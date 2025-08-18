@@ -80,10 +80,36 @@
     </div>
   </div>
   <div class="col-auto">
-    <button class="btn btn-outline-secondary" onclick="exportSummary('csv')">导出CSV</button>
+    <div class="btn-group">
+      <button class="btn btn-outline-secondary" onclick="exportSummary('csv')">导出CSV</button>
+      <button class="btn btn-outline-secondary" onclick="exportSummary('xlsx')">导出XLSX</button>
+      <button class="btn btn-outline-primary" onclick="exportSummaryAsync()">异步导出</button>
+      <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#exportTasksModal">任务</button>
+    </div>
+</div>
+
+<!-- 导出任务列表 Modal -->
+<div class="modal fade" id="exportTasksModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">导出任务</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <table class="table table-sm" id="exportTasksTable">
+          <thead><tr><th>任务ID</th><th>状态</th><th>进度</th><th>操作</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+        <button class="btn btn-outline-primary" onclick="refreshExportTasks()">刷新</button>
+      </div>
+    </div>
   </div>
-  <div class="col-auto">
-    <button class="btn btn-outline-secondary" onclick="exportSummary('xlsx')">导出XLSX</button>
+</div>
+
   </div>
 </div>
 
@@ -254,11 +280,11 @@ function gotoPage(p){
   });
 }
 
-function exportSummary(fmt){
+function buildExportParams(){
   const scope = document.getElementById('exportScope').value;
   const page = document.querySelector('#pager')?.dataset.page || 1;
   const page_size = document.getElementById('pageSize').value || 50;
-  const params = new URLSearchParams({ ...qs(), format: fmt, scope, page, page_size });
+  const params = new URLSearchParams({ ...qs(), scope, page, page_size });
   if (document.getElementById('exportUsePrefs').checked){
     const p = getPrefs();
     const cols = ['student_id','name','class_name','grade_level','score'];
@@ -269,8 +295,41 @@ function exportSummary(fmt){
     if (p.rule_version) cols.push('rule_version');
     params.append('columns', cols.join(','));
   }
+  return params;
+}
+
+function exportSummary(fmt){
+  const params = buildExportParams();
+  params.set('format', fmt);
   window.location = '/api/summary/export?' + params.toString();
 }
+
+async function exportSummaryAsync(){
+  const params = buildExportParams();
+  const res = await fetch('/api/export/tasks', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.fromEntries(params)) });
+  if (!res.ok){ alert('创建任务失败'); return; }
+  const data = await res.json();
+  alert('已创建任务：' + data.task_id);
+  refreshExportTasks();
+}
+<script>
+const _taskIds = new Set();
+async function refreshExportTasks(){
+  const tbody = document.querySelector('#exportTasksTable tbody');
+  if (!tbody) return;
+  const ids = Array.from(_taskIds);
+  tbody.innerHTML = '';
+  for (const id of ids){
+    const r = await fetch(`/api/export/tasks/${id}`);
+    if (!r.ok) continue;
+    const t = await r.json();
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${id}</td><td>${t.status}</td><td>${t.progress||0}%</td><td>${t.status==='completed'?`<a href="/api/export/tasks/${id}/download" class="btn btn-sm btn-success">下载</a>`:''}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+</script>
+
 
 async function loadOptions(){
   const res = await fetch('/api/summary/options');
