@@ -709,7 +709,8 @@ def api_summary_list():
     page = request.args.get('page', type=int) or 1
     page_size = min(max(request.args.get('page_size', type=int) or 50, 1), 1000)
 
-    total = q.count()
+    # 简化 COUNT：去除排序，仅对过滤后的结果进行计数
+    total = q.with_entities(db.func.count()).scalar()
     rows = q.offset((page-1)*page_size).limit(page_size).all()
     items = []
 
