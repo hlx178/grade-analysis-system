@@ -1198,9 +1198,13 @@ def api_summary_prefs():
     key = 'summary_columns'
     if request.method == 'PUT':
         data = request.get_json(force=True)
-        # 兼容新增字段：trend_chrono
+        # 兼容新增字段：trend_chrono + trend_toggles
         if 'trend_chrono' not in data:
             data['trend_chrono'] = False
+        if 'trend_toggles' not in data or not isinstance(data.get('trend_toggles'), dict):
+            data['trend_toggles'] = {
+                'avg': True, 'med': True, 'band': True, 'max': True, 'min': True
+            }
         pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
         if not pref:
             pref = UserPreference(user_id=current_user.id, key=key, value='{}')
@@ -1211,16 +1215,30 @@ def api_summary_prefs():
     # GET
     pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
     if not pref:
-        return jsonify({'letter': True, 'class_rank': True, 'grade_rank': True, 'trend_chrono': False})
+        return jsonify({
+            'letter': True, 'class_rank': True, 'grade_rank': True,
+            'trend_chrono': False,
+            'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True}
+        })
     import json
     try:
         val = json.loads(pref.value)
         # 合并默认值，防止旧数据缺字段
         if 'trend_chrono' not in val:
             val['trend_chrono'] = False
+        if 'trend_toggles' not in val or not isinstance(val.get('trend_toggles'), dict):
+            val['trend_toggles'] = {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True}
+        else:
+            for k in ['avg','med','band','max','min']:
+                if k not in val['trend_toggles']:
+                    val['trend_toggles'][k] = True
         return jsonify(val)
     except Exception:
-        return jsonify({'letter': True, 'class_rank': True, 'grade_rank': True, 'trend_chrono': False})
+        return jsonify({
+            'letter': True, 'class_rank': True, 'grade_rank': True,
+            'trend_chrono': False,
+            'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True}
+        })
 
 
 @api_bp.route('/summary/export', methods=['GET'])

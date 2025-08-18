@@ -320,17 +320,23 @@ function applyPrefs(p){
   document.getElementById('colPercentage').checked = !!p.percentage;
   document.getElementById('colRuleVersion').checked = !!p.rule_version;
   // 保存趋势显示开关
-  try{
-    localStorage.setItem('trend_toggles', JSON.stringify({
-      avg: document.getElementById('tgAvg')?.checked !== false,
-      med: document.getElementById('tgMed')?.checked !== false,
-      band: document.getElementById('tgBand')?.checked !== false,
-      max: document.getElementById('tgMax')?.checked !== false,
-      min: document.getElementById('tgMin')?.checked !== false,
-    }));
-  }catch(e){}
+  const toggles = {
+    avg: document.getElementById('tgAvg')?.checked !== false,
+    med: document.getElementById('tgMed')?.checked !== false,
+    band: document.getElementById('tgBand')?.checked !== false,
+    max: document.getElementById('tgMax')?.checked !== false,
+    min: document.getElementById('tgMin')?.checked !== false,
+  };
+  try{ localStorage.setItem('trend_toggles', JSON.stringify(toggles)); }catch(e){}
+  // 同步保存到后端偏好
+  try{ fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), trend_toggles: toggles})}); }catch(e){}
 
   const chrono = document.getElementById('trendChrono'); if (chrono) chrono.checked = !!p.trend_chrono;
+  // 合并后端偏好中的趋势开关（覆盖 localStorage）
+  if (p.trend_toggles){
+    const map = {tgAvg:'avg', tgMed:'med', tgBand:'band', tgMax:'max', tgMin:'min'};
+    Object.entries(map).forEach(([id,key])=>{ const el = document.getElementById(id); if (el && key in p.trend_toggles) el.checked = !!p.trend_toggles[key]; });
+  }
   document.querySelectorAll('.col-letter').forEach(e=>e.style.display = p.letter? '':'none');
   document.querySelectorAll('.col-class-rank').forEach(e=>e.style.display = p.class_rank? '':'none');
   document.querySelectorAll('.col-grade-rank').forEach(e=>e.style.display = p.grade_rank? '':'none');
