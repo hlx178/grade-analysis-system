@@ -12,7 +12,7 @@ from flask import Blueprint, current_app, flash, jsonify, redirect, render_templ
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db
-from app.models import Course, Grade, Student, User, ExamScheme, GradeBandRule, GradeBandSet
+from app.models import Course, Grade, Student, User, ExamScheme, GradeBandRule, GradeBandSet, ExportJob
 from app.utils import (
     SUBJECTS,
     TOTAL_SUBJECT,
@@ -1059,6 +1059,13 @@ def api_export_task_create():
     task_id = str(uuid.uuid4())
     user_id = current_user.id
     _export_tasks[task_id] = ExportTask(task_id, user_id, params)
+    # 持久化记录
+    try:
+        from json import dumps
+        job = ExportJob(id=task_id, user_id=user_id, params=dumps(params, ensure_ascii=False))
+        db.session.add(job); db.session.commit()
+    except Exception:
+        db.session.rollback()
 
     def worker(task_id, params, user_id):
         try:
@@ -1083,10 +1090,24 @@ def api_export_task_create():
                 # 调用一个内部函数生成文件
                 filepath = _build_export_file(args, export_dir)
                 t.status = 'completed'; t.file = filepath; t.progress = 100; t.finished_at = dt.datetime.utcnow()
+                try:
+                    job = ExportJob.query.get(task_id)
+                    if job:
+                        job.status = 'completed'; job.progress = 100; job.file_path = filepath; job.finished_at = dt.datetime.utcnow()
+                        db.session.commit()
+                except Exception:
+                    db.session.rollback()
         except Exception as e:
             t = _export_tasks.get(task_id)
             if t:
                 t.status = 'failed'; t.error = str(e)
+            try:
+                job = ExportJob.query.get(task_id)
+                if job:
+                    job.status = 'failed'; job.error = str(e); job.finished_at = dt.datetime.utcnow()
+                    db.session.commit()
+            except Exception:
+                db.session.rollback()
 
     _cleanup_exports_once()
     Thread(target=worker, args=(task_id, params, user_id), daemon=True).start()

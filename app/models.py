@@ -179,6 +179,22 @@ class Grade(db.Model):
             score=self.score,
         )
 
+class ExportJob(db.Model):
+    __tablename__ = 'export_jobs'
+
+    id = db.Column(db.String(36), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True, nullable=False)
+    params = db.Column(db.Text, nullable=False)  # JSON
+    status = db.Column(db.String(20), default='pending', index=True)
+    progress = db.Column(db.Integer, default=0)
+    file_path = db.Column(db.String(255))
+    error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    finished_at = db.Column(db.DateTime)
+
+    user = db.relationship('User')
+
+
     @property
     def is_pass(self):
         """是否及格（默认60分及格）"""
