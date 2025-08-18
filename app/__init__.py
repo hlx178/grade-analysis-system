@@ -28,11 +28,12 @@ def create_app(config_name="default"):
     login_manager.login_message_category = "info"
 
     # 注册蓝图
-    from app.routes import api_bp, auth_bp, main_bp
+    from app.routes import api_bp, auth_bp, main_bp, health_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(api_bp, url_prefix="/api")
+    app.register_blueprint(health_bp)
 
     # 慢查询日志（开发/生产均可开启）
     import logging, time

@@ -225,6 +225,10 @@ services:
       - ./uploads:/app/uploads
       - ./exports:/app/exports
     restart: unless-stopped
+- 健康检查
+  - /health：应用进程存活探针（200 ok）
+  - /ready：就绪探针，包含数据库可用性检查（200 ready / 503 not_ready）
+
 ```
 
 - 访问 http://localhost:8000

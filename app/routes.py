@@ -1,6 +1,27 @@
 """
-路由与API定义
+路由与 API 定义
+包含健康检查与就绪探针
 """
+
+from flask import Blueprint
+
+# Health and readiness endpoints
+health_bp = Blueprint('health', __name__)
+
+@health_bp.route('/health', methods=['GET'])
+def health():
+    return {'status': 'ok'}, 200
+
+@health_bp.route('/ready', methods=['GET'])
+def ready():
+    # 轻量 DB 探针
+    try:
+        from app import db
+        db.session.execute('SELECT 1')
+        return {'status': 'ready'}, 200
+    except Exception:
+        return {'status': 'not_ready'}, 503
+
 
 import os
 import uuid
