@@ -38,6 +38,9 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False, default="teacher")  # admin, teacher, student
+    # 非管理员可见范围（逗号分隔）
+    allowed_grade_levels = db.Column(db.Text)  # 如：七年级,八年级
+    allowed_class_names = db.Column(db.Text)   # 如：一班,二班
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_login = db.Column(db.DateTime)
@@ -63,6 +66,7 @@ class Student(db.Model):
     student_id = db.Column(db.String(20), unique=True, nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
     class_name = db.Column(db.String(50), nullable=False, index=True)
+    grade_level = db.Column(db.String(20), index=True)  # 年级，如 初一/七年级/2024级
     email = db.Column(db.String(120), unique=True)
     phone = db.Column(db.String(20))
     gender = db.Column(db.String(10))
@@ -106,6 +110,26 @@ class Course(db.Model):
         return f"<Course {self.code}: {self.name}>"
 
 
+class UserPreference(db.Model):
+    """用户偏好（非管理员账号关联）"""
+
+    __tablename__ = 'user_preferences'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True, nullable=False)
+    key = db.Column(db.String(50), nullable=False)
+    value = db.Column(db.Text, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'key', name='uix_user_pref_key'),
+    )
+
+    user = db.relationship('User', backref='preferences')
+
+    def __repr__(self):
+        return f'<UserPref {self.user_id} {self.key}>'
+
+
 class Grade(db.Model):
     """成绩模型"""
 
@@ -126,6 +150,7 @@ class Grade(db.Model):
     __table_args__ = (
         db.Index("idx_student_course", "student_id", "course_id"),
         db.Index("idx_course_exam", "course_id", "exam_type"),
+        db.Index("idx_course_examname", "course_id", "exam_name"),
     )
 
     @property

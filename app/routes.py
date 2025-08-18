@@ -676,6 +676,16 @@ def api_summary_list():
         q = q.filter(Student.grade_level.in_(grade_levels))
     if class_names:
         q = q.filter(Student.class_name.in_(class_names))
+    # 非管理员可见范围限制
+    if not current_user.is_anonymous and current_user.role != 'admin':
+        if current_user.allowed_grade_levels:
+            allowed = [s.strip() for s in current_user.allowed_grade_levels.split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.grade_level.in_(allowed))
+        if current_user.allowed_class_names:
+            allowed = [s.strip() for s in current_user.allowed_class_names.split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.class_name.in_(allowed))
     if subject_code:
         q = q.filter(Course.code == subject_code)
 
@@ -809,6 +819,31 @@ def api_summary_export():
         q = q.filter(Student.class_name.in_(class_names))
     if subject_code:
         q = q.filter(Course.code == subject_code)
+    # 非管理员可见范围限制
+    if not current_user.is_anonymous and current_user.role != 'admin':
+        if current_user.allowed_grade_levels:
+            allowed = [s.strip() for s in current_user.allowed_grade_levels.split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.grade_level.in_(allowed))
+        if current_user.allowed_class_names:
+            allowed = [s.strip() for s in current_user.allowed_class_names.split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.class_name.in_(allowed))
+
+    # scope: current_page | all
+    scope = request.args.get('scope') or 'all'
+    order_by = request.args.get('order_by') or 'score_desc'
+    page = request.args.get('page', type=int) or 1
+    page_size = min(max(request.args.get('page_size', type=int) or 50, 1), 1000)
+
+    # 排序
+    if order_by == 'score_desc':
+        q = q.order_by(Grade.score.desc())
+    elif order_by == 'score_asc':
+        q = q.order_by(Grade.score.asc())
+
+    if scope == 'current_page':
+        q = q.offset((page-1)*page_size).limit(page_size)
 
     rows = q.all()
 
@@ -918,10 +953,24 @@ def api_summary_export():
 @api_bp.route('/summary/options', methods=['GET'])
 @login_required
 def api_summary_options():
-    # 枚举考试名称、年级、班级
-    exam_names = sorted({ n[0] for n in db.session.query(Grade.exam_name).distinct().all() if n[0] })
-    grade_levels = sorted({ n[0] for n in db.session.query(Student.grade_level).distinct().all() if n[0] })
-    class_names = sorted({ n[0] for n in db.session.query(Student.class_name).distinct().all() if n[0] })
+    # 枚举考试名称、年级、班级（应用非管理员可见范围）
+    exam_q = db.session.query(Grade.exam_name).distinct()
+    gl_q = db.session.query(Student.grade_level).distinct()
+    cl_q = db.session.query(Student.class_name).distinct()
+
+    if not current_user.is_anonymous and current_user.role != 'admin':
+        if current_user.allowed_grade_levels:
+            allowed = [s.strip() for s in current_user.allowed_grade_levels.split(',') if s.strip()]
+            if allowed:
+                gl_q = gl_q.filter(Student.grade_level.in_(allowed))
+        if current_user.allowed_class_names:
+            allowed = [s.strip() for s in current_user.allowed_class_names.split(',') if s.strip()]
+            if allowed:
+                cl_q = cl_q.filter(Student.class_name.in_(allowed))
+
+    exam_names = sorted({ n[0] for n in exam_q.all() if n[0] })
+    grade_levels = sorted({ n[0] for n in gl_q.all() if n[0] })
+    class_names = sorted({ n[0] for n in cl_q.all() if n[0] })
     return jsonify({ 'exam_names': exam_names, 'grade_levels': grade_levels, 'class_names': class_names })
 
 
