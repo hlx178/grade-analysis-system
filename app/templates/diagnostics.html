@@ -85,9 +85,10 @@ async function runDiag(){
 async function loadPresets(){
   const res = await fetch('/api/diagnostics/presets');
   if (!res.ok) return;
-  const items = await res.json();
+  const data = await res.json();
+  const mk = (list, label)=> list.length? `<optgroup label="${label}">`+list.map(p=>`<option value="${encodeURIComponent(JSON.stringify({id:p.id,meta:{name:p.name,group:p.group_name,shared:p.is_shared},...p.payload}))}">${p.group_name? '['+p.group_name+'] ': ''}${p.name}${p.is_shared?' (共享)':''}</option>`).join('')+`</optgroup>` : '';
   const sel = document.getElementById('preset');
-  sel.innerHTML = '<option value="">选择预设...</option>' + items.map(p=>`<option value="${encodeURIComponent(JSON.stringify({id:p.id,...p.payload}))}">${p.name}</option>`).join('');
+  sel.innerHTML = '<option value="">选择预设...</option>' + mk(data.mine||[], '我的预设') + mk(data.shared||[], '共享预设');
   sel.addEventListener('change', ()=>{
     if (!sel.value) return;
     const payload = JSON.parse(decodeURIComponent(sel.value));
@@ -105,8 +106,10 @@ async function loadPresets(){
 async function savePreset(){
   const name = prompt('预设名称');
   if (!name) return;
+  const group_name = prompt('分组（可选）') || '';
+  const is_shared = confirm('设为共享预设？(确定=共享)');
   const payload = readForm();
-  await fetch('/api/diagnostics/presets', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, payload }) });
+  await fetch('/api/diagnostics/presets', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, group_name, is_shared, payload }) });
   await loadPresets();
 }
 

@@ -136,6 +136,8 @@ class DiagnosticPreset(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True, nullable=False)
     name = db.Column(db.String(100), nullable=False)
+    group_name = db.Column(db.String(100))
+    is_shared = db.Column(db.Boolean, default=False)
     payload = db.Column(db.Text, nullable=False)  # JSON 字符串
 
 

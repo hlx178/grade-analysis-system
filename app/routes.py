@@ -1138,9 +1138,12 @@ def api_diagnostics_run():
 def api_diag_presets_list():
     if current_user.role != 'admin':
         return jsonify({'error': 'forbidden'}), 403
-    presets = DiagnosticPreset.query.filter_by(user_id=current_user.id).order_by(DiagnosticPreset.id.desc()).all()
+    mine = DiagnosticPreset.query.filter_by(user_id=current_user.id).order_by(DiagnosticPreset.id.desc()).all()
+    shared = DiagnosticPreset.query.filter_by(is_shared=True).order_by(DiagnosticPreset.id.desc()).all()
     import json
-    return jsonify([{ 'id': p.id, 'name': p.name, 'payload': json.loads(p.payload) } for p in presets])
+    def to_obj(p):
+        return { 'id': p.id, 'name': p.name, 'group_name': p.group_name, 'is_shared': p.is_shared, 'payload': json.loads(p.payload) }
+    return jsonify({ 'mine': [to_obj(p) for p in mine], 'shared': [to_obj(p) for p in shared] })
 
 
 @api_bp.route('/diagnostics/presets', methods=['POST'])
@@ -1150,11 +1153,13 @@ def api_diag_preset_create():
         return jsonify({'error': 'forbidden'}), 403
     data = request.get_json(force=True)
     name = (data.get('name') or '').strip()
+    group_name = (data.get('group_name') or '').strip() or None
+    is_shared = bool(data.get('is_shared') or False)
     payload = data.get('payload') or {}
     if not name:
         return jsonify({'error': 'name required'}), 400
     import json
-    p = DiagnosticPreset(user_id=current_user.id, name=name, payload=json.dumps(payload, ensure_ascii=False))
+    p = DiagnosticPreset(user_id=current_user.id, name=name, group_name=group_name, is_shared=is_shared, payload=json.dumps(payload, ensure_ascii=False))
     db.session.add(p); db.session.commit()
     return jsonify({'id': p.id, 'name': p.name})
 
@@ -1166,10 +1171,15 @@ def api_diag_preset_rename(preset_id):
         return jsonify({'error': 'forbidden'}), 403
     data = request.get_json(force=True)
     name = (data.get('name') or '').strip()
+    group_name = (data.get('group_name') or '').strip() or None
+    is_shared = data.get('is_shared')
     p = DiagnosticPreset.query.filter_by(id=preset_id, user_id=current_user.id).first_or_404()
-    if not name:
-        return jsonify({'error': 'name required'}), 400
-    p.name = name
+    if name:
+        p.name = name
+    if group_name is not None:
+        p.group_name = group_name
+    if is_shared is not None:
+        p.is_shared = bool(is_shared)
     db.session.commit()
     return jsonify({'message':'renamed'})
 
