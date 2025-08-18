@@ -8,7 +8,7 @@ import io
 from io import BytesIO
 
 import pandas as pd
-from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for, send_file, Response, abort
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for, send_file, Response, abort, stream_with_context
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db
@@ -956,20 +956,39 @@ def api_summary_export():
     base_name = f"{_safe_name(name_exam)}_{_safe_name(name_subject)}_{_safe_name(name_gl)}_{_safe_name(name_cl)}_{_safe_name(scope)}_{_safe_name(order_by)}_{ts}"
 
     if fmt == 'xlsx':
-        import pandas as pd
-        buf = io.BytesIO()
-        pd.DataFrame(export_rows).to_excel(buf, index=False)
-        buf.seek(0)
-        return send_file(buf, as_attachment=True, download_name=f'{base_name}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    # 默认csv
+        # 优先使用 openpyxl 流式写入，内存更友好；不可用时回退 pandas
+        try:
+            from openpyxl import Workbook
+            wb = Workbook(write_only=True)
+            ws = wb.create_sheet()
+            ws.append([header_map[c] for c in use_cols])
+            for rec in data_rows:
+                ws.append([rec.get(c, '') for c in use_cols])
+            buf = io.BytesIO()
+            wb.save(buf)
+            buf.seek(0)
+            return send_file(buf, as_attachment=True, download_name=f'{base_name}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        except Exception:
+            import pandas as pd
+            buf = io.BytesIO()
+            pd.DataFrame([{header_map[c]: r.get(c, '') for c in use_cols} for r in data_rows]).to_excel(buf, index=False)
+            buf.seek(0)
+            return send_file(buf, as_attachment=True, download_name=f'{base_name}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    # 默认csv（流式写出，降低内存占用）
     import csv
-    si = io.StringIO()
-    writer = csv.DictWriter(si, fieldnames=[header_map[c] for c in use_cols])
-    writer.writeheader()
-    for row in export_rows:
-        writer.writerow(row)
-    output = si.getvalue().encode('utf-8-sig')
-    return Response(output, mimetype='text/csv', headers={'Content-Disposition': f'attachment; filename={base_name}.csv'})
+    def generate_csv():
+        yield '\ufeff'
+        header = [header_map[c] for c in use_cols]
+        sio = io.StringIO()
+        writer = csv.writer(sio)
+        writer.writerow(header)
+        yield sio.getvalue()
+        sio.seek(0); sio.truncate(0)
+        for rec in data_rows:
+            writer.writerow([rec.get(c, '') for c in use_cols])
+            yield sio.getvalue()
+            sio.seek(0); sio.truncate(0)
+    return Response(stream_with_context(generate_csv()), mimetype='text/csv', headers={'Content-Disposition': f'attachment; filename={base_name}.csv'})
 
 
 @api_bp.route('/summary/options', methods=['GET'])
