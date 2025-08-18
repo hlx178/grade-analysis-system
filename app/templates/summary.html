@@ -149,6 +149,32 @@
 </div>
 
   </div>
+<div class="row g-3 my-3">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>考试趋势（均分）</span>
+        <div>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadTrendChart()">刷新</button>
+        </div>
+      </div>
+      <div class="card-body"><canvas id="trendChart" height="140"></canvas></div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>班级对比（均分）</span>
+        <div>
+          <input id="compareExam" class="form-control form-control-sm d-inline-block" style="width:180px" placeholder="考试名称">
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadClassCompare()">刷新</button>
+        </div>
+      </div>
+      <div class="card-body"><canvas id="classCompareChart" height="140"></canvas></div>
+    </div>
+  </div>
+</div>
+
 </div>
 
 <div class="mb-2">
@@ -488,6 +514,48 @@ async function loadOptions(){
       opt.value = v; opt.textContent = v;
       sel.appendChild(opt);
     });
+
+let _trendChart, _classChart;
+async function loadTrendChart(){
+  const { subject_code, grade_level, class_name } = qs();
+  const p = new URLSearchParams({ subject_code, grade_level, class_name });
+  const r = await fetch('/api/analysis/trends?'+p.toString());
+  if (!r.ok) return;
+  const data = await r.json();
+  const labels = data.trends.map(x=>x.exam_name);
+  const avgs = data.trends.map(x=>x.avg);
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  if (_trendChart) _trendChart.destroy();
+  _trendChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{ label: '均分', data: avgs, borderColor: '#0d6efd', fill: false }]},
+    options: { responsive: true, scales: { y: { beginAtZero: true }}}
+  });
+}
+
+async function loadClassCompare(){
+  const exam = document.getElementById('compareExam').value.trim() || (Array.from(document.getElementById('examName').selectedOptions)[0]?.value || '');
+  const subject_code = document.getElementById('subjectCode').value;
+  if (!exam){ alert('请填写考试名称或在左侧选择一个'); return; }
+  const p = new URLSearchParams({ exam_name: exam, subject_code });
+  const r = await fetch('/api/analysis/class-compare?'+p.toString());
+  if (!r.ok) return;
+  const data = await r.json();
+  const labels = data.compare.map(x=>x.class_name);
+  const avgs = data.compare.map(x=>x.avg);
+  const ctx = document.getElementById('classCompareChart').getContext('2d');
+  if (_classChart) _classChart.destroy();
+  _classChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: '均分', data: avgs, backgroundColor: '#198754' }]},
+    options: { responsive: true, scales: { y: { beginAtZero: true }}}
+  });
+}
+
+window.addEventListener('DOMContentLoaded', ()=>{
+  setTimeout(()=>{ loadTrendChart(); }, 300);
+});
+
   };
   fill('examName', data.exam_names);
   fill('gradeLevel', data.grade_levels);
