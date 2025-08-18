@@ -231,6 +231,33 @@ services:
 
 说明：镜像由 GitHub Actions 在 push 到 main 时自动构建并推送到 GHCR（ghcr.io/hlx178/grade-analysis-system:latest）。首次出现于 Packages 页面时，可将可见性设为 Public 以便公开拉取。
 
+## 发布版本指南（打 tag）
+
+- 打版本 tag（如 v1.0.0）并推送：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+- 工作流会自动构建并推送 multi-arch 镜像到 GHCR：
+  - ghcr.io/hlx178/grade-analysis-system:v1.0.0
+  - main 分支继续构建 latest 与 sha-<短哈希>
+
+- 查看构建状态：
+  - GitHub 仓库 → Actions → 选择最新的“Build and Push Docker image to GHCR”工作流
+
+- 回滚/切换版本：
+
+```bash
+docker pull ghcr.io/hlx178/grade-analysis-system:v1.0.0
+# 使用 v1.0.0 运行
+```
+
+- 可见性（首次）：
+  - 前往仓库 Packages → 容器包 → Settings，将可见性切换为 Public（如果需要公开拉取）
+
+
 ## 开发状态
 
 🚧 项目正在持续演进，欢迎反馈与贡献。
