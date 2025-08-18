@@ -1159,16 +1159,28 @@ def api_export_my_tasks():
     rows = q.order_by(ExportJob.created_at.desc()).offset((page-1)*page_size).limit(page_size).all()
     def to_obj(j):
         from json import loads
+        import os as _os
+        p = loads(j.params)
+        # 构造筛选摘要
+        def _join(v):
+            if isinstance(v, list):
+                return ','.join(v)
+            return str(v or '')
+        summary = f"考试:{_join(p.get('exam_name') or p.get('exam_names'))} 学科:{p.get('subject_code') or ''} 年级:{_join(p.get('grade_level') or p.get('grade_levels'))} 班级:{_join(p.get('class_name') or p.get('class_names'))} 范围:{p.get('scope') or 'all'} 排序:{p.get('order_by') or 'score_desc'}"
+        file_ready = bool(j.file_path and _os.path.isfile(j.file_path) and j.status=='completed')
+        file_size = _os.path.getsize(j.file_path) if file_ready else None
         return {
             'task_id': j.id,
             'user_id': j.user_id,
             'status': j.status,
             'progress': j.progress,
-            'filename': os.path.basename(j.file_path) if j.file_path else None,
-            'file_ready': bool(j.file_path and os.path.isfile(j.file_path) and j.status=='completed'),
+            'filename': _os.path.basename(j.file_path) if j.file_path else None,
+            'file_ready': file_ready,
+            'file_size': file_size,
             'created_at': j.created_at.isoformat()+'Z' if j.created_at else None,
             'finished_at': j.finished_at.isoformat()+'Z' if j.finished_at else None,
-            'params': loads(j.params),
+            'summary': summary,
+            'params': p,
         }
     return jsonify({ 'items': [to_obj(r) for r in rows], 'total': total, 'page': page, 'page_size': page_size })
 
@@ -1197,6 +1209,26 @@ def _cleanup_exports_once():
                     pass
     except Exception:
         pass
+
+# 删除任务与文件
+@api_bp.route('/export/my-tasks/<task_id>', methods=['DELETE'])
+@login_required
+def api_export_task_delete(task_id):
+    job = ExportJob.query.get(task_id)
+    if not job:
+        return jsonify({'error': 'not found'}), 404
+    if current_user.role != 'admin' and job.user_id != current_user.id:
+        return jsonify({'error': 'forbidden'}), 403
+    try:
+        if job.file_path and os.path.isfile(job.file_path):
+            os.remove(job.file_path)
+    except Exception:
+        pass
+    db.session.delete(job); db.session.commit()
+    # 同时清理内存缓存
+    if task_id in _export_tasks:
+        _export_tasks.pop(task_id, None)
+    return jsonify({'message': 'deleted'})
 
 # 在任务创建时尝试触发一次清理
 
