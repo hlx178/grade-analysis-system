@@ -54,6 +54,14 @@
     <label class="form-check-label" for="colLetter">等第</label>
   </div>
   <div class="form-check form-check-inline">
+    <input class="form-check-input" type="checkbox" value="percentage" id="colPercentage">
+    <label class="form-check-label" for="colPercentage">百分比</label>
+  </div>
+  <div class="form-check form-check-inline">
+    <input class="form-check-input" type="checkbox" value="rule_version" id="colRuleVersion">
+    <label class="form-check-label" for="colRuleVersion">规则版本</label>
+  </div>
+  <div class="form-check form-check-inline">
     <input class="form-check-input" type="checkbox" value="class_rank" id="colClassRank" checked>
     <label class="form-check-label" for="colClassRank">班级排名</label>
   </div>
@@ -72,9 +80,11 @@
       <th>班级</th>
       <th>年级</th>
       <th>分数</th>
+      <th class="col-percentage">百分比</th>
       <th class="col-letter">等第</th>
       <th class="col-class-rank">班级排名</th>
       <th class="col-grade-rank">年级排名</th>
+      <th class="col-rule-version">规则版本</th>
     </tr>
   </thead>
   <tbody></tbody>
@@ -92,6 +102,8 @@ function getPrefs(){
     letter: document.getElementById('colLetter').checked,
     class_rank: document.getElementById('colClassRank').checked,
     grade_rank: document.getElementById('colGradeRank').checked,
+    percentage: document.getElementById('colPercentage').checked,
+    rule_version: document.getElementById('colRuleVersion').checked,
   };
 }
 function applyPrefs(p){
@@ -99,9 +111,13 @@ function applyPrefs(p){
   document.getElementById('colLetter').checked = !!p.letter;
   document.getElementById('colClassRank').checked = !!p.class_rank;
   document.getElementById('colGradeRank').checked = !!p.grade_rank;
+  document.getElementById('colPercentage').checked = !!p.percentage;
+  document.getElementById('colRuleVersion').checked = !!p.rule_version;
   document.querySelectorAll('.col-letter').forEach(e=>e.style.display = p.letter? '':'none');
   document.querySelectorAll('.col-class-rank').forEach(e=>e.style.display = p.class_rank? '':'none');
   document.querySelectorAll('.col-grade-rank').forEach(e=>e.style.display = p.grade_rank? '':'none');
+  document.querySelectorAll('.col-percentage').forEach(e=>e.style.display = p.percentage? '':'none');
+  document.querySelectorAll('.col-rule-version').forEach(e=>e.style.display = p.rule_version? '':'none');
 }
 async function savePrefs(){
   const res = await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(getPrefs())});
@@ -130,9 +146,11 @@ async function loadSummary(){
       <td>${it.class_name||''}</td>
       <td>${it.grade_level||''}</td>
       <td>${it.score}</td>
+      <td class="col-percentage">${it.percentage ?? ''}</td>
       <td class="col-letter">${it.letter||''}</td>
       <td class="col-class-rank">${it.class_rank ?? ''}</td>
-      <td class="col-grade-rank">${it.grade_rank ?? ''}</td>`;
+      <td class="col-grade-rank">${it.grade_rank ?? ''}</td>
+      <td class="col-rule-version">${it.rule_version ?? ''}</td>`;
     tbody.appendChild(tr);
   });
   applyPrefs(getPrefs());

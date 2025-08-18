@@ -687,6 +687,17 @@ def api_summary_list():
     rows = q.offset((page-1)*page_size).limit(page_size).all()
     items = []
 
+    # 规则版本（发布的最新版本号），便于展示来源
+    published_set = None
+    rule_version = None
+    if exam_name:
+        published_set = GradeBandSet.query.filter_by(exam_name=exam_name, status='published').order_by(GradeBandSet.version.desc()).first()
+        if published_set:
+            rule_version = published_set.version
+
+    # 准备满分缓存 (exam_type, subject_code) -> max_score
+    max_cache = {}
+
     # 计算班级/年级排名：需要同班/同年级的集合
     # 先聚合：key -> list of (student_id, score)
     from collections import defaultdict
@@ -711,15 +722,29 @@ def api_summary_list():
     from app.utils import grade_letter_for
     for g in rows:
         letter = grade_letter_for(g.exam_name or 'default', g.course.code, g.score)
+        # 百分比（若配置了满分）
+        perc = None
+        key = (g.exam_type or 'regular', g.course.code)
+        if key in max_cache:
+            max_score = max_cache[key]
+        else:
+            s = ExamScheme.query.filter_by(exam_type=key[0], subject_code=key[1]).first()
+            max_score = s.max_score if s else None
+            max_cache[key] = max_score
+        if max_score and max_score > 0:
+            perc = round(float(g.score) / float(max_score) * 100.0, 2)
+
         items.append({
             'student_id': g.student.student_id,
             'name': g.student.name,
             'class_name': g.student.class_name,
             'grade_level': g.student.grade_level,
             'score': g.score,
+            'percentage': perc,
             'letter': letter,
             'class_rank': class_rank_map.get(g.student.class_name, {}).get(g.student_id),
             'grade_rank': grade_rank_map.get(g.student.grade_level, {}).get(g.student_id),
+            'rule_version': rule_version,
         })
 
     # 排序
@@ -732,7 +757,7 @@ def api_summary_list():
     elif order_by == 'grade_rank':
         items.sort(key=lambda x: (x['grade_level'] or '', x['grade_rank'] or 1e9))
 
-    return jsonify({'items': items, 'total': total, 'page': page, 'page_size': page_size})
+    return jsonify({'items': items, 'total': total, 'page': page, 'page_size': page_size, 'rule_version': rule_version})
 
 
 @api_bp.route('/summary/prefs', methods=['GET', 'PUT'])
