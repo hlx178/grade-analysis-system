@@ -834,6 +834,46 @@ def api_analysis_class_compare_export():
         data = res.get_json() if hasattr(res, 'get_json') else res.json
     import csv, io
     output = io.StringIO()
+
+@api_bp.route('/analysis/export-all', methods=['GET'])
+@login_required
+def api_analysis_export_all():
+    """打包导出趋势、班级对比、分布直方图三份 CSV 为一个 ZIP
+    接收与各自导出接口一致的查询参数：
+      - 通用：subject_code, grade_level, class_name
+      - 班级对比：exam_name, top_n（可选）
+      - 分布：exam_name（可选）, bin_width（默认10）
+    """
+    from urllib.parse import urlencode
+    import io, zipfile
+
+    # 构造各自 querystring
+    args = request.args
+    trends_qs = urlencode({k: v for k, v in args.items() if k in ('subject_code','grade_level','class_name')})
+    class_qs_dict = {k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','top_n')}
+    class_qs = urlencode(class_qs_dict)
+    dist_qs = urlencode({k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','class_name','bin_width')})
+
+    # 生成各 CSV 文本
+    with current_app.test_request_context(query_string=trends_qs):
+        trends_res = api_analysis_trends_export()
+        trends_csv = trends_res.get_data(as_text=True)
+    with current_app.test_request_context(query_string=class_qs):
+        class_res = api_analysis_class_compare_export()
+        class_csv = class_res.get_data(as_text=True)
+    with current_app.test_request_context(query_string=dist_qs):
+        dist_res = api_analysis_distribution_export()
+        dist_csv = dist_res.get_data(as_text=True)
+
+    # 打包 ZIP
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('trends.csv', trends_csv)
+        zf.writestr('class_compare.csv', class_csv)
+        zf.writestr('distribution.csv', dist_csv)
+    buf.seek(0)
+    return current_app.response_class(buf.read(), mimetype='application/zip', headers={'Content-Disposition': 'attachment; filename=analysis_exports.zip'})
+
     writer = csv.writer(output)
     writer.writerow(['class_name','avg','count','std'])
     for row in data.get('compare', []):

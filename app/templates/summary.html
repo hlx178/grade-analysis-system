@@ -203,6 +203,10 @@
             <input class="form-check-input" type="checkbox" id="distCDF">
             <label class="form-check-label" for="distCDF">叠加累计分布线</label>
           </div>
+        <div class="btn-group btn-group-sm">
+          <a class="btn btn-outline-primary" id="exportAllBtn" href="#">打包导出三表</a>
+        </div>
+
 
     <div class="card">
       <div class="card-header d-flex justify-content-between align-items-center">
@@ -712,6 +716,25 @@ function buildClassExportUrl(){
 }
 
 function wireExportLinks(){
+
+function buildExportAllUrl(){
+  const { subject_code, grade_level, class_name } = qs();
+  const exam = document.getElementById('compareExam').value.trim() || (Array.from(document.getElementById('examName').selectedOptions)[0]?.value || '');
+  const top_n = (document.getElementById('compareTopN')?.value || '').trim();
+  const bin_width = Number(document.getElementById('distBin').value)||10;
+  const p = new URLSearchParams({ subject_code, grade_level, class_name, bin_width });
+  if (exam) p.set('exam_name', exam);
+  if (top_n) p.set('top_n', top_n);
+  return '/api/analysis/export-all?'+p.toString();
+}
+(function(){
+  const oldWire = wireExportLinks;
+  window.wireExportLinks = function(){
+    oldWire && oldWire();
+    const a = document.getElementById('exportAllBtn'); if (a) a.href = buildExportAllUrl();
+  }
+})();
+
   const t = document.getElementById('trendExportBtn'); if (t) t.href = buildTrendExportUrl();
   const c = document.getElementById('classExportBtn'); if (c) c.href = buildClassExportUrl();
 }
