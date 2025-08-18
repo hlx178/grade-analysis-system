@@ -796,6 +796,13 @@ def api_analysis_distribution():
     n = len(scores); mean = sum(scores)/n
     var = sum((x-mean)**2 for x in scores)/n
     summary = {'count': n, 'avg': round(mean,2), 'max': smax, 'min': smin, 'std': round(math.sqrt(var),2)}
+    # 追加比例与累计比例
+    total = max(1, sum(b['count'] for b in bins))
+    cum = 0
+    for b in bins:
+        b['percent'] = round(b['count'] * 100.0 / total, 2)
+        cum += b['count']
+        b['cdf'] = round(cum * 100.0 / total, 2)
     return jsonify({'bins': bins, 'summary': summary})
 
 @api_bp.route('/analysis/distribution/export', methods=['GET'])
@@ -808,9 +815,9 @@ def api_analysis_distribution_export():
     import csv, io
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['label','start','end','count'])
+    writer.writerow(['label','start','end','count','percent','cdf'])
     for b in data.get('bins', []):
-        writer.writerow([b.get('label'), b.get('start'), b.get('end'), b.get('count')])
+        writer.writerow([b.get('label'), b.get('start'), b.get('end'), b.get('count'), b.get('percent'), b.get('cdf')])
     # 空行 + summary
     writer.writerow([])
     s = data.get('summary') or {}
