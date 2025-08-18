@@ -141,6 +141,25 @@ GitHub Actions 会在每次推送时自动运行 lint 和测试。你可以在�
 - 新增“考试名称”选择器；传 exam_name 到 /api/analysis/statistics
 - 分布优先规则：range > percentile；都无时按默认阈值 80/60/40/20 计算
 
+## 成绩汇总（/summary）
+
+- 功能
+  - 筛选：考试名称（多选）、年级（多选）、班级（多选）、学科/总分
+  - 排序：分数升降序、班级排名、年级排名
+  - 列显示偏好：分数、百分比（基于 ExamScheme）、等第（基于等级规则）、班级/年级排名、规则版本（基于最新发布的 GradeBandSet）
+  - 分页：page/page_size，服务端分页
+  - 导出：CSV/XLSX，支持“按当前列偏好导出”
+- API
+  - GET /api/summary?exam_name=&grade_level=&class_name=&subject_code=&order_by=&page=&page_size=
+  - GET /api/summary/options：返回 exam_names、grade_levels、class_names
+  - GET /api/summary/export?…&format=csv|xlsx[&columns=student_id,name,…]
+  - GET/PUT /api/summary/prefs：按用户保存/读取列显示偏好
+- 注意
+  - 多选参数支持多值或逗号分隔
+  - percentage 需 ExamScheme 配置对应学科/总分的满分
+  - rule_version 仅在选择单个考试名称时返回
+  - 非管理员也可访问汇总与偏好（权限策略可按需配置）
+
 ## CI 状态
 
 GitHub Actions 会在每次推送时自动运行 lint 和测试。你可以在仓库的 Actions 标签页查看状态与日志。
