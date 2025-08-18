@@ -326,4 +326,31 @@ alembic upgrade head
 
 ## 开发状态
 
+## 生产环境最佳实践清单（建议）
+
+- 配置与密钥
+  - 使用 .env 文件或容器环境变量提供 SECRET_KEY、DATABASE_URL 等
+  - 不要将真实密钥提交到仓库；参考 .env.example
+- 日志与监控
+  - 通过容器 stdout/stderr 输出应用与 Gunicorn 日志，宿主机/平台负责采集
+  - 关注慢日志（SLOW_QUERY_MS）与健康/就绪状态；可集成 Prometheus/Grafana（见后续）
+- 备份策略
+  - 数据库：定期备份（Postgres 建议 pg_dump），保留多份（含异地）
+  - 文件：exports/ 与 uploads/ 定期归档到对象存储或 NAS
+- 存储与清理
+  - EXPORT_RETENTION_DAYS 控制导出文件保留期；结合“批量删除已完成任务”释放空间
+  - 磁盘水位监控，READY_DISK_FREE_MB 设定合理阈值
+- 安全加固
+  - 反向代理层开启 HTTPS（Caddy/Nginx）并启用 HSTS
+  - 只对内网暴露应用容器端口，通过反代对外
+  - 容器以非 root 用户运行（Dockerfile 已设置 appuser）
+  - 最小权限挂载卷（只读/可写分离）
+- 资源配额与伸缩
+  - 在编排平台设置 CPU/内存 limits 与 requests
+  - 并发导出上限（EXPORT_MAX_CONCURRENT_PER_USER）按机器规格调优
+- 灰度与回滚
+  - 使用 tag 发布版本镜像（vX.Y.Z），回退时直接切换 tag
+  - 保留近期版本镜像与备份
+
+
 🚧 项目正在持续演进，欢迎反馈与贡献。
