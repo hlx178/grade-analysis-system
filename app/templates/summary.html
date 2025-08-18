@@ -97,10 +97,18 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
+        <div class="d-flex align-items-end gap-2 mb-2">
+          <div>
+            <label class="form-label">每页</label>
+            <input id="taskPageSize" type="number" class="form-control" style="width:120px" value="10">
+          </div>
+          <button class="btn btn-outline-primary" onclick="loadMyTasks(1)">加载我的任务</button>
+        </div>
         <table class="table table-sm" id="exportTasksTable">
-          <thead><tr><th>任务ID</th><th>状态</th><th>进度</th><th>操作</th></tr></thead>
+          <thead><tr><th>创建时间</th><th>任务ID</th><th>状态</th><th>进度</th><th>文件名</th><th>操作</th></tr></thead>
           <tbody></tbody>
         </table>
+        <div id="taskPager" class="mt-2"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
@@ -318,17 +326,45 @@ async function refreshExportTasks(){
   const tbody = document.querySelector('#exportTasksTable tbody');
   if (!tbody) return;
   const ids = Array.from(_taskIds);
-  tbody.innerHTML = '';
   for (const id of ids){
     const r = await fetch(`/api/export/tasks/${id}`);
     if (!r.ok) continue;
     const t = await r.json();
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${id}</td><td>${t.status}</td><td>${t.progress||0}%</td><td>${t.status==='completed'?`<a href="/api/export/tasks/${id}/download" class="btn btn-sm btn-success">下载</a>`:''}</td>`;
-    tbody.appendChild(tr);
+    let row = tbody.querySelector(`tr[data-id="${id}"]`);
+    if (!row){ row = document.createElement('tr'); row.dataset.id = id; tbody.prepend(row); }
+    row.innerHTML = `<td></td><td>${id}</td><td>${t.status}</td><td>${t.progress||0}%</td><td>${t.filename||''}</td><td>${t.status==='completed'?`<a href="/api/export/tasks/${id}/download" class="btn btn-sm btn-success">下载</a>`:''}</td>`;
   }
 }
 </script>
+
+async function loadMyTasks(page=1){
+  const page_size = Number(document.getElementById('taskPageSize').value)||10;
+  const r = await fetch(`/api/export/my-tasks?page=${page}&page_size=${page_size}`);
+  if (!r.ok) return;
+  const data = await r.json();
+  const tbody = document.querySelector('#exportTasksTable tbody');
+  tbody.innerHTML = '';
+  data.items.forEach(it => {
+    const tr = document.createElement('tr');
+    tr.dataset.id = it.task_id;
+    _taskIds.add(it.task_id);
+    tr.innerHTML = `<td>${it.created_at||''}</td><td>${it.task_id}</td><td>${it.status}</td><td>${it.progress||0}%</td><td>${it.filename||''}</td><td>${it.file_ready?`<a href="/api/export/tasks/${it.task_id}/download" class="btn btn-sm btn-success">下载</a>`:''}</td>`;
+    tbody.appendChild(tr);
+  });
+  renderTaskPager(data.total, data.page, data.page_size);
+}
+
+function renderTaskPager(total, page, page_size){
+  const totalPages = Math.max(1, Math.ceil(total / page_size));
+  const pager = document.getElementById('taskPager');
+  pager.innerHTML = '';
+  const mkBtn = (p, label, disabled=false) => `<button class="btn btn-sm ${disabled?'btn-secondary':'btn-outline-secondary'} me-1" ${disabled?'disabled':''} onclick="loadMyTasks(${p})">${label}</button>`;
+  pager.innerHTML += mkBtn(1, '首页', page<=1);
+  pager.innerHTML += mkBtn(page-1, '上一页', page<=1);
+  pager.innerHTML += `<span class=\"me-2\">第 ${page}/${totalPages} 页，共 ${total} 条</span>`;
+  pager.innerHTML += mkBtn(page+1, '下一页', page>=totalPages);
+  pager.innerHTML += mkBtn(totalPages, '末页', page>=totalPages);
+}
 
 
 async function loadOptions(){

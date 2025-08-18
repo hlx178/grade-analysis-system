@@ -1131,12 +1131,46 @@ def api_export_task_status(task_id):
 def api_export_task_download(task_id):
     t = _export_tasks.get(task_id)
     if not t:
-        return jsonify({ 'error': 'not found' }), 404
+        # 回退到持久化
+        job = ExportJob.query.get(task_id)
+        if not job:
+            return jsonify({ 'error': 'not found' }), 404
+        if current_user.role != 'admin' and job.user_id != current_user.id:
+            return jsonify({ 'error': 'forbidden' }), 403
+        if job.status != 'completed' or not job.file_path or not os.path.isfile(job.file_path):
+            return jsonify({ 'error': 'not ready' }), 400
+        return send_file(job.file_path, as_attachment=True)
     if current_user.role != 'admin' and t.user_id != current_user.id:
         return jsonify({ 'error': 'forbidden' }), 403
     if t.status != 'completed':
         return jsonify({ 'error': 'not ready' }), 400
     return send_file(t.file, as_attachment=True)
+
+
+@api_bp.route('/export/my-tasks', methods=['GET'])
+@login_required
+def api_export_my_tasks():
+    page = request.args.get('page', type=int) or 1
+    page_size = min(max(request.args.get('page_size', type=int) or 20, 1), 200)
+    q = ExportJob.query
+    if current_user.role != 'admin':
+        q = q.filter(ExportJob.user_id == current_user.id)
+    total = q.count()
+    rows = q.order_by(ExportJob.created_at.desc()).offset((page-1)*page_size).limit(page_size).all()
+    def to_obj(j):
+        from json import loads
+        return {
+            'task_id': j.id,
+            'user_id': j.user_id,
+            'status': j.status,
+            'progress': j.progress,
+            'filename': os.path.basename(j.file_path) if j.file_path else None,
+            'file_ready': bool(j.file_path and os.path.isfile(j.file_path) and j.status=='completed'),
+            'created_at': j.created_at.isoformat()+'Z' if j.created_at else None,
+            'finished_at': j.finished_at.isoformat()+'Z' if j.finished_at else None,
+            'params': loads(j.params),
+        }
+    return jsonify({ 'items': [to_obj(r) for r in rows], 'total': total, 'page': page, 'page_size': page_size })
 
 
 # 简易清理任务：删除过期导出文件（在应用启动后首次调用时触发一次）
