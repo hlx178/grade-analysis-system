@@ -680,9 +680,63 @@ def api_analysis_class_compare():
         if not arr: continue
         n = len(arr); mean = sum(arr)/n
         var = sum((x-mean)**2 for x in arr)/n
-        out.append({'class_name': cls, 'avg': round(mean,2), 'count': n, 'std': round(math.sqrt(var),2)})
-    out.sort(key=lambda x: x['avg'], reverse=True)
-    return jsonify({'compare': out})
+
+@api_bp.route('/analysis/distribution', methods=['GET'])
+@login_required
+def api_analysis_distribution():
+    """按分数段生成直方图分布，可按考试/学科/年级/班级过滤
+    params:
+      - exam_name: 可选，指定考试名称
+      - subject_code: 可选，学科代码（默认 TOTAL）
+      - grade_level: 可选
+      - class_name: 可选
+      - bin_width: 可选，分箱宽度，默认 10
+    """
+    exam_name = request.args.get('exam_name')
+    subject_code = request.args.get('subject_code') or 'TOTAL'
+    grade_level = request.args.get('grade_level')
+    class_name = request.args.get('class_name')
+    try:
+        bin_width = int(request.args.get('bin_width') or 10)
+        if bin_width <= 0: bin_width = 10
+    except Exception:
+        bin_width = 10
+
+    q = Grade.query.join(Course).join(Student)
+    if exam_name:
+        q = q.filter(Grade.exam_name == exam_name)
+    if subject_code:
+        q = q.filter(Course.code == subject_code)
+    if grade_level:
+        q = q.filter(Student.grade_level == grade_level)
+    if class_name:
+        q = q.filter(Student.class_name == class_name)
+
+    scores = [float(s) for (s,) in q.with_entities(Grade.score).all()]
+    if not scores:
+        return jsonify({'bins': [], 'summary': {'count': 0}})
+
+    import math
+    smin = min(scores); smax = max(scores)
+    start = math.floor(smin / bin_width) * bin_width
+    end = math.ceil(smax / bin_width) * bin_width
+    if end == start:
+        end = start + bin_width
+    bins = []
+    edges = list(range(int(start), int(end)+bin_width, bin_width))
+    for i in range(len(edges)-1):
+        bins.append({'start': edges[i], 'end': edges[i+1], 'count': 0, 'label': f"{edges[i]}-{edges[i+1]}"})
+    # 计数（右开区间，最后一个包含右端点）
+    for v in scores:
+        idx = int((v - start) // bin_width)
+        if idx < 0: idx = 0
+        if idx >= len(bins): idx = len(bins)-1
+        bins[idx]['count'] += 1
+
+    n = len(scores); mean = sum(scores)/n
+    var = sum((x-mean)**2 for x in scores)/n
+    summary = {'count': n, 'avg': round(mean,2), 'max': smax, 'min': smin, 'std': round(math.sqrt(var),2)}
+    return jsonify({'bins': bins, 'summary': summary})
 
 
 # 等级规则：查询

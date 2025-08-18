@@ -174,6 +174,20 @@
     </div>
   </div>
 </div>
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>成绩分布直方图</span>
+        <div class="d-flex align-items-center gap-2">
+          <input id="distExam" class="form-control form-control-sm" style="width:180px" placeholder="考试名称(可选)">
+          <input id="distBin" type="number" class="form-control form-control-sm" style="width:100px" placeholder="分箱宽度" value="10">
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadDistribution()">刷新</button>
+        </div>
+      </div>
+      <div class="card-body"><canvas id="distChart" height="120"></canvas></div>
+    </div>
+  </div>
+
 
 </div>
 
@@ -556,6 +570,28 @@ async function loadClassCompare(){
   const data = await r.json();
   const labels = data.compare.map(x=>x.class_name);
   const avgs = data.compare.map(x=>x.avg);
+
+let _distChart;
+async function loadDistribution(){
+  const subject_code = document.getElementById('subjectCode').value;
+  const exam_name = document.getElementById('distExam').value.trim();
+  const bin_width = Number(document.getElementById('distBin').value)||10;
+  const p = new URLSearchParams({ subject_code, bin_width });
+  if (exam_name) p.set('exam_name', exam_name);
+  const r = await fetch('/api/analysis/distribution?'+p.toString());
+  if (!r.ok) return;
+  const data = await r.json();
+  const labels = data.bins.map(b=>b.label);
+  const counts = data.bins.map(b=>b.count);
+  const ctx = document.getElementById('distChart').getContext('2d');
+  if (_distChart) _distChart.destroy();
+  _distChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: '人数', data: counts, backgroundColor: '#6f42c1' }]},
+    options: { responsive: true, scales: { y: { beginAtZero: true }}}
+  });
+}
+
   const counts = data.compare.map(x=>x.count);
   const stds = data.compare.map(x=>x.std);
   const ctx = document.getElementById('classCompareChart').getContext('2d');
