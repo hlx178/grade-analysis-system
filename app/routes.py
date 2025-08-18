@@ -8,7 +8,7 @@ from io import BytesIO
 
 import pandas as pd
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
-from flask_login import login_required, login_user, logout_user
+from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db
 from app.models import Course, Grade, Student, User, ExamScheme, GradeBandRule, GradeBandSet
@@ -637,6 +637,8 @@ def api_grade_bands_preview():
 @login_required
 def api_band_sets():
     if request.method == 'POST':
+        if not current_user.is_authenticated or current_user.role != 'admin':
+            return jsonify({'error': 'forbidden'}), 403
         data = request.get_json(force=True)
         exam_name = data.get('exam_name') or 'default'
         note = data.get('note')
@@ -659,6 +661,8 @@ def api_band_sets():
 @api_bp.route('/grade-bands/sets/<int:set_id>/publish', methods=['PUT'])
 @login_required
 def api_band_set_publish(set_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
     s = GradeBandSet.query.get_or_404(set_id)
     import json, datetime as dt
     # 将快照覆盖到活跃规则
@@ -675,12 +679,18 @@ def api_band_set_publish(set_id):
     s.status = 'published'
     s.published_at = dt.datetime.utcnow()
     db.session.commit()
+    # 审计
+    from app.models import AuditLog
+    db.session.add(AuditLog(user_id=current_user.id, username=current_user.username, action='publish', resource=f'GradeBandSet:{s.id}', details=f'{s.exam_name} v{s.version}'))
+    db.session.commit()
     return jsonify({'message': 'published'})
 
 
 @api_bp.route('/grade-bands/sets/<int:set_id>/rollback', methods=['PUT'])
 @login_required
 def api_band_set_rollback(set_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
     # 将历史版本复制为新的草稿
     src = GradeBandSet.query.get_or_404(set_id)
     import json
@@ -700,6 +710,8 @@ def api_band_set_rollback(set_id):
 @api_bp.route('/grade-bands/sets/<int:set_id>/export-json', methods=['GET'])
 @login_required
 def api_band_set_export_json(set_id):
+    if not current_user.is_authenticated or current_user.role not in ['admin','teacher']:
+        return jsonify({'error': 'forbidden'}), 403
     s = GradeBandSet.query.get_or_404(set_id)
     import json
     return jsonify({ 'exam_name': s.exam_name, 'version': s.version, 'items': json.loads(s.rules_json) })
@@ -708,6 +720,8 @@ def api_band_set_export_json(set_id):
 @api_bp.route('/grade-bands/sets/<int:set_id>/import-json', methods=['POST'])
 @login_required
 def api_band_set_import_json(set_id):
+    if not current_user.is_authenticated or current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
     s = GradeBandSet.query.get_or_404(set_id)
     data = request.get_json(force=True)
     items = data.get('items') or []

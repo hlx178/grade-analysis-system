@@ -199,3 +199,22 @@ class GradeBandSet(db.Model):
 
     def __repr__(self):
         return f'<GradeBandSet {self.exam_name} v{self.version} {self.status}>'
+
+
+class AuditLog(db.Model):
+    """操作审计日志"""
+
+    __tablename__ = 'audit_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    username = db.Column(db.String(80))
+    action = db.Column(db.String(50), nullable=False)
+    resource = db.Column(db.String(100), nullable=False)
+    details = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='audit_logs')
+
+    def __repr__(self):
+        return f'<Audit {self.username} {self.action} {self.resource}>'
