@@ -1198,6 +1198,9 @@ def api_summary_prefs():
     key = 'summary_columns'
     if request.method == 'PUT':
         data = request.get_json(force=True)
+        # 兼容新增字段：trend_chrono
+        if 'trend_chrono' not in data:
+            data['trend_chrono'] = False
         pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
         if not pref:
             pref = UserPreference(user_id=current_user.id, key=key, value='{}')
@@ -1208,9 +1211,16 @@ def api_summary_prefs():
     # GET
     pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
     if not pref:
-        return jsonify({'letter': True, 'class_rank': True, 'grade_rank': True})
+        return jsonify({'letter': True, 'class_rank': True, 'grade_rank': True, 'trend_chrono': False})
     import json
-    return jsonify(json.loads(pref.value))
+    try:
+        val = json.loads(pref.value)
+        # 合并默认值，防止旧数据缺字段
+        if 'trend_chrono' not in val:
+            val['trend_chrono'] = False
+        return jsonify(val)
+    except Exception:
+        return jsonify({'letter': True, 'class_rank': True, 'grade_rank': True, 'trend_chrono': False})
 
 
 @api_bp.route('/summary/export', methods=['GET'])

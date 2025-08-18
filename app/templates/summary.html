@@ -215,6 +215,8 @@
         </div>
 
 
+      <div class="px-2 text-muted small" id="distRange"></div>
+
     <div class="card">
       <div class="card-header d-flex justify-content-between align-items-center">
         <span>班级对比（均分）</span>
@@ -307,6 +309,7 @@ function getPrefs(){
     grade_rank: document.getElementById('colGradeRank').checked,
     percentage: document.getElementById('colPercentage').checked,
     rule_version: document.getElementById('colRuleVersion').checked,
+    trend_chrono: document.getElementById('trendChrono')?.checked || false,
   };
 }
 function applyPrefs(p){
@@ -316,6 +319,7 @@ function applyPrefs(p){
   document.getElementById('colGradeRank').checked = !!p.grade_rank;
   document.getElementById('colPercentage').checked = !!p.percentage;
   document.getElementById('colRuleVersion').checked = !!p.rule_version;
+  const chrono = document.getElementById('trendChrono'); if (chrono) chrono.checked = !!p.trend_chrono;
   document.querySelectorAll('.col-letter').forEach(e=>e.style.display = p.letter? '':'none');
   document.querySelectorAll('.col-class-rank').forEach(e=>e.style.display = p.class_rank? '':'none');
   document.querySelectorAll('.col-grade-rank').forEach(e=>e.style.display = p.grade_rank? '':'none');
@@ -713,6 +717,12 @@ async function loadDistribution(){
   const meta = document.getElementById('distMeta');
   if (meta) meta.textContent = `实际桶宽: ${data.summary?.bin_width ?? (typeof bin_width==='string'?bin_width:bin_width||'auto')}`;
   _distChart = new Chart(ctx, {
+  const range = document.getElementById('distRange');
+  if (range && data.bins?.length){
+    const first = data.bins[0], last = data.bins[data.bins.length-1];
+    range.textContent = `范围: ${first.start} ~ ${last.end}（分箱数 ${data.bins.length}）`;
+  }
+
     type: 'bar',
     data: { labels, datasets },
     options: { responsive: true, scales: {
@@ -786,6 +796,10 @@ window.addEventListener('DOMContentLoaded', wireExportLinks);
 window.addEventListener('DOMContentLoaded', ()=>{
   setTimeout(()=>{ loadTrendChart(); }, 300);
   // 联动刷新：每次查询/分页后可手动调用
+  // 当偏好加载后，按偏好重绘趋势图
+  const prefChrono = document.getElementById('trendChrono')?.checked;
+  if (typeof prefChrono !== 'undefined') { loadTrendChart(); }
+
   const oldLoadSummary = loadSummary;
   window.loadSummary = async function(){ await oldLoadSummary(); await loadTrendChart(); }
   const chrono = document.getElementById('trendChrono'); if (chrono) chrono.onchange = ()=> loadTrendChart();
