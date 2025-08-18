@@ -895,6 +895,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
   const prefChrono = document.getElementById('trendChrono')?.checked;
   if (typeof prefChrono !== 'undefined') { loadTrendChart(); }
 
+  const onlyMeetsEl = document.getElementById('onlyMeets'); if (onlyMeetsEl) onlyMeetsEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, only_meets: onlyMeetsEl.checked }})}); }catch(e){}; loadClassCompare(); };
+  const sortByEl = document.getElementById('compareSortBy'); if (sortByEl) sortByEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, sort_by: sortByEl.value }})}); }catch(e){}; loadClassCompare(); };
+
   const oldLoadSummary = loadSummary;
   window.loadSummary = async function(){ await oldLoadSummary(); await loadTrendChart(); }
   const chrono = document.getElementById('trendChrono'); if (chrono) chrono.onchange = ()=> loadTrendChart();

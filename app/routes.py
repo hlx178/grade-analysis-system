@@ -886,7 +886,7 @@ def api_analysis_export_all():
     # 构造各自 querystring
     args = request.args
     trends_qs = urlencode({k: v for k, v in args.items() if k in ('subject_code','grade_level','class_name')})
-    class_qs_dict = {k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','top_n')}
+    class_qs_dict = {k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','top_n','min_count','sort_by')}
     class_qs = urlencode(class_qs_dict)
     dist_qs = urlencode({k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','class_name','bin_width')})
 
