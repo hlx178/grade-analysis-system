@@ -697,6 +697,26 @@ def api_band_set_rollback(set_id):
     return jsonify({'id': s.id, 'version': s.version, 'status': s.status})
 
 
+@api_bp.route('/grade-bands/sets/<int:set_id>/export-json', methods=['GET'])
+@login_required
+def api_band_set_export_json(set_id):
+    s = GradeBandSet.query.get_or_404(set_id)
+    import json
+    return jsonify({ 'exam_name': s.exam_name, 'version': s.version, 'items': json.loads(s.rules_json) })
+
+
+@api_bp.route('/grade-bands/sets/<int:set_id>/import-json', methods=['POST'])
+@login_required
+def api_band_set_import_json(set_id):
+    s = GradeBandSet.query.get_or_404(set_id)
+    data = request.get_json(force=True)
+    items = data.get('items') or []
+    import json
+    s.rules_json = json.dumps(items, ensure_ascii=False)
+    db.session.commit()
+    return jsonify({'message': 'imported', 'count': len(items)})
+
+
 # ExamScheme CRUD
 @api_bp.route("/exam-schemes", methods=["GET", "POST"])
 @login_required

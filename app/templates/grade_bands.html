@@ -11,7 +11,24 @@
     <button class="btn btn-primary" onclick="loadRules()">加载</button>
   </div>
   <div class="col-auto">
+    <select id="versionSelect" class="form-select">
+      <option value="">当前活跃</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-secondary" onclick="createDraft()">新建草稿</button>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-success" onclick="publishSet()">发布当前版本</button>
+  </div>
+  <div class="col-auto">
     <button class="btn btn-success" onclick="saveBulk()">保存全部</button>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-primary" onclick="applyTemplateToAll()">应用到所有学科（使用首行作为模板）</button>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-secondary" onclick="previewDist()">预览分布</button>
   </div>
   <div class="col-auto">
     <button class="btn btn-outline-primary" onclick="applyTemplateToAll()">应用到所有学科（使用首行作为模板）</button>
@@ -122,9 +139,25 @@ function collectItems(){
   return items;
 }
 
+async function loadVersions(){
+  const exam_name = document.getElementById('examName').value.trim() || 'default';
+  const res = await fetch(`/api/grade-bands/sets?exam_name=${encodeURIComponent(exam_name)}`);
+  const sets = await res.json();
+  const sel = document.getElementById('versionSelect');
+  sel.innerHTML = '<option value="">当前活跃</option>';
+  sets.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = `v${s.version} (${s.status})`;
+    sel.appendChild(opt);
+  });
+}
+
 async function loadRules(){
   const exam_name = document.getElementById('examName').value.trim() || 'default';
-  const res = await fetch(`/api/grade-bands?exam_name=${encodeURIComponent(exam_name)}`);
+  const setId = document.getElementById('versionSelect').value;
+  const url = setId ? `/api/grade-bands?rule_set_id=${setId}` : `/api/grade-bands?exam_name=${encodeURIComponent(exam_name)}`;
+  const res = await fetch(url);
   const data = await res.json();
   const byCode = Object.fromEntries(data.map(x => [x.subject_code, x]));
   document.querySelectorAll('#rulesTable tbody tr').forEach(tr => {
@@ -184,6 +217,29 @@ async function saveBulk(){
   }
 }
 
+async function createDraft(){
+  const exam_name = document.getElementById('examName').value.trim() || 'default';
+  const note = prompt('草稿备注（可选）:') || '';
+  const res = await fetch('/api/grade-bands/sets', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ exam_name, note })
+  });
+  if (res.ok){
+    await loadVersions();
+    alert('草稿已创建');
+  } else {
+    const d = await res.json(); alert('创建失败：' + (d.error || '未知错误'));
+  }
+}
+
+async function publishSet(){
+  const setId = document.getElementById('versionSelect').value;
+  if (!setId){ alert('请选择要发布的版本'); return; }
+  if (!confirm('发布后将覆盖当前活跃规则，确认继续？')) return;
+  const res = await fetch(`/api/grade-bands/sets/${setId}/publish`, { method: 'PUT' });
+  if (res.ok){ alert('发布成功'); } else { alert('发布失败'); }
+}
+
 function applyTemplateToAll(){
   const rows = Array.from(document.querySelectorAll('#rulesTable tbody tr'));
   if (rows.length === 0) return;
@@ -233,6 +289,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   });
   updatePercentBadges();
+  loadVersions().then(loadRules);
 });
 </script>
 {% endblock %}
