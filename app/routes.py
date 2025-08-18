@@ -2,7 +2,12 @@
 路由与API定义
 """
 
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
+import os
+import uuid
+from io import BytesIO
+
+import pandas as pd
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required, login_user, logout_user
 
 from app import db
@@ -20,6 +25,7 @@ from app.utils import (
 main_bp = Blueprint("main", __name__)
 auth_bp = Blueprint("auth", __name__)
 api_bp = Blueprint("api", __name__)
+import_bp = Blueprint("importer", __name__)
 
 
 # 首页仪表盘
@@ -70,6 +76,13 @@ def login():
             return redirect(next_page)
         flash("用户名或密码错误", "danger")
     return render_template("login.html")
+
+
+# 导入页面
+@main_bp.route("/import")
+@login_required
+def import_page():
+    return render_template("import.html")
 
 
 @auth_bp.route("/logout")
@@ -269,6 +282,128 @@ def api_analysis_statistics():
     stats = calculate_statistics(grades)
     distribution = get_grade_distribution(grades)
     return jsonify({"stats": stats, "distribution": distribution})
+
+
+# 导入: 预览工作表列表，保存临时文件并返回 file_id
+@api_bp.route("/import/preview", methods=["POST"])
+@login_required
+def api_import_preview():
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "Empty filename"}), 400
+
+    # 保存到上传目录
+    upload_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    file_id = str(uuid.uuid4())
+    # 统一使用 .xlsx 扩展名
+    file_path = os.path.join(upload_dir, f"{file_id}.xlsx")
+    f.save(file_path)
+
+    try:
+        # 读取工作表列表
+        xls = pd.ExcelFile(file_path, engine="openpyxl")
+        sheets = xls.sheet_names
+    except Exception as e:
+        # 清理坏文件
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        return jsonify({"error": f"Failed to read excel: {e}"}), 400
+
+    return jsonify({"file_id": file_id, "sheets": sheets})
+
+
+# 导入: 根据选择的工作表执行导入
+@api_bp.route("/import/grades", methods=["POST"])
+@login_required
+def api_import_grades():
+    data = request.get_json() or request.form
+    file_id = data.get("file_id")
+    sheet_name = data.get("sheet_name")
+    if not file_id or not sheet_name:
+        return jsonify({"error": "file_id and sheet_name are required"}), 400
+
+    upload_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
+    file_path = os.path.join(upload_dir, f"{file_id}.xlsx")
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Uploaded file not found or expired"}), 400
+
+    try:
+        df = pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl")
+    except Exception as e:
+        return jsonify({"error": f"Failed to read sheet: {e}"}), 400
+
+    # 期望列：学号, 姓名, 班级, 课程代码, 课程名称, 成绩, 考试类型, 考试日期
+    required_cols = ["学号", "姓名", "班级", "课程代码", "课程名称", "成绩"]
+    for col in required_cols:
+        if col not in df.columns:
+            return jsonify({"error": f"Missing required column: {col}"}), 400
+
+    created = 0
+    updated = 0
+
+    for _, row in df.iterrows():
+        student = Student.query.filter_by(student_id=str(row["学号"]).strip()).first()
+        if not student:
+            student = Student(
+                student_id=str(row["学号"]).strip(),
+                name=str(row.get("姓名") or "").strip(),
+                class_name=str(row.get("班级") or "").strip(),
+                email=None,
+            )
+            db.session.add(student)
+
+        course_code = str(row["课程代码"]).strip()
+        course = Course.query.filter_by(code=course_code).first()
+        if not course:
+            course = Course(code=course_code, name=str(row.get("课程名称") or "").strip())
+            db.session.add(course)
+
+        # 成绩
+        try:
+            score_val = float(row["成绩"])
+        except Exception:
+            score_val = None
+        if score_val is None:
+            # 跳过无效成绩
+            continue
+
+        exam_type = str(row.get("考试类型") or "final").strip() or "final"
+        # 可选：解析考试日期
+        exam_date = None
+        if "考试日期" in df.columns and pd.notna(row.get("考试日期")):
+            try:
+                exam_date = pd.to_datetime(row.get("考试日期")).date()
+            except Exception:
+                exam_date = None
+
+        grade = Grade.query.filter_by(student_id=student.id, course_id=course.id).first() if student.id and course.id else None
+        if not grade:
+            grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type)
+            if exam_date:
+                grade.exam_date = exam_date
+            db.session.add(grade)
+            created += 1
+        else:
+            grade.score = score_val
+            grade.exam_type = exam_type
+            if exam_date:
+                grade.exam_date = exam_date
+            updated += 1
+
+    db.session.commit()
+
+    # 导入完成后可清理临时文件
+    try:
+        os.remove(file_path)
+    except Exception:
+        pass
+
+    return jsonify({"message": "Import finished", "created": created, "updated": updated})
 
 
 @api_bp.route("/analysis/ranking", methods=["GET"])
