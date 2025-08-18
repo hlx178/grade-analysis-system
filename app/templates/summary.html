@@ -221,6 +221,11 @@
       <div class="card-header d-flex justify-content-between align-items-center">
         <span>班级对比（均分）</span>
         <div class="d-flex align-items-center gap-2">
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="onlyMeets">
+            <label class="form-check-label" for="onlyMeets">仅显示达标</label>
+          </div>
+
           <input id="compareExam" class="form-control form-control-sm d-inline-block" style="width:180px" placeholder="考试名称">
           <input id="minCount" type="number" class="form-control form-control-sm d-inline-block" style="width:120px" placeholder="人数阈值(可选)">
           <div class="btn-group btn-group-sm">
@@ -719,6 +724,18 @@ async function loadClassCompare(){
     const m = data.meta;
     if (m.min_count && m.min_count>0){
       metaDiv.textContent = `当前人数阈值: ${m.min_count}；原始班级数: ${m.total}；被过滤: ${m.filtered_out}；返回: ${m.returned}`;
+  // 仅显示达标（前端过滤）
+  if (document.getElementById('onlyMeets')?.checked){
+    const zipped = labels.map((l,i)=>({l, i})).filter(z=>meets[z.i]);
+    const keepIdx = zipped.map(z=>z.i);
+    const _labels = zipped.map(z=>z.l);
+    const _avgs = keepIdx.map(i=>avgs[i]);
+    const _counts = keepIdx.map(i=>counts[i]);
+    const _stds = keepIdx.map(i=>stds[i]);
+    labels = _labels; avgs = _avgs; counts = _counts; stds = _stds;
+    // 颜色统一为达标色
+  }
+
     }else{
       metaDiv.textContent = `班级数: ${m.total}；返回: ${m.returned}`;
     }
@@ -780,10 +797,18 @@ async function loadDistribution(){
   const stds = data.compare.map(x=>x.std);
   const ctx = document.getElementById('classCompareChart').getContext('2d');
   if (_classChart) _classChart.destroy();
+  // 构造图例：达标/未达标
+  const showLegend = true;
   _classChart = new Chart(ctx, {
     type: 'bar',
     data: { labels, datasets: [{ label: '均分', data: avgs, backgroundColor: bgColors, borderColor: borderColors, borderWidth: 1 }]},
     options: { responsive: true, scales: { y: { beginAtZero: true }}, plugins:{
+      legend: { display: showLegend, labels: { generateLabels(chart){
+        return [
+          { text: '达标', fillStyle: '#198754', strokeStyle: '#198754' },
+          { text: '低于阈值', fillStyle: 'rgba(220,53,69,0.3)', strokeStyle: '#dc3545' },
+        ];
+      }}},
       tooltip:{ callbacks:{
         afterBody(items){ const i = items[0].dataIndex; const flag = meets[i] ? '' : '（低于阈值）'; return '人数:'+counts[i]+' 标准差:'+stds[i] + ' ' + flag; }
       }}
