@@ -870,6 +870,13 @@ def api_analysis_class_compare_export():
         data = res.get_json() if hasattr(res, 'get_json') else res.json
     import csv, io
     output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['class_name','avg','count','std','meets_threshold'])
+    for row in data.get('compare', []):
+        writer.writerow([row.get('class_name'), row.get('avg'), row.get('count'), row.get('std'), row.get('meets_threshold')])
+    output.seek(0)
+    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=class_compare.csv'})
+
 
 @api_bp.route('/analysis/export-all', methods=['GET'])
 @login_required
@@ -1220,7 +1227,7 @@ def api_summary_prefs():
             }
         # 兼容新增字段：class compare 偏好
         if 'class_compare' not in data or not isinstance(data.get('class_compare'), dict):
-            data['class_compare'] = {'only_meets': False, 'sort_by': 'avg'}
+            data['class_compare'] = {'only_meets': False, 'sort_by': 'avg', 'min_count': 0}
         else:
             if 'only_meets' not in data['class_compare']:
                 data['class_compare']['only_meets'] = False
@@ -1242,7 +1249,7 @@ def api_summary_prefs():
             'letter': True, 'class_rank': True, 'grade_rank': True,
             'trend_chrono': False,
             'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True},
-            'class_compare': {'only_meets': False, 'sort_by': 'avg'}
+            'class_compare': {'only_meets': False, 'sort_by': 'avg', 'min_count': 0}
         }
         if legacy:
             try:
@@ -1269,7 +1276,7 @@ def api_summary_prefs():
                 if k not in val['trend_toggles']:
                     val['trend_toggles'][k] = True
         if 'class_compare' not in val or not isinstance(val.get('class_compare'), dict):
-            val['class_compare'] = {'only_meets': False, 'sort_by': 'avg'}
+            val['class_compare'] = {'only_meets': False, 'sort_by': 'avg', 'min_count': 0}
         else:
             if 'only_meets' not in val['class_compare']:
                 val['class_compare']['only_meets'] = False
@@ -1281,7 +1288,7 @@ def api_summary_prefs():
             'letter': True, 'class_rank': True, 'grade_rank': True,
             'trend_chrono': False,
             'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True},
-            'class_compare': {'only_meets': False, 'sort_by': 'avg'}
+            'class_compare': {'only_meets': False, 'sort_by': 'avg', 'min_count': 0}
         })
 
 

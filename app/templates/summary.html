@@ -328,6 +328,7 @@ function getPrefs(){
     class_compare: {
       only_meets: document.getElementById('onlyMeets')?.checked || false,
       sort_by: document.getElementById('compareSortBy')?.value || 'avg',
+      min_count: Number(document.getElementById('minCount')?.value || 0) || 0,
     }
   };
 }
@@ -355,6 +356,7 @@ function applyPrefs(p){
   if (p.class_compare){
     const onlyMeets = document.getElementById('onlyMeets'); if (onlyMeets) onlyMeets.checked = !!p.class_compare.only_meets;
     const sortSel = document.getElementById('compareSortBy'); if (sortSel && p.class_compare.sort_by) sortSel.value = p.class_compare.sort_by;
+    const minCountEl = document.getElementById('minCount'); if (minCountEl && (p.class_compare.min_count ?? null) !== null) minCountEl.value = p.class_compare.min_count;
   }
   // 合并后端偏好中的趋势开关（覆盖 localStorage）
   if (p.trend_toggles){
@@ -894,6 +896,8 @@ window.addEventListener('DOMContentLoaded', ()=>{
   // 当偏好加载后，按偏好重绘趋势图
   const prefChrono = document.getElementById('trendChrono')?.checked;
   if (typeof prefChrono !== 'undefined') { loadTrendChart(); }
+
+  const minCountEl = document.getElementById('minCount'); if (minCountEl) minCountEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, min_count: Number(minCountEl.value||0) }})}); }catch(e){}; };
 
   const onlyMeetsEl = document.getElementById('onlyMeets'); if (onlyMeetsEl) onlyMeetsEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, only_meets: onlyMeetsEl.checked }})}); }catch(e){}; loadClassCompare(); };
   const sortByEl = document.getElementById('compareSortBy'); if (sortByEl) sortByEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, sort_by: sortByEl.value }})}); }catch(e){}; loadClassCompare(); };
