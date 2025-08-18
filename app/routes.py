@@ -4,10 +4,11 @@
 
 import os
 import uuid
+import io
 from io import BytesIO
 
 import pandas as pd
-from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for, send_file, Response
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db
@@ -41,12 +42,14 @@ def dashboard():
     classes = get_class_list()
     # 可选：提供已存在的考试名称列表
     exam_names = [row[0] for row in db.session.query(GradeBandRule.exam_name).distinct().all()]
+    grade_levels = [row[0] for row in db.session.query(Student.grade_level).distinct().all() if row[0]]
     return render_template(
         "dashboard.html",
         course_stats=course_stats,
         courses=courses,
         classes=classes,
         exam_names=exam_names,
+        grade_levels=grade_levels,
     )
 
 
@@ -95,6 +98,12 @@ def login():
 @login_required
 def import_page():
     return render_template("import.html")
+
+
+@main_bp.route("/summary")
+@login_required
+def summary_page():
+    return render_template("summary.html")
 
 
 @main_bp.route("/exam-schemes")
@@ -373,7 +382,7 @@ def api_import_grades():
 
     # 期望列（模板方式）：学号、姓名、班级、语文、数学、英语、科学、社会、道法，可选：考试类型
     # 兼容旧方式（含 课程代码/课程名称/成绩）
-    template_cols = ["学号", "姓名", "班级", "语文", "数学", "英语", "科学", "社会", "道法"]
+    template_cols = ["学号", "姓名", "班级", "年级", "语文", "数学", "英语", "科学", "社会", "道法"]
     legacy_required_cols = ["学号", "姓名", "班级", "课程代码", "课程名称", "成绩"]
 
     # 判断模板方式或旧方式
@@ -411,10 +420,16 @@ def api_import_grades():
                     student_id=sid,
                     name=str(row.get("姓名") or "").strip(),
                     class_name=str(row.get("班级") or "").strip(),
+                    grade_level=str(row.get("年级") or "").strip() or None,
                     email=None,
                 )
                 db.session.add(student)
                 db.session.flush()
+            else:
+                # 更新年级信息（若存在）
+                gl = str(row.get("年级") or "").strip()
+                if gl:
+                    student.grade_level = gl
 
             total_score = 0.0
             for col_name, code, _ in SUBJECTS:
@@ -510,7 +525,9 @@ def api_import_grades():
 def api_analysis_ranking():
     course_id = request.args.get("course_id", type=int)
     class_name = request.args.get("class_name")
-    rankings = get_student_ranking(course_id=course_id, class_name=class_name)
+    grade_level = request.args.get("grade_level")
+    exam_name = request.args.get("exam_name")
+    rankings = get_student_ranking(course_id=course_id, class_name=class_name, grade_level=grade_level, exam_name=exam_name)
     return jsonify({"rankings": rankings})
 
 
@@ -630,6 +647,172 @@ def api_grade_bands_preview():
             # 对于percentile/未知：统一在前端给出说明，本接口可选择不处理或返回占位
             pass
     return jsonify({"distribution": dict(dist), "total": len(grades)})
+
+
+# 汇总 API
+@api_bp.route('/summary', methods=['GET'])
+@login_required
+def api_summary_list():
+    from sqlalchemy import desc
+    def _multi(param_name: str):
+        # 支持 ?param=a&param=b 或 ?param=a,b
+        vals = request.args.getlist(param_name)
+        out = []
+        for v in vals:
+            out.extend([s.strip() for s in v.split(',') if s.strip()])
+        return out
+
+    exam_name = request.args.get('exam_name')
+    grade_levels = _multi('grade_level')
+    class_names = _multi('class_name')
+    subject_code = request.args.get('subject_code') or 'TOTAL'
+    order_by = request.args.get('order_by') or 'score_desc'
+
+    # 查询匹配的成绩（按考试名称与科目）
+    q = Grade.query.join(Student).join(Course)
+    if exam_name:
+        q = q.filter(Grade.exam_name == exam_name)
+    if grade_levels:
+        q = q.filter(Student.grade_level.in_(grade_levels))
+    if class_names:
+        q = q.filter(Student.class_name.in_(class_names))
+    if subject_code:
+        q = q.filter(Course.code == subject_code)
+
+    # 分页参数
+    page = request.args.get('page', type=int) or 1
+    page_size = min(max(request.args.get('page_size', type=int) or 50, 1), 1000)
+
+    total = q.count()
+    rows = q.offset((page-1)*page_size).limit(page_size).all()
+    items = []
+
+    # 计算班级/年级排名：需要同班/同年级的集合
+    # 先聚合：key -> list of (student_id, score)
+    from collections import defaultdict
+    by_class = defaultdict(list)
+    by_grade = defaultdict(list)
+    for g in rows:
+        by_class[g.student.class_name].append((g.student_id, g.score))
+        by_grade[g.student.grade_level].append((g.student_id, g.score))
+
+    # 排名映射
+    def rank_map(pairs):
+        # pairs: list[(student_id, score)]
+        pairs_sorted = sorted(pairs, key=lambda x: x[1], reverse=True)
+        rank = {}
+        for i, (sid, _) in enumerate(pairs_sorted, 1):
+            rank[sid] = i
+        return rank
+
+    class_rank_map = {k: rank_map(v) for k, v in by_class.items()}
+    grade_rank_map = {k: rank_map(v) for k, v in by_grade.items()}
+
+    from app.utils import grade_letter_for
+    for g in rows:
+        letter = grade_letter_for(g.exam_name or 'default', g.course.code, g.score)
+        items.append({
+            'student_id': g.student.student_id,
+            'name': g.student.name,
+            'class_name': g.student.class_name,
+            'grade_level': g.student.grade_level,
+            'score': g.score,
+            'letter': letter,
+            'class_rank': class_rank_map.get(g.student.class_name, {}).get(g.student_id),
+            'grade_rank': grade_rank_map.get(g.student.grade_level, {}).get(g.student_id),
+        })
+
+    # 排序
+    if order_by == 'score_desc':
+        items.sort(key=lambda x: x['score'], reverse=True)
+    elif order_by == 'score_asc':
+        items.sort(key=lambda x: x['score'])
+    elif order_by == 'class_rank':
+        items.sort(key=lambda x: (x['class_name'] or '', x['class_rank'] or 1e9))
+    elif order_by == 'grade_rank':
+        items.sort(key=lambda x: (x['grade_level'] or '', x['grade_rank'] or 1e9))
+
+    return jsonify({'items': items, 'total': total, 'page': page, 'page_size': page_size})
+
+
+@api_bp.route('/summary/prefs', methods=['GET', 'PUT'])
+@login_required
+def api_summary_prefs():
+    from app.models import UserPreference
+    import json
+    key = 'summary_columns'
+    if request.method == 'PUT':
+        data = request.get_json(force=True)
+        pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
+        if not pref:
+            pref = UserPreference(user_id=current_user.id, key=key, value='{}')
+            db.session.add(pref)
+        pref.value = json.dumps(data, ensure_ascii=False)
+        db.session.commit()
+        return jsonify({'message': 'ok'})
+    # GET
+    pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
+    if not pref:
+        return jsonify({'letter': True, 'class_rank': True, 'grade_rank': True})
+    import json
+    return jsonify(json.loads(pref.value))
+
+
+@api_bp.route('/summary/export', methods=['GET'])
+@login_required
+def api_summary_export():
+    # 复用过滤逻辑
+    def _multi(param_name: str):
+        vals = request.args.getlist(param_name)
+        out = []
+        for v in vals:
+            out.extend([s.strip() for s in v.split(',') if s.strip()])
+        return out
+
+    exam_name = request.args.get('exam_name')
+    grade_levels = _multi('grade_level')
+    class_names = _multi('class_name')
+    subject_code = request.args.get('subject_code') or 'TOTAL'
+    fmt = request.args.get('format') or 'csv'
+
+    q = Grade.query.join(Student).join(Course)
+    if exam_name:
+        q = q.filter(Grade.exam_name == exam_name)
+    if grade_levels:
+        q = q.filter(Student.grade_level.in_(grade_levels))
+    if class_names:
+        q = q.filter(Student.class_name.in_(class_names))
+    if subject_code:
+        q = q.filter(Course.code == subject_code)
+
+    rows = q.all()
+    data = []
+    from app.utils import grade_letter_for
+    for g in rows:
+        data.append({
+            '学号': g.student.student_id,
+            '姓名': g.student.name,
+            '班级': g.student.class_name,
+            '年级': g.student.grade_level,
+            '分数': g.score,
+            '等第': grade_letter_for(g.exam_name or 'default', g.course.code, g.score),
+        })
+
+    if fmt == 'xlsx':
+        import pandas as pd
+        buf = io.BytesIO()
+        pd.DataFrame(data).to_excel(buf, index=False)
+        buf.seek(0)
+        return send_file(buf, as_attachment=True, download_name='summary.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    # 默认csv
+    import csv
+    si = io.StringIO()
+    writer = csv.DictWriter(si, fieldnames=['学号','姓名','班级','年级','分数','等第'])
+    writer.writeheader()
+    for row in data:
+        writer.writerow(row)
+    output = si.getvalue().encode('utf-8-sig')
+    return Response(output, mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=summary.csv'})
 
 
 # 版本管理：列出/新建草稿/发布/回滚

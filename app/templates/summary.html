@@ -1,0 +1,195 @@
+{% extends 'base.html' %}
+{% block title %}成绩汇总 - 成绩分析系统{% endblock %}
+{% block content %}
+<h3>成绩汇总</h3>
+<div class="row g-2 align-items-end mb-3">
+  <div class="col-auto">
+    <label class="form-label">考试名称</label>
+    <input id="examName" class="form-control" placeholder="如：期末">
+  </div>
+  <div class="col-auto">
+    <label class="form-label">年级</label>
+    <input id="gradeLevel" class="form-control" placeholder="如：七年级/2024级">
+  </div>
+  <div class="col-auto">
+    <label class="form-label">班级</label>
+    <input id="className" class="form-control" placeholder="如：一班">
+  </div>
+  <div class="col-auto">
+    <label class="form-label">学科</label>
+    <select id="subjectCode" class="form-select">
+      <option value="TOTAL">总分</option>
+      <option value="CN">语文</option>
+      <option value="MA">数学</option>
+      <option value="EN">英语</option>
+      <option value="SC">科学</option>
+      <option value="SOC">社会</option>
+      <option value="MOR">道法</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label">排序</label>
+    <select id="orderBy" class="form-select">
+      <option value="score_desc">分数(高->低)</option>
+      <option value="score_asc">分数(低->高)</option>
+      <option value="class_rank">班级排名</option>
+      <option value="grade_rank">年级排名</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-primary" onclick="loadSummary()">查询</button>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-secondary" onclick="exportSummary('csv')">导出CSV</button>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-secondary" onclick="exportSummary('xlsx')">导出XLSX</button>
+  </div>
+</div>
+
+<div class="mb-2">
+  <label class="form-label me-2">显示列</label>
+  <div class="form-check form-check-inline">
+    <input class="form-check-input" type="checkbox" value="letter" id="colLetter" checked>
+    <label class="form-check-label" for="colLetter">等第</label>
+  </div>
+  <div class="form-check form-check-inline">
+    <input class="form-check-input" type="checkbox" value="class_rank" id="colClassRank" checked>
+    <label class="form-check-label" for="colClassRank">班级排名</label>
+  </div>
+  <div class="form-check form-check-inline">
+    <input class="form-check-input" type="checkbox" value="grade_rank" id="colGradeRank" checked>
+    <label class="form-check-label" for="colGradeRank">年级排名</label>
+  </div>
+  <button class="btn btn-outline-secondary btn-sm ms-2" onclick="savePrefs()">保存偏好</button>
+</div>
+
+<table class="table table-striped" id="summaryTable">
+  <thead>
+    <tr>
+      <th>学号</th>
+      <th>姓名</th>
+      <th>班级</th>
+      <th>年级</th>
+      <th>分数</th>
+      <th class="col-letter">等第</th>
+      <th class="col-class-rank">班级排名</th>
+      <th class="col-grade-rank">年级排名</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+<div class="d-flex align-items-center gap-2">
+  <label class="form-label">每页</label>
+  <input id="pageSize" type="number" class="form-control" value="50" style="width:100px" onblur="gotoPage(1)">
+  <div id="pager" class="ms-2"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function getPrefs(){
+  return {
+    letter: document.getElementById('colLetter').checked,
+    class_rank: document.getElementById('colClassRank').checked,
+    grade_rank: document.getElementById('colGradeRank').checked,
+  };
+}
+function applyPrefs(p){
+  if (!p) return;
+  document.getElementById('colLetter').checked = !!p.letter;
+  document.getElementById('colClassRank').checked = !!p.class_rank;
+  document.getElementById('colGradeRank').checked = !!p.grade_rank;
+  document.querySelectorAll('.col-letter').forEach(e=>e.style.display = p.letter? '':'none');
+  document.querySelectorAll('.col-class-rank').forEach(e=>e.style.display = p.class_rank? '':'none');
+  document.querySelectorAll('.col-grade-rank').forEach(e=>e.style.display = p.grade_rank? '':'none');
+}
+async function savePrefs(){
+  const res = await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(getPrefs())});
+  if (res.ok) alert('已保存'); else alert('保存失败');
+}
+async function loadPrefs(){
+  const res = await fetch('/api/summary/prefs');
+  if (res.ok){ const p = await res.json(); applyPrefs(p); }
+}
+async function loadSummary(){
+  const exam_name = document.getElementById('examName').value.trim() || '';
+  const grade_level = document.getElementById('gradeLevel').value.trim() || '';
+  const class_name = document.getElementById('className').value.trim() || '';
+  const subject_code = document.getElementById('subjectCode').value;
+  const order_by = document.getElementById('orderBy').value;
+  const p = new URLSearchParams({ exam_name, grade_level, class_name, subject_code, order_by });
+  const res = await fetch('/api/summary?' + p.toString());
+  const data = await res.json();
+  const tbody = document.querySelector('#summaryTable tbody');
+  tbody.innerHTML = '';
+  data.items.forEach(it => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${it.student_id}</td>
+      <td>${it.name}</td>
+      <td>${it.class_name||''}</td>
+      <td>${it.grade_level||''}</td>
+      <td>${it.score}</td>
+      <td class="col-letter">${it.letter||''}</td>
+      <td class="col-class-rank">${it.class_rank ?? ''}</td>
+      <td class="col-grade-rank">${it.grade_rank ?? ''}</td>`;
+    tbody.appendChild(tr);
+  });
+  applyPrefs(getPrefs());
+  // 分页渲染
+  renderPager(data.total, data.page, data.page_size);
+}
+
+function qs(){
+  const exam_name = document.getElementById('examName').value.trim() || '';
+  const grade_level = document.getElementById('gradeLevel').value.trim() || '';
+  const class_name = document.getElementById('className').value.trim() || '';
+  const subject_code = document.getElementById('subjectCode').value;
+  const order_by = document.getElementById('orderBy').value;
+  return { exam_name, grade_level, class_name, subject_code, order_by };
+}
+
+function renderPager(total, page, page_size){
+  const totalPages = Math.max(1, Math.ceil(total / page_size));
+  const pager = document.getElementById('pager');
+  pager.innerHTML = '';
+  const mkBtn = (p, label, disabled=false) => `<button class="btn btn-sm ${disabled?'btn-secondary':'btn-outline-secondary'} me-1" ${disabled?'disabled':''} onclick="gotoPage(${p})">${label}</button>`;
+  pager.innerHTML += mkBtn(1, '首页', page<=1);
+  pager.innerHTML += mkBtn(page-1, '上一页', page<=1);
+  pager.innerHTML += `<span class="me-2">第 ${page}/${totalPages} 页，共 ${total} 条</span>`;
+  pager.innerHTML += mkBtn(page+1, '下一页', page>=totalPages);
+  pager.innerHTML += mkBtn(totalPages, '末页', page>=totalPages);
+}
+
+function gotoPage(p){
+  const psize = Number(document.getElementById('pageSize').value) || 50;
+  const params = new URLSearchParams({ ...qs(), page: p, page_size: psize });
+  fetch('/api/summary?' + params.toString()).then(r=>r.json()).then(data=>{
+    const tbody = document.querySelector('#summaryTable tbody');
+    tbody.innerHTML = '';
+    data.items.forEach(it => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${it.student_id}</td>
+        <td>${it.name}</td>
+        <td>${it.class_name||''}</td>
+        <td>${it.grade_level||''}</td>
+        <td>${it.score}</td>
+        <td class="col-letter">${it.letter||''}</td>
+        <td class="col-class-rank">${it.class_rank ?? ''}</td>
+        <td class="col-grade-rank">${it.grade_rank ?? ''}</td>`;
+      tbody.appendChild(tr);
+    });
+    applyPrefs(getPrefs());
+    renderPager(data.total, data.page, data.page_size);
+  });
+}
+
+function exportSummary(fmt){
+  const params = new URLSearchParams({ ...qs(), format: fmt });
+  window.location = '/api/summary/export?' + params.toString();
+}
+
+window.addEventListener('DOMContentLoaded', ()=>{ loadPrefs(); });
+</script>
+{% endblock %}
