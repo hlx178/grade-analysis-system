@@ -308,6 +308,22 @@ docker compose -f docker-compose.postgres.yml up -d
   - 如需数据迁移，可后续接入 Alembic
 
 
+## 数据库迁移（Alembic）
+
+- 初始化（已加入基础配置）：
+  - alembic.ini 与 migrations/ 已存在
+- 生成迁移（示例）：
+
+```bash
+# 在 FLASK_CONFIG=production 或开发环境下，确保应用可导入
+alembic revision -m "init schema"
+# 执行迁移
+alembic upgrade head
+```
+
+- 提示：生产环境建议采用 Alembic 管理 schema 演进；当前测试仍使用 create_all 方式初始化
+
+
 ## 开发状态
 
 🚧 项目正在持续演进，欢迎反馈与贡献。

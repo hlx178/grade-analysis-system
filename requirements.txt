@@ -11,3 +11,9 @@ seaborn==0.12.2
 plotly==5.17.0
 python-dotenv==1.0.0
 openpyxl==3.1.5
+# runtime server
+gunicorn==21.2.0
+# migrations
+alembic==1.13.1
+# postgres optional client
+psycopg2-binary==2.9.9
