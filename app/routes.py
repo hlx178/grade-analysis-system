@@ -8,7 +8,7 @@ import io
 from io import BytesIO
 
 import pandas as pd
-from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for, send_file, Response
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for, send_file, Response, abort
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db
@@ -104,6 +104,14 @@ def import_page():
 @login_required
 def summary_page():
     return render_template("summary.html")
+
+
+@main_bp.route("/users")
+@login_required
+def users_page():
+    if current_user.role != 'admin':
+        abort(403)
+    return render_template("users.html")
 
 
 @main_bp.route("/exam-schemes")
@@ -972,6 +980,43 @@ def api_summary_options():
     grade_levels = sorted({ n[0] for n in gl_q.all() if n[0] })
     class_names = sorted({ n[0] for n in cl_q.all() if n[0] })
     return jsonify({ 'exam_names': exam_names, 'grade_levels': grade_levels, 'class_names': class_names })
+
+
+# 用户管理 API（管理员）
+@api_bp.route('/users', methods=['GET'])
+@login_required
+def api_users_list():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    users = User.query.order_by(User.id.asc()).all()
+    return jsonify([
+        {
+            'id': u.id,
+            'username': u.username,
+            'email': u.email,
+            'role': u.role,
+            'allowed_grade_levels': u.allowed_grade_levels or '',
+            'allowed_class_names': u.allowed_class_names or '',
+        } for u in users
+    ])
+
+
+@api_bp.route('/users/<int:user_id>', methods=['PUT'])
+@login_required
+def api_user_update(user_id):
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    u = User.query.get_or_404(user_id)
+    data = request.get_json(force=True)
+    # 仅允许更新可见范围与角色（可选）
+    if 'allowed_grade_levels' in data:
+        u.allowed_grade_levels = data.get('allowed_grade_levels')
+    if 'allowed_class_names' in data:
+        u.allowed_class_names = data.get('allowed_class_names')
+    if 'role' in data:
+        u.role = data.get('role')
+    db.session.commit()
+    return jsonify({'message': 'updated'})
 
 
 # 版本管理：列出/新建草稿/发布/回滚

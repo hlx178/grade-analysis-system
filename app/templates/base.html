@@ -18,9 +18,13 @@
         <li class="nav-item"><a class="nav-link" href="/students">学生</a></li>
         <li class="nav-item"><a class="nav-link" href="/courses">课程</a></li>
         <li class="nav-item"><a class="nav-link" href="/grades">成绩</a></li>
+        <li class="nav-item"><a class="nav-link" href="/summary">汇总</a></li>
         <li class="nav-item"><a class="nav-link" href="/import">导入</a></li>
         <li class="nav-item"><a class="nav-link" href="/exam-schemes">考试方案</a></li>
         <li class="nav-item"><a class="nav-link" href="/grade-bands">等级规则</a></li>
+        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        <li class="nav-item"><a class="nav-link" href="/users">用户管理</a></li>
+        {% endif %}
       </ul>
       <ul class="navbar-nav">
         {% if current_user.is_authenticated %}

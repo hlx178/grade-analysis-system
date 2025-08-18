@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% block title %}用户管理 - 成绩分析系统{% endblock %}
+{% block content %}
+<h3>用户管理</h3>
+<table class="table table-bordered" id="userTable">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>用户名</th>
+      <th>邮箱</th>
+      <th>角色</th>
+      <th>可见年级</th>
+      <th>可见班级</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadUsers(){
+  const res = await fetch('/api/users');
+  if (!res.ok){ alert('加载失败'); return; }
+  const list = await res.json();
+  const tbody = document.querySelector('#userTable tbody');
+  tbody.innerHTML = '';
+  list.forEach(u => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${u.id}</td>
+      <td>${u.username}</td>
+      <td>${u.email}</td>
+      <td>
+        <select class="form-select form-select-sm role">
+          <option value="admin" ${u.role==='admin'?'selected':''}>admin</option>
+          <option value="teacher" ${u.role==='teacher'?'selected':''}>teacher</option>
+          <option value="student" ${u.role==='student'?'selected':''}>student</option>
+        </select>
+      </td>
+      <td><input class="form-control form-control-sm gl" value="${u.allowed_grade_levels||''}" placeholder="逗号分隔"></td>
+      <td><input class="form-control form-control-sm cl" value="${u.allowed_class_names||''}" placeholder="逗号分隔"></td>
+      <td><button class="btn btn-sm btn-primary" onclick="saveUser(${u.id}, this)">保存</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function saveUser(id, btn){
+  const tr = btn.closest('tr');
+  const payload = {
+    role: tr.querySelector('.role').value,
+    allowed_grade_levels: tr.querySelector('.gl').value,
+    allowed_class_names: tr.querySelector('.cl').value,
+  };
+  const res = await fetch(`/api/users/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  if (res.ok){ alert('已保存'); } else { alert('保存失败'); }
+}
+
+window.addEventListener('DOMContentLoaded', loadUsers);
+</script>
+{% endblock %}
