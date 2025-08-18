@@ -39,11 +39,14 @@ def dashboard():
     course_stats = get_course_statistics()
     courses = Course.query.order_by(Course.code).all()
     classes = get_class_list()
+    # 可选：提供已存在的考试名称列表
+    exam_names = [row[0] for row in db.session.query(GradeBandRule.exam_name).distinct().all()]
     return render_template(
         "dashboard.html",
         course_stats=course_stats,
         courses=courses,
         classes=classes,
+        exam_names=exam_names,
     )
 
 

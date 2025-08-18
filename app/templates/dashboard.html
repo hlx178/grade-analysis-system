@@ -16,6 +16,12 @@
       <option value="{{ cls }}">{{ cls }}</option>
       {% endfor %}
     </select>
+    <select id="examNameSelect" class="form-select">
+      <option value="">默认规则</option>
+      {% for en in exam_names %}
+      <option value="{{ en }}">{{ en }}</option>
+      {% endfor %}
+    </select>
     <button class="btn btn-primary" onclick="loadAnalysis()">分析</button>
   </div>
 </div>
@@ -82,6 +88,8 @@ async function loadAnalysis(){
   const p = new URLSearchParams();
   if (courseId) p.append('course_id', courseId);
   if (className) p.append('class_name', className);
+  const examName = document.getElementById('examNameSelect').value;
+  if (examName) p.append('exam_name', examName);
   const res = await fetch('/api/analysis/statistics?' + p.toString());
   const data = await res.json();
   const s = data.stats || {};
@@ -94,7 +102,7 @@ async function loadAnalysis(){
     <li>最低分: ${s.min ?? '-'}</li>
     <li>标准差: ${s.std ?? '-'}</li>
     <li>及格率: ${s.pass_rate ?? '-'}%</li>`;
-  const labels = ['A','B','C','D','F'];
+  const labels = ['A','B','C','D','E'];
   const values = labels.map(k => d[k] || 0);
   const ctx = document.getElementById('distChart').getContext('2d');
   if (chart) chart.destroy();
