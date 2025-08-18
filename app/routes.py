@@ -671,13 +671,16 @@ def api_analysis_class_compare():
         q = q.filter(Course.code == subject_code)
     rows = q.with_entities(Student.class_name, Grade.score).all()
     from collections import defaultdict
+    import math
     agg = defaultdict(list)
     for cls, score in rows:
         agg[cls or '未知班级'].append(float(score))
     out = []
     for cls, arr in agg.items():
         if not arr: continue
-        out.append({'class_name': cls, 'avg': round(sum(arr)/len(arr),2), 'count': len(arr)})
+        n = len(arr); mean = sum(arr)/n
+        var = sum((x-mean)**2 for x in arr)/n
+        out.append({'class_name': cls, 'avg': round(mean,2), 'count': n, 'std': round(math.sqrt(var),2)})
     out.sort(key=lambda x: x['avg'], reverse=True)
     return jsonify({'compare': out})
 
