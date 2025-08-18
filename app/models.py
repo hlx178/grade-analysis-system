@@ -116,6 +116,7 @@ class Grade(db.Model):
     course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False)
     score = db.Column(db.Float, nullable=False)
     exam_type = db.Column(db.String(20), default="final")  # midterm, final, quiz, assignment
+    exam_name = db.Column(db.String(100), default="default", index=True)  # 自定义考试名称
     exam_date = db.Column(db.Date, default=datetime.utcnow().date())
     remarks = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -129,22 +130,50 @@ class Grade(db.Model):
 
     @property
     def letter_grade(self):
-        """计算等级成绩"""
-        if self.score >= 90:
-            return "A"
-        elif self.score >= 80:
-            return "B"
-        elif self.score >= 70:
-            return "C"
-        elif self.score >= 60:
-            return "D"
-        else:
-            return "F"
+        """按规则或默认阈值计算等级"""
+        # 延迟导入避免循环
+        from app.utils import grade_letter_for
+
+        subject_code = self.course.code  # e.g., CN/MA/... or TOTAL
+        return grade_letter_for(
+            exam_name=self.exam_name or "default",
+            subject_code=subject_code,
+            score=self.score,
+        )
 
     @property
     def is_pass(self):
-        """是否及格"""
+        """是否及格（默认60分及格）"""
         return self.score >= 60
 
     def __repr__(self):
         return f"<Grade {self.student.name}-{self.course.name}: {self.score}>"
+
+
+class GradeBandRule(db.Model):
+    """等级换算规则：按考试名称+学科配置ABCDE两种方法之一"""
+
+    __tablename__ = 'grade_band_rules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    exam_name = db.Column(db.String(100), nullable=False, index=True)
+    subject_code = db.Column(db.String(20), nullable=False, index=True)  # 学科或 TOTAL
+    method = db.Column(db.String(20), nullable=False, default='range')  # 'range' or 'percentile'
+    # 分数段法：设定A/B/C/D的最低分，E为其余
+    a_min = db.Column(db.Float)
+    b_min = db.Column(db.Float)
+    c_min = db.Column(db.Float)
+    d_min = db.Column(db.Float)
+    # 百分比分配法：A/B/C/D/E所占百分比，合计应为100
+    a_pct = db.Column(db.Float)
+    b_pct = db.Column(db.Float)
+    c_pct = db.Column(db.Float)
+    d_pct = db.Column(db.Float)
+    e_pct = db.Column(db.Float)
+
+    __table_args__ = (
+        db.UniqueConstraint('exam_name', 'subject_code', name='uix_examname_subject'),
+    )
+
+    def __repr__(self):
+        return f'<GradeBandRule {self.exam_name}:{self.subject_code} {self.method}>'

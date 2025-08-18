@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import func
 
-from app.models import Course, Grade, Student, ExamScheme
+from app.models import Course, Grade, Student, ExamScheme, GradeBandRule
 
 # 学科列与课程编码映射（可扩展）
 SUBJECTS = [
@@ -75,28 +75,111 @@ def calculate_statistics(grades_query):
     }
 
 
-def get_grade_distribution(grades_query):
-    """获取成绩分布"""
+def grade_letter_for(exam_name: str, subject_code: str, score: float) -> str:
+    """根据规则或默认阈值计算单个成绩的等级（A-E）。"""
+    # 优先查找范围法规则
+    rule = GradeBandRule.query.filter_by(exam_name=exam_name, subject_code=subject_code).first()
+    if rule and rule.method == 'range':
+        # 注意：若a_min等为空，按默认区间
+        a = rule.a_min if rule.a_min is not None else 90
+        b = rule.b_min if rule.b_min is not None else 80
+        c = rule.c_min if rule.c_min is not None else 70
+        d = rule.d_min if rule.d_min is not None else 60
+        if score >= a:
+            return 'A'
+        elif score >= b:
+            return 'B'
+        elif score >= c:
+            return 'C'
+        elif score >= d:
+            return 'D'
+        return 'E'
+    # 若没有范围法规则配置且方法为percentile，需要整体分布，单个无法计算，回退默认
+    if score >= 90:
+        return 'A'
+    elif score >= 80:
+        return 'B'
+    elif score >= 70:
+        return 'C'
+    elif score >= 60:
+        return 'D'
+    return 'E'
+
+
+def get_grade_distribution(grades_query, exam_name: str | None = None, subject_code: str | None = None):
+    """获取成绩分布，根据需要应用等级规则。
+    - 若存在 range 规则，直接按阈值划分
+    - 若存在 percentile 规则，则按比例切分
+    - 否则使用默认90/80/70/60
+    """
     scores = [grade.score for grade in grades_query]
-
     if not scores:
-        return {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
+        return {"A": 0, "B": 0, "C": 0, "D": 0, "E": 0}
 
-    distribution = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
+    # 检索规则
+    rule = None
+    if exam_name and subject_code:
+        rule = GradeBandRule.query.filter_by(exam_name=exam_name, subject_code=subject_code).first()
 
+    if rule and rule.method == 'range':
+        a = rule.a_min if rule.a_min is not None else 90
+        b = rule.b_min if rule.b_min is not None else 80
+        c = rule.c_min if rule.c_min is not None else 70
+        d = rule.d_min if rule.d_min is not None else 60
+        dist = {"A": 0, "B": 0, "C": 0, "D": 0, "E": 0}
+        for s in scores:
+            if s >= a:
+                dist['A'] += 1
+            elif s >= b:
+                dist['B'] += 1
+            elif s >= c:
+                dist['C'] += 1
+            elif s >= d:
+                dist['D'] += 1
+            else:
+                dist['E'] += 1
+        return dist
+
+    if rule and rule.method == 'percentile':
+        # 计算分位点
+        scores_sorted = sorted(scores, reverse=True)
+        n = len(scores_sorted)
+        # 百分比默认 20% 均分
+        ap = (rule.a_pct if rule.a_pct is not None else 20) / 100.0
+        bp = (rule.b_pct if rule.b_pct is not None else 20) / 100.0
+        cp = (rule.c_pct if rule.c_pct is not None else 20) / 100.0
+        dp = (rule.d_pct if rule.d_pct is not None else 20) / 100.0
+        ep = (rule.e_pct if rule.e_pct is not None else 20) / 100.0
+        # 按比例分配人数（四舍五入/保底）
+        # 基于排序后的成绩切分，优先A，再B，再C，再D，剩余E，确保总数精确等于n
+        boundaries = [ap, bp, cp, dp]
+        counts = []
+        remaining = n
+        for p in boundaries:
+            cnt = int(round(n * p))
+            if cnt > remaining:
+                cnt = remaining
+            counts.append(cnt)
+            remaining -= cnt
+        counts.append(max(0, remaining))  # E
+        a_n, b_n, c_n, d_n, e_n = counts
+        dist = {"A": a_n, "B": b_n, "C": c_n, "D": d_n, "E": e_n}
+        return dist
+
+    # 默认规则
+    dist = {"A": 0, "B": 0, "C": 0, "D": 0, "E": 0}
     for score in scores:
         if score >= 90:
-            distribution["A"] += 1
+            dist["A"] += 1
         elif score >= 80:
-            distribution["B"] += 1
+            dist["B"] += 1
         elif score >= 70:
-            distribution["C"] += 1
+            dist["C"] += 1
         elif score >= 60:
-            distribution["D"] += 1
+            dist["D"] += 1
         else:
-            distribution["F"] += 1
-
-    return distribution
+            dist["E"] += 1
+    return dist
 
 
 def get_student_ranking(course_id=None, class_name=None):

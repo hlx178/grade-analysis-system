@@ -297,7 +297,12 @@ def api_analysis_statistics():
         query = query.join(Student).filter(Student.class_name == class_name)
     grades = query.all()
     stats = calculate_statistics(grades)
-    distribution = get_grade_distribution(grades)
+    exam_name = request.args.get("exam_name")
+    subject_code = None
+    if course_id:
+        course = Course.query.get(course_id)
+        subject_code = course.code if course else None
+    distribution = get_grade_distribution(grades, exam_name=exam_name, subject_code=subject_code)
     return jsonify({"stats": stats, "distribution": distribution})
 
 
@@ -372,6 +377,7 @@ def api_import_grades():
     if is_template:
         # 处理考试类型与考试方案
         exam_type = normalize_exam_type(df.get("考试类型").iloc[0] if "考试类型" in df.columns else "regular")
+        exam_name = str(df.get("考试名称").iloc[0] if "考试名称" in df.columns else "default").strip() or "default"
         ensure_default_exam_scheme(exam_type)
 
         # 为模板中的各学科准备/获取Course
@@ -410,7 +416,7 @@ def api_import_grades():
                 course = subject_courses[col_name]
                 grade = Grade.query.filter_by(student_id=student.id, course_id=course.id).first()
                 if not grade:
-                    grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type)
+                    grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type, exam_name=exam_name)
                     db.session.add(grade)
                     created += 1
                 else:
@@ -428,7 +434,7 @@ def api_import_grades():
                 db.session.flush()
             grade_total = Grade.query.filter_by(student_id=student.id, course_id=total_course.id).first()
             if not grade_total:
-                grade_total = Grade(student=student, course=total_course, score=total_score, exam_type=exam_type)
+                grade_total = Grade(student=student, course=total_course, score=total_score, exam_type=exam_type, exam_name=exam_name)
                 db.session.add(grade_total)
                 created += 1
             else:
@@ -464,10 +470,11 @@ def api_import_grades():
                 continue
 
             exam_type = normalize_exam_type(row.get("考试类型") or "regular")
+            exam_name = str(row.get("考试名称") or "default").strip() or "default"
 
             grade = Grade.query.filter_by(student_id=student.id, course_id=course.id).first()
             if not grade:
-                grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type)
+                grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type, exam_name=exam_name)
                 db.session.add(grade)
                 created += 1
             else:
