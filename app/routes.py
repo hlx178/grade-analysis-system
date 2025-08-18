@@ -1024,31 +1024,72 @@ import os
 
 _export_tasks = {}
 
+class ExportTask:
+    def __init__(self, task_id, user_id, params):
+        self.id = task_id
+        self.user_id = user_id
+        self.params = params
+        self.status = 'pending'
+        self.progress = 0
+        self.file = None
+        self.error = None
+        self.created_at = dt.datetime.utcnow()
+        self.finished_at = None
+
+    def to_dict(self):
+        d = {
+            'task_id': self.id,
+            'status': self.status,
+            'progress': self.progress,
+            'file': self.file,
+            'error': self.error,
+            'created_at': self.created_at.isoformat() + 'Z',
+            'finished_at': self.finished_at.isoformat() + 'Z' if self.finished_at else None,
+        }
+        # 摘要（文件名）
+        if self.file:
+            d['filename'] = os.path.basename(self.file)
+        return d
+
 @api_bp.route('/export/tasks', methods=['POST'])
 @login_required
 def api_export_task_create():
     # 接收与 /api/summary/export 相同的查询参数
     params = request.get_json(force=True) or {}
     task_id = str(uuid.uuid4())
-    _export_tasks[task_id] = { 'status': 'pending', 'progress': 0 }
+    user_id = current_user.id
+    _export_tasks[task_id] = ExportTask(task_id, user_id, params)
 
-    def worker(task_id, params):
+    def worker(task_id, params, user_id):
         try:
-            _export_tasks[task_id] = { 'status': 'running', 'progress': 10 }
+            t = _export_tasks.get(task_id)
+            if not t: return
+            t.status = 'running'; t.progress = 10
             # 复用逻辑：构建查询，与同步导出一致
             with current_app.app_context():
                 from copy import deepcopy
                 args = deepcopy(params)
+                # 将用户可见范围注入参数
+                if current_user.is_anonymous or current_user.role == 'admin':
+                    pass
+                else:
+                    if current_user.allowed_grade_levels:
+                        args['grade_level'] = args.get('grade_level') or current_user.allowed_grade_levels
+                    if current_user.allowed_class_names:
+                        args['class_name'] = args.get('class_name') or current_user.allowed_class_names
                 # 生成文件名与导出目录
                 export_dir = current_app.config.get('EXPORT_DIR', 'exports')
                 os.makedirs(export_dir, exist_ok=True)
                 # 调用一个内部函数生成文件
                 filepath = _build_export_file(args, export_dir)
-                _export_tasks[task_id] = { 'status': 'completed', 'file': filepath, 'progress': 100 }
+                t.status = 'completed'; t.file = filepath; t.progress = 100; t.finished_at = dt.datetime.utcnow()
         except Exception as e:
-            _export_tasks[task_id] = { 'status': 'failed', 'error': str(e) }
+            t = _export_tasks.get(task_id)
+            if t:
+                t.status = 'failed'; t.error = str(e)
 
-    Thread(target=worker, args=(task_id, params), daemon=True).start()
+    _cleanup_exports_once()
+    Thread(target=worker, args=(task_id, params, user_id), daemon=True).start()
     return jsonify({ 'task_id': task_id })
 
 
@@ -1058,16 +1099,51 @@ def api_export_task_status(task_id):
     t = _export_tasks.get(task_id)
     if not t:
         return jsonify({ 'error': 'not found' }), 404
-    return jsonify(t)
+    # 仅本人或管理员可查
+    if current_user.role != 'admin' and t.user_id != current_user.id:
+        return jsonify({ 'error': 'forbidden' }), 403
+    return jsonify(t.to_dict())
 
 
 @api_bp.route('/export/tasks/<task_id>/download', methods=['GET'])
 @login_required
 def api_export_task_download(task_id):
     t = _export_tasks.get(task_id)
-    if not t or t.get('status') != 'completed':
+    if not t:
+        return jsonify({ 'error': 'not found' }), 404
+    if current_user.role != 'admin' and t.user_id != current_user.id:
+        return jsonify({ 'error': 'forbidden' }), 403
+    if t.status != 'completed':
         return jsonify({ 'error': 'not ready' }), 400
-    return send_file(t['file'], as_attachment=True)
+    return send_file(t.file, as_attachment=True)
+
+
+# 简易清理任务：删除过期导出文件（在应用启动后首次调用时触发一次）
+_last_cleanup = None
+
+def _cleanup_exports_once():
+    global _last_cleanup
+    import time
+    now = time.time()
+    if _last_cleanup and now - _last_cleanup < 3600:
+        return
+    _last_cleanup = now
+    try:
+        export_dir = current_app.config.get('EXPORT_DIR', 'exports')
+        days = current_app.config.get('EXPORT_RETENTION_DAYS', 7)
+        cutoff = now - days*86400
+        if os.path.isdir(export_dir):
+            for name in os.listdir(export_dir):
+                path = os.path.join(export_dir, name)
+                try:
+                    if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                        os.remove(path)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+# 在任务创建时尝试触发一次清理
 
 
 def _build_export_file(params: dict, export_dir: str) -> str:
