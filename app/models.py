@@ -10,6 +10,24 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from app import db
 
 
+class ExamScheme(db.Model):
+    """考试配置：按考试类型设置各学科及总分的满分"""
+    __tablename__ = 'exam_schemes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    exam_type = db.Column(db.String(20), nullable=False, index=True)  # 'regular' / 'mock'
+    subject_code = db.Column(db.String(20), nullable=False)  # e.g., CN, MA, EN, SC, SOC, MOR, TOTAL
+    subject_name = db.Column(db.String(50), nullable=False)
+    max_score = db.Column(db.Float, nullable=False, default=100.0)
+
+    __table_args__ = (
+        db.UniqueConstraint('exam_type', 'subject_code', name='uix_examtype_subject'),
+    )
+
+    def __repr__(self):
+        return f'<ExamScheme {self.exam_type}:{self.subject_code}={self.max_score}>'
+
+
 class User(UserMixin, db.Model):
     """用户模型"""
 

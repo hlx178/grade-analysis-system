@@ -13,11 +13,15 @@ from flask_login import login_required, login_user, logout_user
 from app import db
 from app.models import Course, Grade, Student, User
 from app.utils import (
+    SUBJECTS,
+    TOTAL_SUBJECT,
     calculate_statistics,
+    ensure_default_exam_scheme,
     get_class_list,
     get_course_statistics,
     get_grade_distribution,
     get_student_ranking,
+    normalize_exam_type,
     validate_score,
 )
 
@@ -337,63 +341,126 @@ def api_import_grades():
     except Exception as e:
         return jsonify({"error": f"Failed to read sheet: {e}"}), 400
 
-    # 期望列：学号, 姓名, 班级, 课程代码, 课程名称, 成绩, 考试类型, 考试日期
-    required_cols = ["学号", "姓名", "班级", "课程代码", "课程名称", "成绩"]
-    for col in required_cols:
-        if col not in df.columns:
-            return jsonify({"error": f"Missing required column: {col}"}), 400
+    # 期望列（模板方式）：学号、姓名、班级、语文、数学、英语、科学、社会、道法，可选：考试类型
+    # 兼容旧方式（含 课程代码/课程名称/成绩）
+    template_cols = ["学号", "姓名", "班级", "语文", "数学", "英语", "科学", "社会", "道法"]
+    legacy_required_cols = ["学号", "姓名", "班级", "课程代码", "课程名称", "成绩"]
+
+    # 判断模板方式或旧方式
+    is_template = all(col in df.columns for col in template_cols)
+    if not is_template:
+        # 非模板方式则要求旧字段存在
+        for col in legacy_required_cols:
+            if col not in df.columns:
+                return jsonify({"error": f"Missing required column: {col}"}), 400
 
     created = 0
     updated = 0
+    if is_template:
+        # 处理考试类型与考试方案
+        exam_type = normalize_exam_type(df.get("考试类型").iloc[0] if "考试类型" in df.columns else "regular")
+        ensure_default_exam_scheme(exam_type)
 
-    for _, row in df.iterrows():
-        student = Student.query.filter_by(student_id=str(row["学号"]).strip()).first()
-        if not student:
-            student = Student(
-                student_id=str(row["学号"]).strip(),
-                name=str(row.get("姓名") or "").strip(),
-                class_name=str(row.get("班级") or "").strip(),
-                email=None,
-            )
-            db.session.add(student)
+        # 为模板中的各学科准备/获取Course
+        subject_courses = {}
+        for col_name, code, name in SUBJECTS:
+            course = Course.query.filter_by(code=code).first()
+            if not course:
+                course = Course(code=code, name=name)
+                db.session.add(course)
+                db.session.flush()
+            subject_courses[col_name] = course
 
-        course_code = str(row["课程代码"]).strip()
-        course = Course.query.filter_by(code=course_code).first()
-        if not course:
-            course = Course(code=course_code, name=str(row.get("课程名称") or "").strip())
-            db.session.add(course)
+        # 逐行导入
+        for _, row in df.iterrows():
+            sid = str(row["学号"]).strip()
+            student = Student.query.filter_by(student_id=sid).first()
+            if not student:
+                student = Student(
+                    student_id=sid,
+                    name=str(row.get("姓名") or "").strip(),
+                    class_name=str(row.get("班级") or "").strip(),
+                    email=None,
+                )
+                db.session.add(student)
+                db.session.flush()
 
-        # 成绩
-        try:
-            score_val = float(row["成绩"])
-        except Exception:
-            score_val = None
-        if score_val is None:
-            # 跳过无效成绩
-            continue
+            total_score = 0.0
+            for col_name, code, _ in SUBJECTS:
+                val = row.get(col_name)
+                try:
+                    score_val = float(val) if pd.notna(val) else None
+                except Exception:
+                    score_val = None
+                if score_val is None:
+                    continue
+                course = subject_courses[col_name]
+                grade = Grade.query.filter_by(student_id=student.id, course_id=course.id).first()
+                if not grade:
+                    grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type)
+                    db.session.add(grade)
+                    created += 1
+                else:
+                    grade.score = score_val
+                    grade.exam_type = exam_type
+                    updated += 1
+                total_score += score_val
 
-        exam_type = str(row.get("考试类型") or "final").strip() or "final"
-        # 可选：解析考试日期
-        exam_date = None
-        if "考试日期" in df.columns and pd.notna(row.get("考试日期")):
+            # 总分作为一个虚拟课程TOTAL写入（可选）
+            total_code = TOTAL_SUBJECT[1]
+            total_course = Course.query.filter_by(code=total_code).first()
+            if not total_course:
+                total_course = Course(code=total_code, name=TOTAL_SUBJECT[2])
+                db.session.add(total_course)
+                db.session.flush()
+            grade_total = Grade.query.filter_by(student_id=student.id, course_id=total_course.id).first()
+            if not grade_total:
+                grade_total = Grade(student=student, course=total_course, score=total_score, exam_type=exam_type)
+                db.session.add(grade_total)
+                created += 1
+            else:
+                grade_total.score = total_score
+                grade_total.exam_type = exam_type
+                updated += 1
+    else:
+        # 兼容旧方式
+        for _, row in df.iterrows():
+            student = Student.query.filter_by(student_id=str(row["学号"]).strip()).first()
+            if not student:
+                student = Student(
+                    student_id=str(row["学号"]).strip(),
+                    name=str(row.get("姓名") or "").strip(),
+                    class_name=str(row.get("班级") or "").strip(),
+                    email=None,
+                )
+                db.session.add(student)
+                db.session.flush()
+
+            course_code = str(row["课程代码"]).strip()
+            course = Course.query.filter_by(code=course_code).first()
+            if not course:
+                course = Course(code=course_code, name=str(row.get("课程名称") or "").strip())
+                db.session.add(course)
+                db.session.flush()
+
             try:
-                exam_date = pd.to_datetime(row.get("考试日期")).date()
+                score_val = float(row["成绩"])
             except Exception:
-                exam_date = None
+                score_val = None
+            if score_val is None:
+                continue
 
-        grade = Grade.query.filter_by(student_id=student.id, course_id=course.id).first() if student.id and course.id else None
-        if not grade:
-            grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type)
-            if exam_date:
-                grade.exam_date = exam_date
-            db.session.add(grade)
-            created += 1
-        else:
-            grade.score = score_val
-            grade.exam_type = exam_type
-            if exam_date:
-                grade.exam_date = exam_date
-            updated += 1
+            exam_type = normalize_exam_type(row.get("考试类型") or "regular")
+
+            grade = Grade.query.filter_by(student_id=student.id, course_id=course.id).first()
+            if not grade:
+                grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type)
+                db.session.add(grade)
+                created += 1
+            else:
+                grade.score = score_val
+                grade.exam_type = exam_type
+                updated += 1
 
     db.session.commit()
 

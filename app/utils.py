@@ -6,7 +6,52 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import func
 
-from app.models import Course, Grade, Student
+from app.models import Course, Grade, Student, ExamScheme
+
+# 学科列与课程编码映射（可扩展）
+SUBJECTS = [
+    ("语文", "CN", "语文"),
+    ("数学", "MA", "数学"),
+    ("英语", "EN", "英语"),
+    ("科学", "SC", "科学"),
+    ("社会", "SOC", "社会"),
+    ("道法", "MOR", "道法"),
+]
+TOTAL_SUBJECT = ("总分", "TOTAL", "总分")
+
+EXAM_TYPE_MAP = {
+    "常规考试": "regular",
+    "模拟考试": "mock",
+    "regular": "regular",
+    "mock": "mock",
+}
+
+def normalize_exam_type(exam_type: str) -> str:
+    if not exam_type:
+        return "regular"
+    return EXAM_TYPE_MAP.get(str(exam_type).strip(), "regular")
+
+
+def ensure_default_exam_scheme(exam_type: str):
+    """若该考试类型未配置科目满分，则以默认值创建。
+    默认：每科100分，总分为学科数量*100。
+    """
+    from app import db
+
+    norm = normalize_exam_type(exam_type)
+    exists = (
+        ExamScheme.query.filter_by(exam_type=norm).first() is not None
+    )
+    if exists:
+        return
+    # 创建默认配置
+    total = 0
+    for _, code, name in SUBJECTS:
+        db.session.add(ExamScheme(exam_type=norm, subject_code=code, subject_name=name, max_score=100.0))
+        total += 100
+    # 总分
+    db.session.add(ExamScheme(exam_type=norm, subject_code=TOTAL_SUBJECT[1], subject_name=TOTAL_SUBJECT[2], max_score=float(total)))
+    db.session.commit()
 
 
 def calculate_statistics(grades_query):
