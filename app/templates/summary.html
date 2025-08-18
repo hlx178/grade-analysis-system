@@ -67,6 +67,13 @@
     <button class="btn btn-primary" onclick="loadSummary()">查询</button>
   </div>
   <div class="col-auto">
+    <label class="form-label">导出范围</label>
+    <select id="exportScope" class="form-select">
+      <option value="current_page">当前页</option>
+      <option value="all" selected>全量</option>
+    </select>
+  </div>
+  <div class="col-auto">
     <div class="form-check mt-2">
       <input class="form-check-input" type="checkbox" id="exportUsePrefs" checked>
       <label class="form-check-label" for="exportUsePrefs">按当前列偏好导出</label>
@@ -212,6 +219,8 @@ function clearSel(id){
 function renderPager(total, page, page_size){
   const totalPages = Math.max(1, Math.ceil(total / page_size));
   const pager = document.getElementById('pager');
+  pager.dataset.page = page;
+  pager.dataset.pageSize = page_size;
   pager.innerHTML = '';
   const mkBtn = (p, label, disabled=false) => `<button class="btn btn-sm ${disabled?'btn-secondary':'btn-outline-secondary'} me-1" ${disabled?'disabled':''} onclick="gotoPage(${p})">${label}</button>`;
   pager.innerHTML += mkBtn(1, '首页', page<=1);
@@ -246,7 +255,10 @@ function gotoPage(p){
 }
 
 function exportSummary(fmt){
-  const params = new URLSearchParams({ ...qs(), format: fmt });
+  const scope = document.getElementById('exportScope').value;
+  const page = document.querySelector('#pager')?.dataset.page || 1;
+  const page_size = document.getElementById('pageSize').value || 50;
+  const params = new URLSearchParams({ ...qs(), format: fmt, scope, page, page_size });
   if (document.getElementById('exportUsePrefs').checked){
     const p = getPrefs();
     const cols = ['student_id','name','class_name','grade_level','score'];
