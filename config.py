@@ -10,6 +10,10 @@ class Config:
 
     # 诊断与慢查询
     SLOW_QUERY_MS = int(os.environ.get("SLOW_QUERY_MS") or 500)
+    DIAG_SQL_LOG = os.environ.get("DIAG_SQL_LOG", "false").lower() in ["1","true","on"]
+
+    # COUNT 微缓存
+    SUMMARY_COUNT_TTL_SECONDS = int(os.environ.get("SUMMARY_COUNT_TTL_SECONDS") or 60)
 
     # 数据库配置
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL") or "sqlite:///grade_analysis.db"

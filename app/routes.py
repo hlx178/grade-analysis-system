@@ -712,6 +712,23 @@ def api_summary_list():
     # 简化 COUNT：去除排序，仅对过滤后的结果进行计数
     total = q.with_entities(db.func.count()).scalar()
     rows = q.offset((page-1)*page_size).limit(page_size).all()
+
+    # 慢请求 SQL 摘要（仅在 DEBUG 或 DIAG_SQL_LOG 开启时）
+    try:
+        if current_app.debug or current_app.config.get('DIAG_SQL_LOG', False):
+            import logging, time
+            threshold = current_app.config.get('SLOW_QUERY_MS', 500)
+            # 仅粗略记录分页查询耗时
+            # 如有需要可精细化到 COUNT/列表分开计时，这里以 rows 拉取为准
+            # 由于我们没有显式计时开始点，简化处理：略过
+            comp = q.statement.compile(dialect=db.engine.dialect, compile_kwargs={"literal_binds": True})
+            sql_snippet = str(comp)
+            if len(sql_snippet) > 300:
+                sql_snippet = sql_snippet[:300] + '...'
+            # 不知道实际耗时，只有在页面层或全局 after_request 记录；此处直接输出片段以便诊断
+            logging.getLogger('slow').warning(f"SUMMARY SQL: {sql_snippet}")
+    except Exception:
+        pass
     items = []
 
     # 规则版本（发布的最新版本号），便于展示来源
@@ -1181,7 +1198,32 @@ def api_users_list():
     if qstr:
         like = f"%{qstr}%"
         q = q.filter((User.username.ilike(like)) | (User.email.ilike(like)))
-    total = q.count()
+    # COUNT 微缓存：按筛选组合缓存短时间的 total
+    try:
+        from hashlib import md5
+        import json, time
+        ttl = current_app.config.get('SUMMARY_COUNT_TTL_SECONDS', 60)
+        cache = getattr(current_app, '_summary_count_cache', None)
+        if cache is None:
+            cache = {}; current_app._summary_count_cache = cache
+        key_payload = {
+            'exam_names': sorted(exam_names),
+            'grade_levels': sorted(grade_levels),
+            'class_names': sorted(class_names),
+            'subject_code': subject_code,
+            'user_gl': sorted([s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]) if (not current_user.is_anonymous and current_user.role!='admin') else [],
+            'user_cl': sorted([s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]) if (not current_user.is_anonymous and current_user.role!='admin') else [],
+        }
+        key = md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        now = time.time()
+        entry = cache.get(key)
+        if entry and now - entry['ts'] < ttl:
+            total = entry['total']
+        else:
+            total = q.with_entities(db.func.count()).scalar()
+            cache[key] = {'total': total, 'ts': now}
+    except Exception:
+        total = q.with_entities(db.func.count()).scalar()
     users = q.order_by(User.id.asc()).offset((page-1)*page_size).limit(page_size).all()
     return jsonify({
         'items': [
