@@ -15,6 +15,8 @@
   <div class="ms-auto">
     <div class="btn-group">
       <button class="btn btn-outline-primary" onclick="batchSave()">批量保存</button>
+      <button class="btn btn-outline-primary" onclick="setRoleForSelected()">所选设角色</button>
+      <button class="btn btn-outline-primary" onclick="applyVisibilityToSelected()">所选设可见范围</button>
       <button class="btn btn-outline-secondary" onclick="exportUsers()">导出CSV</button>
       <input type="file" id="importUsersFile" accept="text/csv,application/vnd.ms-excel" class="d-none"/>
       <button class="btn btn-outline-secondary" onclick="document.getElementById('importUsersFile').click()">导入CSV</button>
@@ -52,6 +54,7 @@ async function loadUsers(page=1){
     const tr = document.createElement('tr');
     tr.dataset.id = u.id;
     tr.innerHTML = `
+      <td><input type="checkbox" class="rowcb"></td>
       <td>${u.id}</td>
       <td>${u.username}</td>
       <td>${u.email}</td>
@@ -68,6 +71,33 @@ async function loadUsers(page=1){
     tbody.appendChild(tr);
   });
   renderPager(data.total, data.page, data.page_size);
+}
+
+function toggleAll(cb){
+  const cbs = document.querySelectorAll('#userTable tbody .rowcb');
+  cbs.forEach(x=> x.checked = cb.checked);
+}
+
+function selectedIds(){
+  return Array.from(document.querySelectorAll('#userTable tbody tr')).filter(tr=> tr.querySelector('.rowcb').checked).map(tr=> tr.dataset.id);
+}
+
+async function setRoleForSelected(){
+  const sel = prompt('设置所选用户角色为（admin/teacher/student）：');
+  if (!sel) return;
+  const ids = selectedIds();
+  if (!ids.length){ alert('请选择行'); return; }
+  await fetch('/api/users/batch', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ items: ids.map(id=>({ id, role: sel })) }) });
+  loadUsers(1);
+}
+
+async function applyVisibilityToSelected(){
+  const gl = prompt('设置所选用户可见年级（逗号分隔）：', '');
+  const cl = prompt('设置所选用户可见班级（逗号分隔）：', '');
+  const ids = selectedIds();
+  if (!ids.length){ alert('请选择行'); return; }
+  await fetch('/api/users/batch', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ items: ids.map(id=>({ id, allowed_grade_levels: gl, allowed_class_names: cl })) }) });
+  loadUsers(1);
 }
 
 function renderPager(total, page, page_size){

@@ -1044,6 +1044,27 @@ def api_user_update(user_id):
     return jsonify({'message': 'updated'})
 
 
+@api_bp.route('/users/batch', methods=['PUT'])
+@login_required
+def api_users_batch_update():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True)
+    items = data.get('items') or []
+    for it in items:
+        u = User.query.get(it.get('id'))
+        if not u:
+            continue
+        if 'role' in it and it.get('role'):
+            u.role = it.get('role')
+        if 'allowed_grade_levels' in it:
+            u.allowed_grade_levels = it.get('allowed_grade_levels')
+        if 'allowed_class_names' in it:
+            u.allowed_class_names = it.get('allowed_class_names')
+    db.session.commit()
+    return jsonify({'message': 'batch updated', 'count': len(items)})
+
+
 # 版本管理：列出/新建草稿/发布/回滚
 @api_bp.route('/grade-bands/sets', methods=['GET', 'POST'])
 @login_required
