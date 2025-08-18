@@ -154,8 +154,9 @@
     <div class="card">
       <div class="card-header d-flex justify-content-between align-items-center">
         <span>考试趋势（均分）</span>
-        <div>
-          <button class="btn btn-sm btn-outline-secondary" onclick="loadTrendChart()">刷新</button>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-secondary" onclick="loadTrendChart()">刷新</button>
+          <a class="btn btn-outline-primary" id="trendExportBtn" href="#">导出CSV</a>
         </div>
       </div>
       <div class="card-body"><canvas id="trendChart" height="140"></canvas></div>
@@ -165,9 +166,12 @@
     <div class="card">
       <div class="card-header d-flex justify-content-between align-items-center">
         <span>班级对比（均分）</span>
-        <div>
+        <div class="d-flex align-items-center gap-2">
           <input id="compareExam" class="form-control form-control-sm d-inline-block" style="width:180px" placeholder="考试名称">
-          <button class="btn btn-sm btn-outline-secondary" onclick="loadClassCompare()">刷新</button>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" onclick="loadClassCompare()">刷新</button>
+            <a class="btn btn-outline-primary" id="classExportBtn" href="#">导出CSV</a>
+          </div>
         </div>
       </div>
       <div class="card-body"><canvas id="classCompareChart" height="140"></canvas></div>
@@ -538,6 +542,9 @@ async function loadTrendChart(){
   const data = await r.json();
   const labels = data.trends.map(x=>x.exam_name);
   const avgs = data.trends.map(x=>x.avg);
+  const meds = data.trends.map(x=>x.median);
+  const p25 = data.trends.map(x=>x.p25);
+  const p75 = data.trends.map(x=>x.p75);
   const ctx = document.getElementById('trendChart').getContext('2d');
   if (_trendChart) _trendChart.destroy();
   const maxs = data.trends.map(x=>x.max);
@@ -547,6 +554,9 @@ async function loadTrendChart(){
     type: 'line',
     data: { labels, datasets: [
       { label: '均分', data: avgs, borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.1)' },
+      { label: '中位数', data: meds, borderColor: '#0dcaf0', borderDash:[2,2] },
+      { label: 'P75', data: p75, borderColor: '#6f42c1', borderDash:[6,3] },
+      { label: 'P25', data: p25, borderColor: '#6c757d', borderDash:[6,3] },
       { label: '最高', data: maxs, borderColor: '#198754', borderDash:[4,3] },
       { label: '最低', data: mins, borderColor: '#dc3545', borderDash:[4,3] }
     ]},
@@ -605,6 +615,32 @@ async function loadDistribution(){
       }}
     }}
   });
+
+function buildTrendExportUrl(){
+  const { subject_code, grade_level, class_name } = qs();
+  const p = new URLSearchParams({ subject_code, grade_level, class_name });
+  return '/api/analysis/trends/export?'+p.toString();
+}
+function buildClassExportUrl(){
+  const exam = document.getElementById('compareExam').value.trim() || (Array.from(document.getElementById('examName').selectedOptions)[0]?.value || '');
+  const subject_code = document.getElementById('subjectCode').value;
+  const p = new URLSearchParams({ subject_code });
+  if (exam) p.set('exam_name', exam);
+  return '/api/analysis/class-compare/export?'+p.toString();
+}
+
+function wireExportLinks(){
+  const t = document.getElementById('trendExportBtn'); if (t) t.href = buildTrendExportUrl();
+  const c = document.getElementById('classExportBtn'); if (c) c.href = buildClassExportUrl();
+}
+
+const _oldLoadTrendChart = loadTrendChart;
+loadTrendChart = async function(){ await _oldLoadTrendChart(); wireExportLinks(); }
+const _oldLoadClassCompare = loadClassCompare;
+loadClassCompare = async function(){ await _oldLoadClassCompare(); wireExportLinks(); }
+
+window.addEventListener('DOMContentLoaded', wireExportLinks);
+
 }
 
 window.addEventListener('DOMContentLoaded', ()=>{

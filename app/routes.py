@@ -645,13 +645,38 @@ def api_analysis_trends():
         if not arr: continue
         n = len(arr); s = sum(arr); mean = s/n
         var = sum((x-mean)**2 for x in arr)/n
+        # 计算中位数与分位数
+        arr_sorted = sorted(arr)
+        def _median(a):
+            m = len(a)
+            mid = m // 2
+            if m % 2 == 1:
+                return a[mid]
+            else:
+                return (a[mid-1] + a[mid]) / 2.0
+        def _percentile(a, p):
+            if not a: return None
+            k = (p/100.0) * (len(a)-1)
+            f = math.floor(k); c = math.ceil(k)
+            if f == c: return a[int(k)]
+            d0 = a[int(f)] * (c - k)
+            d1 = a[int(c)] * (k - f)
+            return d0 + d1
+
+        # percentile helper end
+        med = _median(arr_sorted)
+        p25 = _percentile(arr_sorted, 25)
+        p75 = _percentile(arr_sorted, 75)
         out.append({
             'exam_name': exam_name,
             'count': n,
             'avg': round(mean,2),
             'max': max(arr),
             'min': min(arr),
-            'std': round(math.sqrt(var),2)
+            'std': round(math.sqrt(var),2),
+            'median': round(med,2) if med is not None else None,
+            'p25': round(p25,2) if p25 is not None else None,
+            'p75': round(p75,2) if p75 is not None else None,
         })
     # 简单按 exam_name 排序（若 exam_name 可解析时间戳可在前端进一步排序）
     out.sort(key=lambda x: x['exam_name'])
@@ -675,6 +700,22 @@ def api_analysis_class_compare():
     agg = defaultdict(list)
     for cls, score in rows:
         agg[cls or '未知班级'].append(float(score))
+
+    med = _median(arr_sorted)
+    p25 = _percentile(arr_sorted, 25)
+    p75 = _percentile(arr_sorted, 75)
+    out.append({
+        'exam_name': exam_name,
+        'count': n,
+        'avg': round(mean,2),
+        'max': max(arr),
+        'min': min(arr),
+        'std': round(math.sqrt(var),2),
+        'median': round(med,2) if med is not None else None,
+        'p25': round(p25,2) if p25 is not None else None,
+        'p75': round(p75,2) if p75 is not None else None,
+    })
+
     out = []
     for cls, arr in agg.items():
         if not arr: continue
@@ -701,6 +742,23 @@ def api_analysis_distribution():
         if bin_width <= 0: bin_width = 10
     except Exception:
         bin_width = 10
+
+@api_bp.route('/analysis/class-compare/export', methods=['GET'])
+@login_required
+def api_analysis_class_compare_export():
+    """导出班级对比数据为 CSV：class_name, avg, count, std"""
+    with current_app.test_request_context(query_string=request.query_string):
+        res = api_analysis_class_compare()
+        data = res.get_json() if hasattr(res, 'get_json') else res.json
+    import csv, io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['class_name','avg','count','std'])
+    for row in data.get('compare', []):
+        writer.writerow([row.get('class_name'), row.get('avg'), row.get('count'), row.get('std')])
+    output.seek(0)
+    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=class_compare.csv'})
+
 
     q = Grade.query.join(Course).join(Student)
     if exam_name:
