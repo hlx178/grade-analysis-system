@@ -1236,12 +1236,27 @@ def api_summary_prefs():
     # GET
     pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
     if not pref:
-        return jsonify({
+        # 迁移旧 key：summary_columns
+        legacy = UserPreference.query.filter_by(user_id=current_user.id, key='summary_columns').first()
+        base = {
             'letter': True, 'class_rank': True, 'grade_rank': True,
             'trend_chrono': False,
             'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True},
             'class_compare': {'only_meets': False, 'sort_by': 'avg'}
-        })
+        }
+        if legacy:
+            try:
+                lv = json.loads(legacy.value or '{}')
+                for k in ['letter','class_rank','grade_rank']:
+                    if k in lv:
+                        base[k] = bool(lv[k])
+            except Exception:
+                pass
+        # 持久化迁移结果
+        pref = UserPreference(user_id=current_user.id, key=key, value=json.dumps(base, ensure_ascii=False))
+        db.session.add(pref)
+        db.session.commit()
+        return jsonify(base)
     try:
         val = json.loads(pref.value)
         # 合并默认值，防止旧数据缺字段
