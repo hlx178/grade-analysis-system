@@ -1179,6 +1179,72 @@ def api_export_task_status(task_id):
     return jsonify(t.to_dict())
 
 
+
+import hmac, hashlib, base64, time
+
+def _sign_download_token(task_id: str, user_id: int, ttl: int) -> str:
+    secret = (current_app.config.get('SECRET_KEY') or 'secret').encode('utf-8')
+    exp = int(time.time()) + int(ttl)
+    payload = f"{task_id}.{user_id}.{exp}".encode('utf-8')
+    sig = hmac.new(secret, payload, hashlib.sha256).digest()
+    token = base64.urlsafe_b64encode(payload + b'.' + sig).decode('utf-8')
+    return token
+
+
+def _verify_download_token(token: str):
+    try:
+        raw = base64.urlsafe_b64decode(token.encode('utf-8'))
+        parts = raw.split(b'.')
+        if len(parts) != 4:
+            return None
+        task_id = parts[0].decode('utf-8')
+        user_id = int(parts[1].decode('utf-8'))
+        exp = int(parts[2].decode('utf-8'))
+        sig = parts[3]
+        secret = (current_app.config.get('SECRET_KEY') or 'secret').encode('utf-8')
+        mac = hmac.new(secret, (parts[0]+b'.'+parts[1]+b'.'+parts[2]), hashlib.sha256).digest()
+        if not hmac.compare_digest(mac, sig):
+            return None
+        if time.time() > exp:
+            return None
+        return { 'task_id': task_id, 'user_id': user_id, 'exp': exp }
+    except Exception:
+        return None
+
+
+@api_bp.route('/export/tasks/<task_id>/signed-url', methods=['GET'])
+@login_required
+def api_export_task_signed_url(task_id):
+    # 仅管理员或创建者可生成
+    job = ExportJob.query.get(task_id)
+    if not job:
+        return jsonify({'error':'not found'}), 404
+    if current_user.role != 'admin' and job.user_id != current_user.id:
+        return jsonify({'error':'forbidden'}), 403
+    ttl = current_app.config.get('DOWNLOAD_LINK_TTL_SECONDS', 3600)
+    token = _sign_download_token(task_id, job.user_id, ttl)
+    url = url_for('api.api_export_task_download_signed', token=token, _external=True)
+    return jsonify({ 'url': url, 'ttl_seconds': ttl })
+
+
+@api_bp.route('/export/download', methods=['GET'])
+@login_required
+def api_export_task_download_signed():
+    token = request.args.get('token')
+    data = _verify_download_token(token or '')
+    if not data:
+        return jsonify({'error':'invalid_or_expired'}), 400
+    task_id = data['task_id']; user_id = data['user_id']
+    # 校验 DB 与文件存在
+    job = ExportJob.query.get(task_id)
+    if not job:
+        return jsonify({'error':'not found'}), 404
+    if current_user.role != 'admin' and user_id != current_user.id:
+        return jsonify({'error':'forbidden'}), 403
+    if job.status != 'completed' or not job.file_path or not os.path.isfile(job.file_path):
+        return jsonify({'error':'not ready'}), 400
+    return send_file(job.file_path, as_attachment=True)
+
 @api_bp.route('/export/tasks/<task_id>/download', methods=['GET'])
 @login_required
 def api_export_task_download(task_id):

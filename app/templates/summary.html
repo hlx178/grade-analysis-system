@@ -392,7 +392,7 @@ async function loadMyTasks(page=1){
     const tr = document.createElement('tr');
     tr.dataset.id = it.task_id;
     _taskIds.add(it.task_id);
-    tr.innerHTML = `<td>${it.created_at||''}</td><td>${it.task_id}</td><td>${it.status}</td><td>${it.progress||0}%</td><td>${it.filename||''}</td><td>${it.file_size||''}</td><td>${it.summary||''}</td><td>${it.file_ready?`<a href="/api/export/tasks/${it.task_id}/download" class="btn btn-sm btn-success me-1">下载</a>`:''}<button class="btn btn-sm btn-outline-danger" onclick="deleteTask('${it.task_id}')">删除</button></td>`;
+    tr.innerHTML = `<td><input type=\"checkbox\" class=\"task-cb\"></td><td>${it.created_at||''}</td><td>${it.task_id}</td><td>${it.status}</td><td>${it.progress||0}%</td><td>${it.filename||''}</td><td>${it.file_size||''}</td><td>${it.summary||''}</td><td>${it.file_ready?`<a href=\"/api/export/tasks/${it.task_id}/download\" class=\"btn btn-sm btn-success me-1\">下载</a><button class=\"btn btn-sm btn-outline-primary me-1\" onclick=\"copySignedUrl('${it.task_id}')\">签名链接</button>`:''}<button class=\"btn btn-sm btn-outline-danger\" onclick=\"deleteTask('${it.task_id}')\">删除</button></td>`;
     if (it.status === 'completed'){ tr.classList.add('table-success'); }
     else if (it.status === 'failed'){ tr.classList.add('table-danger'); }
     tbody.appendChild(tr);
@@ -402,6 +402,15 @@ async function loadMyTasks(page=1){
   renderTaskPager(data.total, data.page, data.page_size);
 
 function toggleTaskAll(cb){
+
+async function copySignedUrl(id){
+  const r = await fetch(`/api/export/tasks/${id}/signed-url`);
+  if (!r.ok){ alert('生成签名链接失败'); return; }
+  const data = await r.json();
+  await navigator.clipboard.writeText(data.url);
+  alert('已复制签名下载链接（有效期秒）：' + data.ttl_seconds);
+}
+
   document.querySelectorAll('#exportTasksTable tbody .task-cb').forEach(x=> x.checked = cb.checked);
 }
 
