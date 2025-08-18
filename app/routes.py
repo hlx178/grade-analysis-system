@@ -683,6 +683,26 @@ def api_analysis_trends():
     return jsonify({'trends': out})
 
 
+@api_bp.route('/analysis/trends/export', methods=['GET'])
+@login_required
+def api_analysis_trends_export():
+    """导出趋势数据为 CSV：exam_name, count, avg, max, min, std, median, p25, p75"""
+    with current_app.test_request_context(query_string=request.query_string):
+        res = api_analysis_trends()
+        data = res.get_json() if hasattr(res, 'get_json') else res.json
+    import csv, io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['exam_name','count','avg','max','min','std','median','p25','p75'])
+    for row in data.get('trends', []):
+        writer.writerow([
+            row.get('exam_name'), row.get('count'), row.get('avg'), row.get('max'),
+            row.get('min'), row.get('std'), row.get('median'), row.get('p25'), row.get('p75')
+        ])
+    output.seek(0)
+    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=trends.csv'})
+
+
 @api_bp.route('/analysis/class-compare', methods=['GET'])
 @login_required
 def api_analysis_class_compare():
@@ -744,6 +764,27 @@ def api_analysis_distribution():
         bin_width = 10
 
 @api_bp.route('/analysis/class-compare/export', methods=['GET'])
+
+@api_bp.route('/analysis/distribution/export', methods=['GET'])
+@login_required
+def api_analysis_distribution_export():
+    """导出直方图分布为 CSV：label,start,end,count + summary 行"""
+    with current_app.test_request_context(query_string=request.query_string):
+        res = api_analysis_distribution()
+        data = res.get_json() if hasattr(res, 'get_json') else res.json
+    import csv, io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['label','start','end','count'])
+    for b in data.get('bins', []):
+        writer.writerow([b.get('label'), b.get('start'), b.get('end'), b.get('count')])
+    # 空行 + summary
+    writer.writerow([])
+    s = data.get('summary') or {}
+    writer.writerow(['summary', 'count', s.get('count'), 'avg', s.get('avg'), 'max', s.get('max'), 'min', s.get('min'), 'std', s.get('std')])
+    output.seek(0)
+    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=distribution.csv'})
+
 @login_required
 def api_analysis_class_compare_export():
     """导出班级对比数据为 CSV：class_name, avg, count, std"""

@@ -185,7 +185,10 @@
         <div class="d-flex align-items-center gap-2">
           <input id="distExam" class="form-control form-control-sm" style="width:180px" placeholder="考试名称(可选)">
           <input id="distBin" type="number" class="form-control form-control-sm" style="width:100px" placeholder="分箱宽度" value="10">
-          <button class="btn btn-sm btn-outline-secondary" onclick="loadDistribution()">刷新</button>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" onclick="loadDistribution()">刷新</button>
+            <a class="btn btn-outline-primary" id="distExportBtn" href="#">导出CSV</a>
+          </div>
         </div>
       </div>
       <div class="card-body"><canvas id="distChart" height="120"></canvas></div>
@@ -669,6 +672,23 @@ function attachFilter(inputId, selectId){
     });
   });
 }
+
+
+function buildDistExportUrl(){
+  const subject_code = document.getElementById('subjectCode').value;
+  const bin_width = Number(document.getElementById('distBin').value)||10;
+  const exam_name = document.getElementById('distExam').value.trim();
+  const p = new URLSearchParams({ subject_code, bin_width });
+  if (exam_name) p.set('exam_name', exam_name);
+  return '/api/analysis/distribution/export?'+p.toString();
+}
+(function(){
+  const oldWire = wireExportLinks;
+  window.wireExportLinks = function(){
+    oldWire && oldWire();
+    const d = document.getElementById('distExportBtn'); if (d) d.href = buildDistExportUrl();
+  }
+})();
 
 window.addEventListener('DOMContentLoaded', ()=>{
   loadOptions(); loadPrefs();
