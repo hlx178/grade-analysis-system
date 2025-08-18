@@ -159,7 +159,32 @@
           <a class="btn btn-outline-primary" id="trendExportBtn" href="#">导出CSV</a>
         </div>
       </div>
-      <div class="card-body"><canvas id="trendChart" height="140"></canvas></div>
+      <div class="card-body">
+        <canvas id="trendChart" height="140"></canvas>
+        <div class="mt-2 small">
+          <span class="me-2">显示：</span>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="tgAvg" checked>
+            <label class="form-check-label" for="tgAvg">均分</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="tgMed" checked>
+            <label class="form-check-label" for="tgMed">中位数</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="tgBand" checked>
+            <label class="form-check-label" for="tgBand">P25/P75 阴影</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="tgMax" checked>
+            <label class="form-check-label" for="tgMax">最高</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="tgMin" checked>
+            <label class="form-check-label" for="tgMin">最低</label>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <div class="col-md-6">
@@ -553,16 +578,27 @@ async function loadTrendChart(){
   const maxs = data.trends.map(x=>x.max);
   const mins = data.trends.map(x=>x.min);
   const stds = data.trends.map(x=>x.std);
+  const showAvg = document.getElementById('tgAvg')?.checked !== false;
+  const showMed = document.getElementById('tgMed')?.checked !== false;
+  const showBand = document.getElementById('tgBand')?.checked !== false;
+  const showMax = document.getElementById('tgMax')?.checked !== false;
+  const showMin = document.getElementById('tgMin')?.checked !== false;
+
+  const datasets = [];
+  if (showAvg) datasets.push({ label: '均分', data: avgs, borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.1)' });
+  if (showMed) datasets.push({ label: '中位数', data: meds, borderColor: '#0dcaf0', borderDash:[2,2] });
+  if (showBand){
+    // 先压入 P25 作为下边界
+    datasets.push({ label: 'P25', data: p25, borderColor: 'rgba(108,117,125,0.0)' });
+    // 再压入 P75，并将其填充到前一个数据集（即 P25）
+    datasets.push({ label: 'P25-P75', data: p75, borderColor: 'rgba(111,66,193,0.0)', backgroundColor: 'rgba(111,66,193,0.15)', fill: '-1' });
+  }
+  if (showMax) datasets.push({ label: '最高', data: maxs, borderColor: '#198754', borderDash:[4,3] });
+  if (showMin) datasets.push({ label: '最低', data: mins, borderColor: '#dc3545', borderDash:[4,3] });
+
   _trendChart = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets: [
-      { label: '均分', data: avgs, borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.1)' },
-      { label: '中位数', data: meds, borderColor: '#0dcaf0', borderDash:[2,2] },
-      { label: 'P75', data: p75, borderColor: '#6f42c1', borderDash:[6,3] },
-      { label: 'P25', data: p25, borderColor: '#6c757d', borderDash:[6,3] },
-      { label: '最高', data: maxs, borderColor: '#198754', borderDash:[4,3] },
-      { label: '最低', data: mins, borderColor: '#dc3545', borderDash:[4,3] }
-    ]},
+    data: { labels, datasets },
     options: { responsive: true, scales: { y: { beginAtZero: true }}, plugins:{
       tooltip:{ callbacks:{
         afterBody(items){
@@ -570,6 +606,12 @@ async function loadTrendChart(){
         }
       }}
     }}
+  });
+
+  // 勾选联动
+  ['tgAvg','tgMed','tgBand','tgMax','tgMin'].forEach(id=>{
+    const el = document.getElementById(id); if (!el) return;
+    el.onchange = ()=> loadTrendChart();
   });
 }
 
