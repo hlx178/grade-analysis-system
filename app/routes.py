@@ -619,6 +619,69 @@ def api_analysis_ranking():
     return jsonify({"rankings": rankings})
 
 
+@api_bp.route('/analysis/trends', methods=['GET'])
+@login_required
+def api_analysis_trends():
+    """按考试名称时间序列统计每次考试的平均分、最高分、最低分、标准差，可按学科/年级/班级过滤"""
+    subject_code = request.args.get('subject_code')
+    grade_level = request.args.get('grade_level')
+    class_name = request.args.get('class_name')
+    q = Grade.query.join(Course).join(Student)
+    if subject_code:
+        q = q.filter(Course.code == subject_code)
+    if grade_level:
+        q = q.filter(Student.grade_level == grade_level)
+    if class_name:
+        q = q.filter(Student.class_name == class_name)
+    # 聚合到 exam_name
+    rows = q.with_entities(Grade.exam_name, Grade.score).all()
+    from collections import defaultdict
+    buckets = defaultdict(list)
+    for exam_name, score in rows:
+        buckets[exam_name or 'default'].append(float(score))
+    import math
+    out = []
+    for exam_name, arr in buckets.items():
+        if not arr: continue
+        n = len(arr); s = sum(arr); mean = s/n
+        var = sum((x-mean)**2 for x in arr)/n
+        out.append({
+            'exam_name': exam_name,
+            'count': n,
+            'avg': round(mean,2),
+            'max': max(arr),
+            'min': min(arr),
+            'std': round(math.sqrt(var),2)
+        })
+    # 简单按 exam_name 排序（若 exam_name 可解析时间戳可在前端进一步排序）
+    out.sort(key=lambda x: x['exam_name'])
+    return jsonify({'trends': out})
+
+
+@api_bp.route('/analysis/class-compare', methods=['GET'])
+@login_required
+def api_analysis_class_compare():
+    """按考试名称+学科维度，对各班的均分进行对比"""
+    exam_name = request.args.get('exam_name')
+    subject_code = request.args.get('subject_code')
+    q = Grade.query.join(Course).join(Student)
+    if exam_name:
+        q = q.filter(Grade.exam_name == exam_name)
+    if subject_code:
+        q = q.filter(Course.code == subject_code)
+    rows = q.with_entities(Student.class_name, Grade.score).all()
+    from collections import defaultdict
+    agg = defaultdict(list)
+    for cls, score in rows:
+        agg[cls or '未知班级'].append(float(score))
+    out = []
+    for cls, arr in agg.items():
+        if not arr: continue
+        out.append({'class_name': cls, 'avg': round(sum(arr)/len(arr),2), 'count': len(arr)})
+    out.sort(key=lambda x: x['avg'], reverse=True)
+    return jsonify({'compare': out})
+
+
 # 等级规则：查询
 @api_bp.route("/grade-bands", methods=["GET"])
 @login_required
@@ -716,25 +779,53 @@ def api_grade_bands_preview():
         query = query.join(Student).filter(Student.class_name == class_name)
     grades = query.all()
 
-    # 应用规则生成分布（仅支持range/percentile两类）
+    # 应用规则生成分布（支持 range 与 percentile）
     from collections import defaultdict
-    dist = defaultdict(int)
+    by_key_scores = defaultdict(list)
     for g in grades:
         subject_code = g.course.code
         key = (g.exam_name or 'default', subject_code)
+        by_key_scores[key].append(float(g.score))
+
+    dist = defaultdict(int)
+    total = 0
+    for key, scores in by_key_scores.items():
         rule = tmp_rules.get(key)
-        s = g.score
-        if rule and rule.get('method') == 'range':
+        if not rule:
+            continue
+        n = len(scores)
+        total += n
+        if rule.get('method') == 'range':
             a = rule.get('a_min', 80); b = rule.get('b_min', 60); c = rule.get('c_min', 40); d = rule.get('d_min', 20)
-            if s >= a: dist['A'] += 1
-            elif s >= b: dist['B'] += 1
-            elif s >= c: dist['C'] += 1
-            elif s >= d: dist['D'] += 1
-            else: dist['E'] += 1
+            for s in scores:
+                if s >= a: dist['A'] += 1
+                elif s >= b: dist['B'] += 1
+                elif s >= c: dist['C'] += 1
+                elif s >= d: dist['D'] += 1
+                else: dist['E'] += 1
+        elif rule.get('method') == 'percentile':
+            # 基于排名按百分比分桶（A->E），不依赖具体分数阈值
+            ap, bp, cp, dp, ep = [rule.get(k, 0) for k in ['a_pct','b_pct','c_pct','d_pct','e_pct']]
+            # 防御：归一化到100
+            totp = (ap or 0)+(bp or 0)+(cp or 0)+(dp or 0)+(ep or 0)
+            if not totp:
+                continue
+            from math import ceil
+            scores_sorted = sorted(scores, reverse=True)
+            nA = ceil(n * (ap/100.0))
+            nB = ceil(n * (bp/100.0))
+            nC = ceil(n * (cp/100.0))
+            nD = ceil(n * (dp/100.0))
+            # E 为剩余
+            for i, _ in enumerate(scores_sorted, 1):
+                if i <= nA: dist['A'] += 1
+                elif i <= nA+nB: dist['B'] += 1
+                elif i <= nA+nB+nC: dist['C'] += 1
+                elif i <= nA+nB+nC+nD: dist['D'] += 1
+                else: dist['E'] += 1
         else:
-            # 对于percentile/未知：统一在前端给出说明，本接口可选择不处理或返回占位
-            pass
-    return jsonify({"distribution": dict(dist), "total": len(grades)})
+            continue
+    return jsonify({"distribution": dict(dist), "total": total})
 
 
 # 汇总 API
