@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% block title %}成绩管理 - 成绩分析系统{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3>成绩列表</h3>
+  <a href="#" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addGradeModal">新增成绩</a>
+</div>
+<table class="table table-hover">
+  <thead>
+    <tr>
+      <th>学号</th>
+      <th>姓名</th>
+      <th>课程</th>
+      <th>成绩</th>
+      <th>等级</th>
+      <th>考试类型</th>
+      <th>日期</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for g in grades %}
+    <tr>
+      <td>{{ g.student.student_id }}</td>
+      <td>{{ g.student.name }}</td>
+      <td>{{ g.course.name }}</td>
+      <td>{{ g.score }}</td>
+      <td>{{ g.letter_grade }}</td>
+      <td>{{ g.exam_type }}</td>
+      <td>{{ g.exam_date }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<!-- 新增成绩模态框 -->
+<div class="modal fade" id="addGradeModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">新增成绩</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="gradeForm">
+          <div class="mb-3">
+            <label class="form-label">学生ID</label>
+            <input type="number" class="form-control" name="student_id" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">课程ID</label>
+            <input type="number" class="form-control" name="course_id" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">成绩</label>
+            <input type="number" class="form-control" name="score" step="0.1" min="0" max="100" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">考试类型</label>
+            <select class="form-select" name="exam_type">
+              <option value="final">期末</option>
+              <option value="midterm">期中</option>
+              <option value="quiz">小测</option>
+              <option value="assignment">作业</option>
+            </select>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" onclick="submitGrade()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function submitGrade() {
+  const form = document.getElementById('gradeForm');
+  const formData = new FormData(form);
+  const payload = Object.fromEntries(formData.entries());
+  const res = await fetch('/api/grades', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (res.ok) {
+    location.reload();
+  } else {
+    const err = await res.json();
+    alert('保存失败: ' + (err.error || '未知错误'));
+  }
+}
+</script>
+{% endblock %}

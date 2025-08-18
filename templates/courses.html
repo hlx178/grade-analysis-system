@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% block title %}课程管理 - 成绩分析系统{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3>课程列表</h3>
+  <a href="#" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCourseModal">新增课程</a>
+</div>
+<table class="table table-hover">
+  <thead>
+    <tr>
+      <th>代码</th>
+      <th>名称</th>
+      <th>描述</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for c in courses %}
+    <tr>
+      <td>{{ c.code }}</td>
+      <td>{{ c.name }}</td>
+      <td>{{ c.description }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<!-- 新增课程模态框 -->
+<div class="modal fade" id="addCourseModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">新增课程</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="courseForm">
+          <div class="mb-3">
+            <label class="form-label">代码</label>
+            <input type="text" class="form-control" name="code" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">名称</label>
+            <input type="text" class="form-control" name="name" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">描述</label>
+            <textarea class="form-control" name="description"></textarea>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" onclick="submitCourse()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function submitCourse() {
+  const form = document.getElementById('courseForm');
+  const formData = new FormData(form);
+  const payload = Object.fromEntries(formData.entries());
+  const res = await fetch('/api/courses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (res.ok) {
+    location.reload();
+  } else {
+    alert('保存失败');
+  }
+}
+</script>
+{% endblock %}

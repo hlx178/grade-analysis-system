@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}仪表盘 - 成绩分析系统{% endblock %}
+{% block content %}
+<h3>课程统计</h3>
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>课程代码</th>
+      <th>课程名称</th>
+      <th>成绩条数</th>
+      <th>平均分</th>
+      <th>最高分</th>
+      <th>最低分</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for item in course_stats %}
+    <tr>
+      <td>{{ item.course_code }}</td>
+      <td>{{ item.course_name }}</td>
+      <td>{{ item.total_students }}</td>
+      <td>{{ item.avg_score }}</td>
+      <td>{{ item.max_score }}</td>
+      <td>{{ item.min_score }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
