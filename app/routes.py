@@ -1205,9 +1205,12 @@ def api_export_task_download(task_id):
 def api_export_my_tasks():
     page = request.args.get('page', type=int) or 1
     page_size = min(max(request.args.get('page_size', type=int) or 20, 1), 200)
+    status = request.args.get('status')  # pending|running|completed|failed
     q = ExportJob.query
     if current_user.role != 'admin':
         q = q.filter(ExportJob.user_id == current_user.id)
+    if status:
+        q = q.filter(ExportJob.status == status)
     total = q.count()
     rows = q.order_by(ExportJob.created_at.desc()).offset((page-1)*page_size).limit(page_size).all()
     def to_obj(j):

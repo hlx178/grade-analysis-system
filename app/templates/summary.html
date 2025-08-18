@@ -102,7 +102,18 @@
             <label class="form-label">每页</label>
             <input id="taskPageSize" type="number" class="form-control" style="width:120px" value="10">
           </div>
+          <div>
+            <label class="form-label">状态</label>
+            <select id="taskStatus" class="form-select" style="width:160px">
+              <option value="">全部</option>
+              <option value="pending">pending</option>
+              <option value="running">running</option>
+              <option value="completed">completed</option>
+              <option value="failed">failed</option>
+            </select>
+          </div>
           <button class="btn btn-outline-primary" onclick="loadMyTasks(1)">加载我的任务</button>
+          <button class="btn btn-outline-secondary" onclick="autoRefreshToggle(this)">开启自动刷新</button>
         </div>
         <table class="table table-sm" id="exportTasksTable">
           <thead><tr><th>创建时间</th><th>任务ID</th><th>状态</th><th>进度</th><th>文件名</th><th>大小</th><th>摘要</th><th>操作</th></tr></thead>
@@ -355,9 +366,21 @@ function notifyDone(task){
 }
 
 
+let _autoTimer = null;
+function autoRefreshToggle(btn){
+  if (_autoTimer){
+    clearInterval(_autoTimer); _autoTimer = null; btn.textContent = '开启自动刷新';
+  } else {
+    _autoTimer = setInterval(()=> loadMyTasks(), 5000); btn.textContent = '关闭自动刷新';
+  }
+}
+
 async function loadMyTasks(page=1){
   const page_size = Number(document.getElementById('taskPageSize').value)||10;
-  const r = await fetch(`/api/export/my-tasks?page=${page}&page_size=${page_size}`);
+  const status = document.getElementById('taskStatus').value;
+  const qs = new URLSearchParams({ page, page_size });
+  if (status) qs.set('status', status);
+  const r = await fetch(`/api/export/my-tasks?${qs.toString()}`);
   if (!r.ok) return;
   const data = await r.json();
   const tbody = document.querySelector('#exportTasksTable tbody');
