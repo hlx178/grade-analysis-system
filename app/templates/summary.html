@@ -725,6 +725,9 @@ async function loadClassCompare(){
   }
   const labels = data.compare.map(x=>x.class_name);
   const avgs = data.compare.map(x=>x.avg);
+  const meets = data.compare.map(x=>x.meets_threshold !== false);
+  const bgColors = meets.map(ok => ok ? '#198754' : 'rgba(220,53,69,0.3)');
+  const borderColors = meets.map(ok => ok ? '#198754' : '#dc3545');
 
 let _distChart;
 async function loadDistribution(){
@@ -779,10 +782,10 @@ async function loadDistribution(){
   if (_classChart) _classChart.destroy();
   _classChart = new Chart(ctx, {
     type: 'bar',
-    data: { labels, datasets: [{ label: '均分', data: avgs, backgroundColor: '#198754' }]},
+    data: { labels, datasets: [{ label: '均分', data: avgs, backgroundColor: bgColors, borderColor: borderColors, borderWidth: 1 }]},
     options: { responsive: true, scales: { y: { beginAtZero: true }}, plugins:{
       tooltip:{ callbacks:{
-        afterBody(items){ const i = items[0].dataIndex; return '人数:'+counts[i]+' 标准差:'+stds[i]; }
+        afterBody(items){ const i = items[0].dataIndex; const flag = meets[i] ? '' : '（低于阈值）'; return '人数:'+counts[i]+' 标准差:'+stds[i] + ' ' + flag; }
       }}
     }}
   });

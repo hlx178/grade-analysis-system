@@ -737,17 +737,14 @@ def api_analysis_class_compare():
         if not arr: continue
         n = len(arr); mean = sum(arr)/n
         var = sum((x-mean)**2 for x in arr)/n
-        out.append({'class_name': cls, 'avg': round(mean,2), 'count': n, 'std': round(math.sqrt(var),2)})
+        meets = (min_count or 0) <= 0 or n >= int(min_count)
+        out.append({'class_name': cls, 'avg': round(mean,2), 'count': n, 'std': round(math.sqrt(var),2), 'meets_threshold': bool(meets)})
     total_classes = len(out)
-    filtered_out = 0
-    # 人数阈值过滤
-    if min_count and min_count > 0:
-        filtered_out = sum(1 for o in out if o['count'] < min_count)
-        out = [o for o in out if o['count'] >= min_count]
+    below_threshold = sum(1 for o in out if not o['meets_threshold']) if (min_count and min_count > 0) else 0
     out.sort(key=lambda x: x['avg'], reverse=True)
     if top_n and top_n > 0:
         out = out[:top_n]
-    meta = {'min_count': min_count or 0, 'total': total_classes, 'filtered_out': filtered_out, 'returned': len(out)}
+    meta = {'min_count': int(min_count or 0), 'total': total_classes, 'below_threshold': below_threshold, 'filtered_out': below_threshold, 'returned': len(out)}
     return jsonify({'compare': out, 'meta': meta})
 
 @api_bp.route('/analysis/distribution', methods=['GET'])
