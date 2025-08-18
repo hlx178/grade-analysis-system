@@ -229,6 +229,8 @@
           </div>
         </div>
       </div>
+      <div class="px-2 text-muted small" id="compareMeta"></div>
+
       <div class="card-body"><canvas id="classCompareChart" height="140"></canvas></div>
     </div>
   </div>
@@ -712,6 +714,15 @@ async function loadClassCompare(){
   const r = await fetch('/api/analysis/class-compare?'+p.toString());
   if (!r.ok) return;
   const data = await r.json();
+  const metaDiv = document.getElementById('compareMeta');
+  if (metaDiv && data.meta){
+    const m = data.meta;
+    if (m.min_count && m.min_count>0){
+      metaDiv.textContent = `当前人数阈值: ${m.min_count}；原始班级数: ${m.total}；被过滤: ${m.filtered_out}；返回: ${m.returned}`;
+    }else{
+      metaDiv.textContent = `班级数: ${m.total}；返回: ${m.returned}`;
+    }
+  }
   const labels = data.compare.map(x=>x.class_name);
   const avgs = data.compare.map(x=>x.avg);
 
