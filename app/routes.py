@@ -11,7 +11,7 @@ from flask import Blueprint, current_app, flash, jsonify, redirect, render_templ
 from flask_login import login_required, login_user, logout_user
 
 from app import db
-from app.models import Course, Grade, Student, User, ExamScheme
+from app.models import Course, Grade, Student, User, ExamScheme, GradeBandRule
 from app.utils import (
     SUBJECTS,
     TOTAL_SUBJECT,
@@ -100,6 +100,13 @@ def exam_schemes_page():
     # 初始显示常规考试，若无则创建默认方案
     ensure_default_exam_scheme("regular")
     return render_template("exam_schemes.html")
+
+
+@main_bp.route("/grade-bands")
+@login_required
+def grade_bands_page():
+    courses = Course.query.order_by(Course.code).all()
+    return render_template("grade_bands.html", courses=courses, subjects=SUBJECTS + [TOTAL_SUBJECT])
 
 
 @auth_bp.route("/logout")
@@ -500,6 +507,109 @@ def api_analysis_ranking():
     class_name = request.args.get("class_name")
     rankings = get_student_ranking(course_id=course_id, class_name=class_name)
     return jsonify({"rankings": rankings})
+
+
+# 等级规则：查询
+@api_bp.route("/grade-bands", methods=["GET"])
+@login_required
+def api_grade_bands_get():
+    exam_name = request.args.get("exam_name") or "default"
+    rules = GradeBandRule.query.filter_by(exam_name=exam_name).all()
+    data = []
+    for r in rules:
+        data.append({
+            "id": r.id,
+            "exam_name": r.exam_name,
+            "subject_code": r.subject_code,
+            "method": r.method,
+            "a_min": r.a_min, "b_min": r.b_min, "c_min": r.c_min, "d_min": r.d_min,
+            "a_pct": r.a_pct, "b_pct": r.b_pct, "c_pct": r.c_pct, "d_pct": r.d_pct, "e_pct": r.e_pct,
+        })
+    return jsonify(data)
+
+
+# 等级规则：批量保存（覆盖写）
+@api_bp.route("/grade-bands/bulk", methods=["PUT"])
+@login_required
+def api_grade_bands_bulk_put():
+    payload = request.get_json(force=True)
+    exam_name = payload.get("exam_name") or "default"
+    items = payload.get("items") or []
+    # 基本校验
+    for it in items:
+        method = it.get("method")
+        if method == 'range':
+            a = it.get("a_min"); b = it.get("b_min"); c = it.get("c_min"); d = it.get("d_min")
+            # 允许缺省，缺省时沿用默认 80/60/40/20
+            # 若提供了必须满足顺序
+            seq = [x for x in [a,b,c,d] if x is not None]
+            if len(seq) == 4 and not (a >= b >= c >= d):
+                return jsonify({"error": "Range thresholds must satisfy A>=B>=C>=D"}), 400
+        elif method == 'percentile':
+            ap, bp, cp, dp, ep = [it.get(k) for k in ["a_pct","b_pct","c_pct","d_pct","e_pct"]]
+            if None in [ap,bp,cp,dp,ep]:
+                return jsonify({"error": "Percentile requires all five percentages"}), 400
+            total = ap + bp + cp + dp + ep
+            if round(total) != 100:
+                return jsonify({"error": "Percentile sums must be 100"}), 400
+        else:
+            return jsonify({"error": "Unknown method"}), 400
+
+    # 清理旧规则并写入新规则
+    GradeBandRule.query.filter_by(exam_name=exam_name).delete()
+    for it in items:
+        rule = GradeBandRule(
+            exam_name=exam_name,
+            subject_code=it.get("subject_code"),
+            method=it.get("method"),
+            a_min=it.get("a_min"), b_min=it.get("b_min"), c_min=it.get("c_min"), d_min=it.get("d_min"),
+            a_pct=it.get("a_pct"), b_pct=it.get("b_pct"), c_pct=it.get("c_pct"), d_pct=it.get("d_pct"), e_pct=it.get("e_pct"),
+        )
+        db.session.add(rule)
+    db.session.commit()
+    return jsonify({"message": "saved", "count": len(items)})
+
+
+# 等级规则：预览（不落库）
+@api_bp.route("/grade-bands/preview", methods=["POST"])
+@login_required
+def api_grade_bands_preview():
+    payload = request.get_json(force=True)
+    items = payload.get("items") or []
+    course_id = payload.get("course_id")
+    class_name = payload.get("class_name")
+    # 构造一个临时的规则索引
+    tmp_rules = {}
+    for it in items:
+        tmp_rules[(payload.get("exam_name") or "default", it.get("subject_code"))] = it
+
+    # 准备数据集
+    query = Grade.query
+    if course_id:
+        query = query.filter(Grade.course_id == course_id)
+    if class_name:
+        query = query.join(Student).filter(Student.class_name == class_name)
+    grades = query.all()
+
+    # 应用规则生成分布（仅支持range/percentile两类）
+    from collections import defaultdict
+    dist = defaultdict(int)
+    for g in grades:
+        subject_code = g.course.code
+        key = (g.exam_name or 'default', subject_code)
+        rule = tmp_rules.get(key)
+        s = g.score
+        if rule and rule.get('method') == 'range':
+            a = rule.get('a_min', 80); b = rule.get('b_min', 60); c = rule.get('c_min', 40); d = rule.get('d_min', 20)
+            if s >= a: dist['A'] += 1
+            elif s >= b: dist['B'] += 1
+            elif s >= c: dist['C'] += 1
+            elif s >= d: dist['D'] += 1
+            else: dist['E'] += 1
+        else:
+            # 对于percentile/未知：统一在前端给出说明，本接口可选择不处理或返回占位
+            pass
+    return jsonify({"distribution": dict(dist), "total": len(grades)})
 
 
 # ExamScheme CRUD
