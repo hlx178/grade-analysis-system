@@ -712,11 +712,13 @@ def api_analysis_class_compare():
       - subject_code（默认 TOTAL 时请显式传递）
       - grade_level（可选）
       - top_n（可选，>0 时返回前 N 个均分最高的班级）
+      - min_count（可选，>0 时剔除样本数小于该阈值的班级）
     """
     exam_name = request.args.get('exam_name')
     subject_code = request.args.get('subject_code')
     grade_level = request.args.get('grade_level')
     top_n = request.args.get('top_n', type=int)
+    min_count = request.args.get('min_count', type=int)
     q = Grade.query.join(Course).join(Student)
     if exam_name:
         q = q.filter(Grade.exam_name == exam_name)
@@ -736,6 +738,9 @@ def api_analysis_class_compare():
         n = len(arr); mean = sum(arr)/n
         var = sum((x-mean)**2 for x in arr)/n
         out.append({'class_name': cls, 'avg': round(mean,2), 'count': n, 'std': round(math.sqrt(var),2)})
+    # 人数阈值过滤
+    if min_count and min_count > 0:
+        out = [o for o in out if o['count'] >= min_count]
     out.sort(key=lambda x: x['avg'], reverse=True)
     if top_n and top_n > 0:
         out = out[:top_n]
