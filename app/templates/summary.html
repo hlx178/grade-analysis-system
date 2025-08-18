@@ -159,6 +159,11 @@
           <a class="btn btn-outline-primary" id="trendExportBtn" href="#">导出CSV</a>
         </div>
       </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="trendChrono">
+            <label class="form-check-label" for="trendChrono">按时间排序</label>
+          </div>
+
       <div class="card-body">
         <canvas id="trendChart" height="140"></canvas>
         <div class="mt-2 small">
@@ -229,7 +234,7 @@
         <span>成绩分布直方图</span>
         <div class="d-flex align-items-center gap-2">
           <input id="distExam" class="form-control form-control-sm" style="width:180px" placeholder="考试名称(可选)">
-          <input id="distBin" type="number" class="form-control form-control-sm" style="width:100px" placeholder="分箱宽度" value="10">
+          <input id="distBin" type="text" class="form-control form-control-sm" style="width:120px" placeholder="分箱宽度(数值或auto)" value="auto">
           <div class="btn-group btn-group-sm">
             <button class="btn btn-outline-secondary" onclick="loadDistribution()">刷新</button>
             <a class="btn btn-outline-primary" id="distExportBtn" href="#">导出CSV</a>
@@ -588,7 +593,32 @@ async function loadTrendChart(){
   const r = await fetch('/api/analysis/trends?'+p.toString());
   if (!r.ok) return;
   const data = await r.json();
-  const labels = data.trends.map(x=>x.exam_name);
+  let labels = data.trends.map(x=>x.exam_name);
+  // 按时间排序（尝试解析日期/学期），失败时使用原顺序
+  if (document.getElementById('trendChrono')?.checked){
+    const parseDate = (s)=>{
+      if (!s) return null;
+      // 常见格式 YYYY-MM-DD 或 YYYYMMDD
+      const m1 = s.match(/(\d{4})[-/]?(\d{2})[-/]?(\d{2})/);
+      if (m1) return new Date(`${m1[1]}-${m1[2]}-${m1[3]}`);
+      // 学期关键字：2024上/2024下/2024春/2024秋/2024S/2024F
+      const m2 = s.match(/(\d{4}).*?(上|下|春|秋|S|F)/i);
+      if (m2){
+        const y = Number(m2[1]); const half = /下|秋|F/i.test(m2[2]) ? 10 : 3; // 10月或3月
+        return new Date(`${y}-${String(half).padStart(2,'0')}-01`);
+      }
+      return null;
+    };
+    const items = data.trends.map((x,i)=>({i, x, d: parseDate(x.exam_name)}));
+    items.sort((a,b)=>{
+      if (a.d && b.d) return a.d - b.d;
+      if (a.d && !b.d) return -1;
+      if (!a.d && b.d) return 1;
+      return String(a.x.exam_name).localeCompare(String(b.x.exam_name));
+    });
+    data.trends = items.map(it=>it.x);
+    labels = data.trends.map(x=>x.exam_name);
+  }
   const avgs = data.trends.map(x=>x.avg);
   const meds = data.trends.map(x=>x.median);
   const p25 = data.trends.map(x=>x.p25);
@@ -654,7 +684,8 @@ let _distChart;
 async function loadDistribution(){
   const subject_code = document.getElementById('subjectCode').value;
   const exam_name = document.getElementById('distExam').value.trim();
-  const bin_width = Number(document.getElementById('distBin').value)||10;
+  const bin_raw = document.getElementById('distBin').value.trim();
+  const bin_width = (bin_raw.toLowerCase?.() === 'auto' || bin_raw === '') ? 'auto' : (Number(bin_raw)||10);
   const usePct = document.getElementById('distPercent')?.checked || false;
   const showCDF = document.getElementById('distCDF')?.checked || false;
   const p = new URLSearchParams({ subject_code, bin_width });
@@ -753,6 +784,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   // 联动刷新：每次查询/分页后可手动调用
   const oldLoadSummary = loadSummary;
   window.loadSummary = async function(){ await oldLoadSummary(); await loadTrendChart(); }
+  const chrono = document.getElementById('trendChrono'); if (chrono) chrono.onchange = ()=> loadTrendChart();
 });
 
   };

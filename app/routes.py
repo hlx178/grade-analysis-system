@@ -756,11 +756,15 @@ def api_analysis_distribution():
     subject_code = request.args.get('subject_code') or 'TOTAL'
     grade_level = request.args.get('grade_level')
     class_name = request.args.get('class_name')
-    try:
-        bin_width = int(request.args.get('bin_width') or 10)
-        if bin_width <= 0: bin_width = 10
-    except Exception:
-        bin_width = 10
+    binw_str = request.args.get('bin_width')
+    bin_width = None  # None 表示自动
+    if binw_str and binw_str.lower() != 'auto':
+        try:
+            bw = int(binw_str)
+            if bw > 0:
+                bin_width = bw
+        except Exception:
+            bin_width = None
 
     q = Grade.query.join(Course).join(Student)
     if exam_name:
@@ -778,6 +782,25 @@ def api_analysis_distribution():
 
     import math
     smin = min(scores); smax = max(scores)
+    # 自动计算 bin 宽度（Freedman–Diaconis; 退化到 Sturges）
+    if not bin_width:
+        arr = sorted(scores)
+        n_s = len(arr)
+        def percentile(a, p):
+            k = (p/100.0) * (len(a)-1)
+            f = math.floor(k); c = math.ceil(k)
+            if f == c: return a[int(k)]
+            return a[f]*(c-k) + a[c]*(k-f)
+        try:
+            iqr = percentile(arr, 75) - percentile(arr, 25)
+            if iqr <= 0:
+                raise ValueError('no iqr')
+            bin_width = max(1, int(round(2 * iqr / (n_s ** (1/3)))))
+        except Exception:
+            # Sturges: k = ceil(log2(n)) + 1
+            import math as _m
+            k = max(1, int(_m.ceil(_m.log2(max(2, n_s))) + 1))
+            bin_width = max(1, int(_m.ceil((smax - smin) / k))) or 10
     start = math.floor(smin / bin_width) * bin_width
     end = math.ceil(smax / bin_width) * bin_width
     if end == start:
