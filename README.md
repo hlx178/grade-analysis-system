@@ -376,3 +376,16 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
   - 将监控对外访问限制在内网或 VPN
 
 🚧 项目正在持续演进，欢迎反馈与贡献。
+
+## 备份与恢复脚本样例
+
+- 数据库（Postgres）
+  - 备份：scripts/backup_postgres.sh [输出目录]
+  - 恢复：scripts/restore_postgres.sh <dump.sql.gz>
+  - 默认连接容器名 gas-db，数据库 gas，用户 gas，密码 gas_pass（可通过环境变量覆盖）
+
+- 文件目录（uploads/ 与 exports/）
+  - 备份：scripts/backup_files.sh [输出目录]
+  - 恢复：scripts/restore_files.sh <files-*.tar.gz>
+
+注意：请将备份文件异地保存并定期校验恢复流程。
