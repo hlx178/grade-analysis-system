@@ -26,17 +26,20 @@ grade-analysis-system/
 │   ├── __init__.py
 │   ├── models.py          # 数据模型
 │   ├── routes.py          # 路由和API
-│   └── utils.py           # 工具函数
-├── static/
-│   ├── css/
-│   ├── js/
-│   └── images/
-├── templates/
-│   ├── base.html
-│   ├── dashboard.html
-│   └── ...
-├── tests/
-├── requirements.txt
+│   ├── utils.py           # 工具函数
+│   └── templates/         # 模板（Flask默认位置）
+│       ├── base.html
+│       ├── dashboard.html
+│       ├── students.html
+│       ├── courses.html
+│       ├── grades.html
+│       └── login.html
+├── tests/                 # 测试用例
+├── .github/workflows/ci.yml  # GitHub Actions CI
+├── requirements.txt       # 运行时依赖
+├── requirements-dev.txt   # 开发依赖（black/isort/flake8）
+├── pyproject.toml         # 工具配置（black/isort/pytest）
+├── .flake8                # flake8 配置
 ├── config.py
 ├── run.py
 └── README.md
@@ -46,26 +49,62 @@ grade-analysis-system/
 
 1. 克隆项目
 ```bash
-git clone https://github.com/your-username/grade-analysis-system.git
+git clone https://github.com/hlx178/grade-analysis-system.git
 cd grade-analysis-system
 ```
 
-2. 安装依赖
+2. 创建并激活虚拟环境（推荐）
+- macOS/Linux
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+- Windows PowerShell
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+3. 安装依赖
 ```bash
 pip install -r requirements.txt
 ```
 
-3. 初始化数据库
+4. 初始化数据库
 ```bash
 python run.py init-db
 ```
 
-4. 运行应用
+5. 运行应用
 ```bash
 python run.py
 ```
 
-5. 访问 http://localhost:5000
+6. 访问 http://localhost:5000
+
+## 本地开发与测试
+
+- 运行测试
+```bash
+pytest -q
+```
+
+- 代码规范检查
+```bash
+black --check .
+isort --check-only .
+flake8
+```
+
+- 自动格式化
+```bash
+black .
+isort .
+```
+
+## CI 状态
+
+GitHub Actions 会在每次推送时自动运行 lint 和测试。你可以在仓库的 Actions 标签页查看状态与日志。
 
 ## 开发状态
 
