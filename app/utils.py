@@ -95,13 +95,13 @@ def grade_letter_for(exam_name: str, subject_code: str, score: float) -> str:
             return 'D'
         return 'E'
     # 若没有范围法规则配置且方法为percentile，需要整体分布，单个无法计算，回退默认
-    if score >= 90:
+    if score >= 80:
         return 'A'
-    elif score >= 80:
-        return 'B'
-    elif score >= 70:
-        return 'C'
     elif score >= 60:
+        return 'B'
+    elif score >= 40:
+        return 'C'
+    elif score >= 20:
         return 'D'
     return 'E'
 
@@ -122,10 +122,10 @@ def get_grade_distribution(grades_query, exam_name: str | None = None, subject_c
         rule = GradeBandRule.query.filter_by(exam_name=exam_name, subject_code=subject_code).first()
 
     if rule and rule.method == 'range':
-        a = rule.a_min if rule.a_min is not None else 90
-        b = rule.b_min if rule.b_min is not None else 80
-        c = rule.c_min if rule.c_min is not None else 70
-        d = rule.d_min if rule.d_min is not None else 60
+        a = rule.a_min if rule.a_min is not None else 80
+        b = rule.b_min if rule.b_min is not None else 60
+        c = rule.c_min if rule.c_min is not None else 40
+        d = rule.d_min if rule.d_min is not None else 20
         dist = {"A": 0, "B": 0, "C": 0, "D": 0, "E": 0}
         for s in scores:
             if s >= a:
@@ -169,13 +169,13 @@ def get_grade_distribution(grades_query, exam_name: str | None = None, subject_c
     # 默认规则
     dist = {"A": 0, "B": 0, "C": 0, "D": 0, "E": 0}
     for score in scores:
-        if score >= 90:
+        if score >= 80:
             dist["A"] += 1
-        elif score >= 80:
-            dist["B"] += 1
-        elif score >= 70:
-            dist["C"] += 1
         elif score >= 60:
+            dist["B"] += 1
+        elif score >= 40:
+            dist["C"] += 1
+        elif score >= 20:
             dist["D"] += 1
         else:
             dist["E"] += 1
