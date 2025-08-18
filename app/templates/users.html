@@ -2,6 +2,25 @@
 {% block title %}用户管理 - 成绩分析系统{% endblock %}
 {% block content %}
 <h3>用户管理</h3>
+<div class="d-flex align-items-end gap-2 mb-2">
+  <div>
+    <label class="form-label">搜索</label>
+    <input id="userSearch" class="form-control" placeholder="用户名/邮箱">
+  </div>
+  <div>
+    <label class="form-label">每页</label>
+    <input id="userPageSize" type="number" value="20" class="form-control" style="width:100px">
+  </div>
+  <button class="btn btn-primary" onclick="loadUsers(1)">查询</button>
+  <div class="ms-auto">
+    <div class="btn-group">
+      <button class="btn btn-outline-primary" onclick="batchSave()">批量保存</button>
+      <button class="btn btn-outline-secondary" onclick="exportUsers()">导出CSV</button>
+      <input type="file" id="importUsersFile" accept="text/csv,application/vnd.ms-excel" class="d-none"/>
+      <button class="btn btn-outline-secondary" onclick="document.getElementById('importUsersFile').click()">导入CSV</button>
+    </div>
+  </div>
+</div>
 <table class="table table-bordered" id="userTable">
   <thead>
     <tr>
@@ -16,17 +35,22 @@
   </thead>
   <tbody></tbody>
 </table>
+<div id="pager" class="mt-2"></div>
 {% endblock %}
 {% block scripts %}
 <script>
-async function loadUsers(){
-  const res = await fetch('/api/users');
+async function loadUsers(page=1){
+  const q = document.getElementById('userSearch').value.trim();
+  const page_size = Number(document.getElementById('userPageSize').value) || 20;
+  const p = new URLSearchParams({ q, page, page_size });
+  const res = await fetch('/api/users?' + p.toString());
   if (!res.ok){ alert('加载失败'); return; }
-  const list = await res.json();
+  const data = await res.json();
   const tbody = document.querySelector('#userTable tbody');
   tbody.innerHTML = '';
-  list.forEach(u => {
+  data.items.forEach(u => {
     const tr = document.createElement('tr');
+    tr.dataset.id = u.id;
     tr.innerHTML = `
       <td>${u.id}</td>
       <td>${u.username}</td>
@@ -43,7 +67,83 @@ async function loadUsers(){
       <td><button class="btn btn-sm btn-primary" onclick="saveUser(${u.id}, this)">保存</button></td>`;
     tbody.appendChild(tr);
   });
+  renderPager(data.total, data.page, data.page_size);
 }
+
+function renderPager(total, page, page_size){
+  const totalPages = Math.max(1, Math.ceil(total / page_size));
+  const container = document.getElementById('pager');
+  container.innerHTML = '';
+  const mk = (p,label,dis=false)=>`<button class="btn btn-sm ${dis?'btn-secondary':'btn-outline-secondary'} me-1" ${dis?'disabled':''} onclick="loadUsers(${p})">${label}</button>`;
+  container.innerHTML += mk(1,'首页', page<=1);
+  container.innerHTML += mk(page-1,'上一页', page<=1);
+  container.innerHTML += `<span class="me-2">第 ${page}/${totalPages} 页，共 ${total} 条</span>`;
+  container.innerHTML += mk(page+1,'下一页', page>=totalPages);
+  container.innerHTML += mk(totalPages,'末页', page>=totalPages);
+}
+
+async function batchSave(){
+  const rows = Array.from(document.querySelectorAll('#userTable tbody tr'));
+  for (const tr of rows){
+    const id = tr.dataset.id;
+    await saveUser(id, tr.querySelector('button'));
+  }
+  alert('批量保存完成');
+}
+
+async function exportUsers(){
+  // 简单CSV导出，包含当前页
+  const header = ['id','username','email','role','allowed_grade_levels','allowed_class_names'];
+  const rows = Array.from(document.querySelectorAll('#userTable tbody tr')).map(tr => {
+    const id = tr.children[0].textContent.trim();
+    const username = tr.children[1].textContent.trim();
+    const email = tr.children[2].textContent.trim();
+    const role = tr.querySelector('.role').value;
+    const gl = tr.querySelector('.gl').value;
+    const cl = tr.querySelector('.cl').value;
+    return { id, username, email, role, allowed_grade_levels: gl, allowed_class_names: cl };
+  });
+  const si = [];
+  si.push(header.join(','));
+  rows.forEach(r => {
+    si.push([r.id,r.username,r.email,r.role,r.allowed_grade_levels,r.allowed_class_names].join(','));
+  });
+  const blob = new Blob(["\ufeff" + si.join('\n')], { type:'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'users.csv';
+  a.click();
+}
+
+document.getElementById('importUsersFile').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2){ alert('空文件'); return; }
+  const header = lines[0].split(',');
+  const idx = {
+    id: header.indexOf('id'),
+    username: header.indexOf('username'),
+    email: header.indexOf('email'),
+    role: header.indexOf('role'),
+    gl: header.indexOf('allowed_grade_levels'),
+    cl: header.indexOf('allowed_class_names'),
+  };
+  for (let i=1;i<lines.length;i++){
+    const cols = lines[i].split(',');
+    const id = cols[idx.id];
+    const payload = {
+      role: cols[idx.role],
+      allowed_grade_levels: cols[idx.gl],
+      allowed_class_names: cols[idx.cl],
+    };
+    await fetch(`/api/users/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  }
+  alert('导入完成');
+  e.target.value='';
+  loadUsers(1);
+});
 
 async function saveUser(id, btn){
   const tr = btn.closest('tr');
@@ -56,6 +156,6 @@ async function saveUser(id, btn){
   if (res.ok){ alert('已保存'); } else { alert('保存失败'); }
 }
 
-window.addEventListener('DOMContentLoaded', loadUsers);
+window.addEventListener('DOMContentLoaded', ()=>loadUsers(1));
 </script>
 {% endblock %}

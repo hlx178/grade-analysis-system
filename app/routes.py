@@ -941,12 +941,24 @@ def api_summary_export():
         row = { header_map[col]: rec.get(col, '') for col in use_cols }
         export_rows.append(row)
 
+    # 组装文件名片段（包含考试、学科、年级、班级）
+    def _safe_name(s: str) -> str:
+        import re
+        return re.sub(r'[^\w\-\u4e00-\u9fa5]+', '_', s)[:40]
+    import datetime as _dt
+    ts = _dt.datetime.now().strftime('%Y%m%d_%H%M%S')
+    name_exam = '-'.join(exam_names) if exam_names else '全部考试'
+    name_subject = subject_code or '全部学科'
+    name_gl = '-'.join(grade_levels) if grade_levels else '全部年级'
+    name_cl = '-'.join(class_names) if class_names else '全部班级'
+    base_name = f"{_safe_name(name_exam)}_{_safe_name(name_subject)}_{_safe_name(name_gl)}_{_safe_name(name_cl)}_{ts}"
+
     if fmt == 'xlsx':
         import pandas as pd
         buf = io.BytesIO()
         pd.DataFrame(export_rows).to_excel(buf, index=False)
         buf.seek(0)
-        return send_file(buf, as_attachment=True, download_name='summary.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        return send_file(buf, as_attachment=True, download_name=f'{base_name}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     # 默认csv
     import csv
     si = io.StringIO()
@@ -955,7 +967,7 @@ def api_summary_export():
     for row in export_rows:
         writer.writerow(row)
     output = si.getvalue().encode('utf-8-sig')
-    return Response(output, mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=summary.csv'})
+    return Response(output, mimetype='text/csv', headers={'Content-Disposition': f'attachment; filename={base_name}.csv'})
 
 
 @api_bp.route('/summary/options', methods=['GET'])
@@ -988,17 +1000,30 @@ def api_summary_options():
 def api_users_list():
     if current_user.role != 'admin':
         return jsonify({'error': 'forbidden'}), 403
-    users = User.query.order_by(User.id.asc()).all()
-    return jsonify([
-        {
-            'id': u.id,
-            'username': u.username,
-            'email': u.email,
-            'role': u.role,
-            'allowed_grade_levels': u.allowed_grade_levels or '',
-            'allowed_class_names': u.allowed_class_names or '',
-        } for u in users
-    ])
+    qstr = request.args.get('q', '').strip()
+    page = request.args.get('page', type=int) or 1
+    page_size = min(max(request.args.get('page_size', type=int) or 20, 1), 200)
+    q = User.query
+    if qstr:
+        like = f"%{qstr}%"
+        q = q.filter((User.username.ilike(like)) | (User.email.ilike(like)))
+    total = q.count()
+    users = q.order_by(User.id.asc()).offset((page-1)*page_size).limit(page_size).all()
+    return jsonify({
+        'items': [
+            {
+                'id': u.id,
+                'username': u.username,
+                'email': u.email,
+                'role': u.role,
+                'allowed_grade_levels': u.allowed_grade_levels or '',
+                'allowed_class_names': u.allowed_class_names or '',
+            } for u in users
+        ],
+        'total': total,
+        'page': page,
+        'page_size': page_size,
+    })
 
 
 @api_bp.route('/users/<int:user_id>', methods=['PUT'])
