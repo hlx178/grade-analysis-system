@@ -844,7 +844,7 @@ def api_analysis_distribution_export():
     # 空行 + summary
     writer.writerow([])
     s = data.get('summary') or {}
-    writer.writerow(['summary', 'count', s.get('count'), 'avg', s.get('avg'), 'max', s.get('max'), 'min', s.get('min'), 'std', s.get('std')])
+    writer.writerow(['summary', 'count', s.get('count'), 'avg', s.get('avg'), 'max', s.get('max'), 'min', s.get('min'), 'std', s.get('std'), 'bin_width', s.get('bin_width')])
     output.seek(0)
     return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=distribution.csv'})
 

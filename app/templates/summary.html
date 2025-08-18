@@ -319,6 +319,17 @@ function applyPrefs(p){
   document.getElementById('colGradeRank').checked = !!p.grade_rank;
   document.getElementById('colPercentage').checked = !!p.percentage;
   document.getElementById('colRuleVersion').checked = !!p.rule_version;
+  // 保存趋势显示开关
+  try{
+    localStorage.setItem('trend_toggles', JSON.stringify({
+      avg: document.getElementById('tgAvg')?.checked !== false,
+      med: document.getElementById('tgMed')?.checked !== false,
+      band: document.getElementById('tgBand')?.checked !== false,
+      max: document.getElementById('tgMax')?.checked !== false,
+      min: document.getElementById('tgMin')?.checked !== false,
+    }));
+  }catch(e){}
+
   const chrono = document.getElementById('trendChrono'); if (chrono) chrono.checked = !!p.trend_chrono;
   document.querySelectorAll('.col-letter').forEach(e=>e.style.display = p.letter? '':'none');
   document.querySelectorAll('.col-class-rank').forEach(e=>e.style.display = p.class_rank? '':'none');
@@ -573,6 +584,15 @@ function renderTaskPager(total, page, page_size){
   const mkBtn = (p, label, disabled=false) => `<button class="btn btn-sm ${disabled?'btn-secondary':'btn-outline-secondary'} me-1" ${disabled?'disabled':''} onclick="loadMyTasks(${p})">${label}</button>`;
   pager.innerHTML += mkBtn(1, '首页', page<=1);
   pager.innerHTML += mkBtn(page-1, '上一页', page<=1);
+  // 恢复趋势显示开关
+  try{
+    const s = localStorage.getItem('trend_toggles');
+    if (s){ const t = JSON.parse(s);
+      const map = {tgAvg:'avg', tgMed:'med', tgBand:'band', tgMax:'max', tgMin:'min'};
+      Object.entries(map).forEach(([id,key])=>{ const el = document.getElementById(id); if (el && key in t) el.checked = !!t[key]; });
+    }
+  }catch(e){}
+
   pager.innerHTML += `<span class=\"me-2\">第 ${page}/${totalPages} 页，共 ${total} 条</span>`;
   pager.innerHTML += mkBtn(page+1, '下一页', page>=totalPages);
   pager.innerHTML += mkBtn(totalPages, '末页', page>=totalPages);
