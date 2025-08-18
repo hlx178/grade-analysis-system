@@ -1,7 +1,53 @@
 {% extends 'base.html' %}
 {% block title %}仪表盘 - 成绩分析系统{% endblock %}
 {% block content %}
-<h3>课程统计</h3>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3>课程统计</h3>
+  <div class="d-flex gap-2">
+    <select id="courseSelect" class="form-select">
+      <option value="">全部课程</option>
+      {% for c in courses %}
+      <option value="{{ c.id }}">{{ c.code }} - {{ c.name }}</option>
+      {% endfor %}
+    </select>
+    <select id="classSelect" class="form-select">
+      <option value="">全部班级</option>
+      {% for cls in classes %}
+      <option value="{{ cls }}">{{ cls }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary" onclick="loadAnalysis()">分析</button>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-md-6 mb-4">
+    <div class="card">
+      <div class="card-header">统计摘要</div>
+      <div class="card-body">
+        <ul class="list-unstyled mb-0" id="statsList">
+          <li>数量: -</li>
+          <li>平均分: -</li>
+          <li>中位数: -</li>
+          <li>最高分: -</li>
+          <li>最低分: -</li>
+          <li>标准差: -</li>
+          <li>及格率: -</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 mb-4">
+    <div class="card">
+      <div class="card-header">成绩分布</div>
+      <div class="card-body">
+        <canvas id="distChart" height="160"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h5 class="mt-4">课程概览</h5>
 <table class="table table-striped">
   <thead>
     <tr>
@@ -26,4 +72,38 @@
   {% endfor %}
   </tbody>
 </table>
+{% endblock %}
+{% block scripts %}
+<script>
+let chart;
+async function loadAnalysis(){
+  const courseId = document.getElementById('courseSelect').value;
+  const className = document.getElementById('classSelect').value;
+  const p = new URLSearchParams();
+  if (courseId) p.append('course_id', courseId);
+  if (className) p.append('class_name', className);
+  const res = await fetch('/api/analysis/statistics?' + p.toString());
+  const data = await res.json();
+  const s = data.stats || {};
+  const d = data.distribution || {};
+  document.getElementById('statsList').innerHTML = `
+    <li>数量: ${s.count ?? '-'}</li>
+    <li>平均分: ${s.average ?? '-'}</li>
+    <li>中位数: ${s.median ?? '-'}</li>
+    <li>最高分: ${s.max ?? '-'}</li>
+    <li>最低分: ${s.min ?? '-'}</li>
+    <li>标准差: ${s.std ?? '-'}</li>
+    <li>及格率: ${s.pass_rate ?? '-'}%</li>`;
+  const labels = ['A','B','C','D','F'];
+  const values = labels.map(k => d[k] || 0);
+  const ctx = document.getElementById('distChart').getContext('2d');
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: '人数', data: values, backgroundColor: '#0d6efd' }] },
+    options: { scales: { y: { beginAtZero: true, precision: 0 } } }
+  });
+}
+window.addEventListener('DOMContentLoaded', loadAnalysis);
+</script>
 {% endblock %}

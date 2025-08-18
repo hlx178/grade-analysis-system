@@ -9,6 +9,7 @@ from app import db
 from app.models import Course, Grade, Student, User
 from app.utils import (
     calculate_statistics,
+    get_class_list,
     get_course_statistics,
     get_grade_distribution,
     get_student_ranking,
@@ -26,7 +27,9 @@ api_bp = Blueprint("api", __name__)
 @login_required
 def dashboard():
     course_stats = get_course_statistics()
-    return render_template("dashboard.html", course_stats=course_stats)
+    courses = Course.query.order_by(Course.code).all()
+    classes = get_class_list()
+    return render_template("dashboard.html", course_stats=course_stats, courses=courses, classes=classes)
 
 
 # 学生管理页面
