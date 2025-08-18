@@ -151,7 +151,7 @@ class Grade(db.Model):
 
 
 class GradeBandRule(db.Model):
-    """等级换算规则：按考试名称+学科配置ABCDE两种方法之一"""
+    """等级换算规则：按考试名称+学科配置ABCDE两种方法之一（当前活跃规则）"""
 
     __tablename__ = 'grade_band_rules'
 
@@ -177,3 +177,25 @@ class GradeBandRule(db.Model):
 
     def __repr__(self):
         return f'<GradeBandRule {self.exam_name}:{self.subject_code} {self.method}>'
+
+
+class GradeBandSet(db.Model):
+    """等级规则版本集（快照）。草稿/发布；发布时覆盖活跃规则。"""
+
+    __tablename__ = 'grade_band_sets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    exam_name = db.Column(db.String(100), nullable=False, index=True)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    status = db.Column(db.String(20), nullable=False, default='draft')  # draft/published
+    note = db.Column(db.String(255))
+    rules_json = db.Column(db.Text, nullable=False)  # 存放 items 的JSON
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    published_at = db.Column(db.DateTime)
+
+    __table_args__ = (
+        db.UniqueConstraint('exam_name', 'version', name='uix_examname_version'),
+    )
+
+    def __repr__(self):
+        return f'<GradeBandSet {self.exam_name} v{self.version} {self.status}>'

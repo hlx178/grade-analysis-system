@@ -11,7 +11,7 @@ from flask import Blueprint, current_app, flash, jsonify, redirect, render_templ
 from flask_login import login_required, login_user, logout_user
 
 from app import db
-from app.models import Course, Grade, Student, User, ExamScheme, GradeBandRule
+from app.models import Course, Grade, Student, User, ExamScheme, GradeBandRule, GradeBandSet
 from app.utils import (
     SUBJECTS,
     TOTAL_SUBJECT,
@@ -109,7 +109,9 @@ def exam_schemes_page():
 @login_required
 def grade_bands_page():
     courses = Course.query.order_by(Course.code).all()
-    return render_template("grade_bands.html", courses=courses, subjects=SUBJECTS + [TOTAL_SUBJECT])
+    # 版本信息初步加载（默认exam_name=default）
+    sets = GradeBandSet.query.filter_by(exam_name='default').order_by(GradeBandSet.version.desc()).all()
+    return render_template("grade_bands.html", courses=courses, subjects=SUBJECTS + [TOTAL_SUBJECT], sets=sets)
 
 
 @auth_bp.route("/logout")
@@ -517,6 +519,13 @@ def api_analysis_ranking():
 @login_required
 def api_grade_bands_get():
     exam_name = request.args.get("exam_name") or "default"
+    rule_set_id = request.args.get("rule_set_id", type=int)
+    if rule_set_id:
+        # 从版本集读取
+        s = GradeBandSet.query.get_or_404(rule_set_id)
+        import json
+        return jsonify(json.loads(s.rules_json))
+    # 默认读取活跃规则
     rules = GradeBandRule.query.filter_by(exam_name=exam_name).all()
     data = []
     for r in rules:
@@ -538,6 +547,7 @@ def api_grade_bands_bulk_put():
     payload = request.get_json(force=True)
     exam_name = payload.get("exam_name") or "default"
     items = payload.get("items") or []
+    rule_set_id = payload.get("rule_set_id")
     # 基本校验
     for it in items:
         method = it.get("method")
@@ -558,19 +568,26 @@ def api_grade_bands_bulk_put():
         else:
             return jsonify({"error": "Unknown method"}), 400
 
-    # 清理旧规则并写入新规则
-    GradeBandRule.query.filter_by(exam_name=exam_name).delete()
-    for it in items:
-        rule = GradeBandRule(
-            exam_name=exam_name,
-            subject_code=it.get("subject_code"),
-            method=it.get("method"),
-            a_min=it.get("a_min"), b_min=it.get("b_min"), c_min=it.get("c_min"), d_min=it.get("d_min"),
-            a_pct=it.get("a_pct"), b_pct=it.get("b_pct"), c_pct=it.get("c_pct"), d_pct=it.get("d_pct"), e_pct=it.get("e_pct"),
-        )
-        db.session.add(rule)
-    db.session.commit()
-    return jsonify({"message": "saved", "count": len(items)})
+    # 若指定 rule_set_id，则保存快照至版本集；否则覆盖活跃规则
+    import json
+    if rule_set_id:
+        s = GradeBandSet.query.get_or_404(rule_set_id)
+        s.rules_json = json.dumps(items, ensure_ascii=False)
+        db.session.commit()
+        return jsonify({"message": "saved to set", "set_id": s.id, "count": len(items)})
+    else:
+        GradeBandRule.query.filter_by(exam_name=exam_name).delete()
+        for it in items:
+            rule = GradeBandRule(
+                exam_name=exam_name,
+                subject_code=it.get("subject_code"),
+                method=it.get("method"),
+                a_min=it.get("a_min"), b_min=it.get("b_min"), c_min=it.get("c_min"), d_min=it.get("d_min"),
+                a_pct=it.get("a_pct"), b_pct=it.get("b_pct"), c_pct=it.get("c_pct"), d_pct=it.get("d_pct"), e_pct=it.get("e_pct"),
+            )
+            db.session.add(rule)
+        db.session.commit()
+        return jsonify({"message": "saved", "count": len(items)})
 
 
 # 等级规则：预览（不落库）
@@ -613,6 +630,71 @@ def api_grade_bands_preview():
             # 对于percentile/未知：统一在前端给出说明，本接口可选择不处理或返回占位
             pass
     return jsonify({"distribution": dict(dist), "total": len(grades)})
+
+
+# 版本管理：列出/新建草稿/发布/回滚
+@api_bp.route('/grade-bands/sets', methods=['GET', 'POST'])
+@login_required
+def api_band_sets():
+    if request.method == 'POST':
+        data = request.get_json(force=True)
+        exam_name = data.get('exam_name') or 'default'
+        note = data.get('note')
+        import json
+        # version = 当前该考试的最大版本+1（草稿态）
+        max_ver = db.session.query(db.func.max(GradeBandSet.version)).filter_by(exam_name=exam_name).scalar() or 0
+        s = GradeBandSet(exam_name=exam_name, version=max_ver+1, status='draft', note=note, rules_json=json.dumps([], ensure_ascii=False))
+        db.session.add(s)
+        db.session.commit()
+        return jsonify({'id': s.id, 'version': s.version, 'status': s.status}), 201
+    # GET
+    exam_name = request.args.get('exam_name') or 'default'
+    sets = GradeBandSet.query.filter_by(exam_name=exam_name).order_by(GradeBandSet.version.desc()).all()
+    return jsonify([
+        { 'id': s.id, 'exam_name': s.exam_name, 'version': s.version, 'status': s.status, 'note': s.note, 'created_at': s.created_at.isoformat(), 'published_at': (s.published_at.isoformat() if s.published_at else None) }
+        for s in sets
+    ])
+
+
+@api_bp.route('/grade-bands/sets/<int:set_id>/publish', methods=['PUT'])
+@login_required
+def api_band_set_publish(set_id):
+    s = GradeBandSet.query.get_or_404(set_id)
+    import json, datetime as dt
+    # 将快照覆盖到活跃规则
+    items = json.loads(s.rules_json)
+    GradeBandRule.query.filter_by(exam_name=s.exam_name).delete()
+    for it in items:
+        db.session.add(GradeBandRule(
+            exam_name=s.exam_name,
+            subject_code=it.get('subject_code'),
+            method=it.get('method'),
+            a_min=it.get('a_min'), b_min=it.get('b_min'), c_min=it.get('c_min'), d_min=it.get('d_min'),
+            a_pct=it.get('a_pct'), b_pct=it.get('b_pct'), c_pct=it.get('c_pct'), d_pct=it.get('d_pct'), e_pct=it.get('e_pct'),
+        ))
+    s.status = 'published'
+    s.published_at = dt.datetime.utcnow()
+    db.session.commit()
+    return jsonify({'message': 'published'})
+
+
+@api_bp.route('/grade-bands/sets/<int:set_id>/rollback', methods=['PUT'])
+@login_required
+def api_band_set_rollback(set_id):
+    # 将历史版本复制为新的草稿
+    src = GradeBandSet.query.get_or_404(set_id)
+    import json
+    max_ver = db.session.query(db.func.max(GradeBandSet.version)).filter_by(exam_name=src.exam_name).scalar() or 0
+    s = GradeBandSet(
+        exam_name=src.exam_name,
+        version=max_ver+1,
+        status='draft',
+        note=f'Rollback from v{src.version}',
+        rules_json=src.rules_json,
+    )
+    db.session.add(s)
+    db.session.commit()
+    return jsonify({'id': s.id, 'version': s.version, 'status': s.status})
 
 
 # ExamScheme CRUD
