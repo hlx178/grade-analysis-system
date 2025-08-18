@@ -662,7 +662,7 @@ def api_summary_list():
             out.extend([s.strip() for s in v.split(',') if s.strip()])
         return out
 
-    exam_name = request.args.get('exam_name')
+    exam_names = _multi('exam_name')
     grade_levels = _multi('grade_level')
     class_names = _multi('class_name')
     subject_code = request.args.get('subject_code') or 'TOTAL'
@@ -670,8 +670,8 @@ def api_summary_list():
 
     # 查询匹配的成绩（按考试名称与科目）
     q = Grade.query.join(Student).join(Course)
-    if exam_name:
-        q = q.filter(Grade.exam_name == exam_name)
+    if exam_names:
+        q = q.filter(Grade.exam_name.in_(exam_names))
     if grade_levels:
         q = q.filter(Student.grade_level.in_(grade_levels))
     if class_names:
@@ -690,8 +690,8 @@ def api_summary_list():
     # 规则版本（发布的最新版本号），便于展示来源
     published_set = None
     rule_version = None
-    if exam_name:
-        published_set = GradeBandSet.query.filter_by(exam_name=exam_name, status='published').order_by(GradeBandSet.version.desc()).first()
+    if exam_names and len(exam_names) == 1:
+        published_set = GradeBandSet.query.filter_by(exam_name=exam_names[0], status='published').order_by(GradeBandSet.version.desc()).first()
         if published_set:
             rule_version = published_set.version
 
@@ -794,15 +794,15 @@ def api_summary_export():
             out.extend([s.strip() for s in v.split(',') if s.strip()])
         return out
 
-    exam_name = request.args.get('exam_name')
+    exam_names = _multi('exam_name')
     grade_levels = _multi('grade_level')
     class_names = _multi('class_name')
     subject_code = request.args.get('subject_code') or 'TOTAL'
     fmt = request.args.get('format') or 'csv'
 
     q = Grade.query.join(Student).join(Course)
-    if exam_name:
-        q = q.filter(Grade.exam_name == exam_name)
+    if exam_names:
+        q = q.filter(Grade.exam_name.in_(exam_names))
     if grade_levels:
         q = q.filter(Student.grade_level.in_(grade_levels))
     if class_names:
@@ -838,6 +838,16 @@ def api_summary_export():
         writer.writerow(row)
     output = si.getvalue().encode('utf-8-sig')
     return Response(output, mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=summary.csv'})
+
+
+@api_bp.route('/summary/options', methods=['GET'])
+@login_required
+def api_summary_options():
+    # 枚举考试名称、年级、班级
+    exam_names = sorted({ n[0] for n in db.session.query(Grade.exam_name).distinct().all() if n[0] })
+    grade_levels = sorted({ n[0] for n in db.session.query(Student.grade_level).distinct().all() if n[0] })
+    class_names = sorted({ n[0] for n in db.session.query(Student.class_name).distinct().all() if n[0] })
+    return jsonify({ 'exam_names': exam_names, 'grade_levels': grade_levels, 'class_names': class_names })
 
 
 # 版本管理：列出/新建草稿/发布/回滚

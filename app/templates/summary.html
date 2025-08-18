@@ -5,15 +5,15 @@
 <div class="row g-2 align-items-end mb-3">
   <div class="col-auto">
     <label class="form-label">考试名称</label>
-    <input id="examName" class="form-control" placeholder="如：期末">
+    <select id="examName" class="form-select" multiple style="min-width:180px"></select>
   </div>
   <div class="col-auto">
     <label class="form-label">年级</label>
-    <input id="gradeLevel" class="form-control" placeholder="如：七年级/2024级">
+    <select id="gradeLevel" class="form-select" multiple style="min-width:180px"></select>
   </div>
   <div class="col-auto">
     <label class="form-label">班级</label>
-    <input id="className" class="form-control" placeholder="如：一班">
+    <select id="className" class="form-select" multiple style="min-width:180px"></select>
   </div>
   <div class="col-auto">
     <label class="form-label">学科</label>
@@ -159,9 +159,9 @@ async function loadSummary(){
 }
 
 function qs(){
-  const exam_name = document.getElementById('examName').value.trim() || '';
-  const grade_level = document.getElementById('gradeLevel').value.trim() || '';
-  const class_name = document.getElementById('className').value.trim() || '';
+  const exam_name = Array.from(document.getElementById('examName').selectedOptions).map(o=>o.value).join(',');
+  const grade_level = Array.from(document.getElementById('gradeLevel').selectedOptions).map(o=>o.value).join(',');
+  const class_name = Array.from(document.getElementById('className').selectedOptions).map(o=>o.value).join(',');
   const subject_code = document.getElementById('subjectCode').value;
   const order_by = document.getElementById('orderBy').value;
   return { exam_name, grade_level, class_name, subject_code, order_by };
@@ -208,6 +208,24 @@ function exportSummary(fmt){
   window.location = '/api/summary/export?' + params.toString();
 }
 
-window.addEventListener('DOMContentLoaded', ()=>{ loadPrefs(); });
+async function loadOptions(){
+  const res = await fetch('/api/summary/options');
+  if (!res.ok) return;
+  const data = await res.json();
+  const fill = (id, arr) => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '';
+    (arr||[]).forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v; opt.textContent = v;
+      sel.appendChild(opt);
+    });
+  };
+  fill('examName', data.exam_names);
+  fill('gradeLevel', data.grade_levels);
+  fill('className', data.class_names);
+}
+
+window.addEventListener('DOMContentLoaded', ()=>{ loadOptions(); loadPrefs(); });
 </script>
 {% endblock %}
