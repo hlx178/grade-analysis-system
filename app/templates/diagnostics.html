@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% block title %}诊断 - 成绩分析系统{% endblock %}
+{% block content %}
+<h3>性能诊断</h3>
+<div class="row g-2 align-items-end mb-3">
+  <div class="col-auto">
+    <label class="form-label">考试名称(逗号分隔)</label>
+    <input id="dExam" class="form-control" placeholder="期末,期中">
+  </div>
+  <div class="col-auto">
+    <label class="form-label">年级(逗号分隔)</label>
+    <input id="dGrade" class="form-control" placeholder="七年级,八年级">
+  </div>
+  <div class="col-auto">
+    <label class="form-label">班级(逗号分隔)</label>
+    <input id="dClass" class="form-control" placeholder="一班,二班">
+  </div>
+  <div class="col-auto">
+    <label class="form-label">学科</label>
+    <select id="dSub" class="form-select">
+      <option value="TOTAL">TOTAL</option>
+      <option value="CN">CN</option>
+      <option value="MA">MA</option>
+      <option value="EN">EN</option>
+      <option value="SC">SC</option>
+      <option value="SOC">SOC</option>
+      <option value="MOR">MOR</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label">排序</label>
+    <select id="dOrder" class="form-select">
+      <option value="score_desc">score_desc</option>
+      <option value="score_asc">score_asc</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label">分页</label>
+    <div class="input-group">
+      <input id="dPage" type="number" class="form-control" style="width:110px" placeholder="page" value="1">
+      <input id="dSize" type="number" class="form-control" style="width:110px" placeholder="page_size" value="50">
+    </div>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-primary" onclick="runDiag()">运行</button>
+  </div>
+</div>
+<pre id="diagOut" class="bg-light p-2" style="white-space:pre-wrap"></pre>
+{% endblock %}
+{% block scripts %}
+<script>
+async function runDiag(){
+  const payload = {
+    exam_names: (document.getElementById('dExam').value||'').split(',').map(s=>s.trim()).filter(Boolean),
+    grade_levels: (document.getElementById('dGrade').value||'').split(',').map(s=>s.trim()).filter(Boolean),
+    class_names: (document.getElementById('dClass').value||'').split(',').map(s=>s.trim()).filter(Boolean),
+    subject_code: document.getElementById('dSub').value,
+    order_by: document.getElementById('dOrder').value,
+    page: Number(document.getElementById('dPage').value||1),
+    page_size: Number(document.getElementById('dSize').value||50),
+  };
+  const res = await fetch('/api/diagnostics/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  if (!res.ok){ document.getElementById('diagOut').textContent = '执行失败: '+res.status; return; }
+  const data = await res.json();
+  document.getElementById('diagOut').textContent = JSON.stringify(data, null, 2);
+}
+</script>
+{% endblock %}

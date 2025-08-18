@@ -114,6 +114,14 @@ def users_page():
     return render_template("users.html")
 
 
+@main_bp.route("/diagnostics")
+@login_required
+def diagnostics_page():
+    if current_user.role != 'admin':
+        abort(403)
+    return render_template("diagnostics.html")
+
+
 @main_bp.route("/exam-schemes")
 @login_required
 def exam_schemes_page():
@@ -1013,6 +1021,85 @@ def api_summary_options():
     grade_levels = sorted({ n[0] for n in gl_q.all() if n[0] })
     class_names = sorted({ n[0] for n in cl_q.all() if n[0] })
     return jsonify({ 'exam_names': exam_names, 'grade_levels': grade_levels, 'class_names': class_names })
+
+
+# 诊断 API（管理员）：构造典型查询，返回 EXPLAIN 计划与耗时
+@api_bp.route('/diagnostics/run', methods=['POST'])
+@login_required
+def api_diagnostics_run():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    import time
+    from sqlalchemy import text
+    payload = request.get_json(force=True) or {}
+    exam_names = payload.get('exam_names') or []
+    grade_levels = payload.get('grade_levels') or []
+    class_names = payload.get('class_names') or []
+    subject_code = payload.get('subject_code') or 'TOTAL'
+    order_by = payload.get('order_by') or 'score_desc'
+    page = int(payload.get('page') or 1)
+    page_size = int(payload.get('page_size') or 50)
+
+    def build_q(base_q):
+        q = base_q
+        if exam_names:
+            q = q.filter(Grade.exam_name.in_(exam_names))
+        if grade_levels:
+            q = q.filter(Student.grade_level.in_(grade_levels))
+        if class_names:
+            q = q.filter(Student.class_name.in_(class_names))
+        if subject_code:
+            q = q.filter(Course.code == subject_code)
+        if order_by == 'score_desc':
+            q = q.order_by(Grade.score.desc())
+        elif order_by == 'score_asc':
+            q = q.order_by(Grade.score.asc())
+        return q
+
+    base_q = Grade.query.join(Student).join(Course)
+    list_q = build_q(base_q)
+
+    # 计时：count、分页列表
+    t0 = time.time()
+    total = list_q.with_entities(db.func.count()).scalar()
+    t_count = (time.time() - t0) * 1000
+
+    t1 = time.time()
+    page_rows = list_q.offset((page-1)*page_size).limit(page_size).all()
+    t_page = (time.time() - t1) * 1000
+
+    # EXPLAIN
+    engine = db.engine
+    dialect = engine.name  # 'sqlite', 'postgresql', 'mysql', ...
+    compiled = list_q.statement.compile(dialect=engine.dialect, compile_kwargs={"literal_binds": True})
+    sql = str(compiled)
+    if dialect == 'sqlite':
+        explain_sql = f"EXPLAIN QUERY PLAN {sql}"
+    elif dialect == 'postgresql':
+        explain_sql = f"EXPLAIN (FORMAT TEXT) {sql}"
+    else:
+        explain_sql = f"EXPLAIN {sql}"
+    rows = engine.execute(text(explain_sql)).fetchall()
+    plan = [" ".join([str(x) for x in r]) for r in rows]
+
+    return jsonify({
+        'filters': {
+            'exam_names': exam_names,
+            'grade_levels': grade_levels,
+            'class_names': class_names,
+            'subject_code': subject_code,
+            'order_by': order_by,
+            'page': page,
+            'page_size': page_size,
+        },
+        'count_ms': round(t_count, 2),
+        'page_ms': round(t_page, 2),
+        'plan': plan,
+        'total': total,
+        'page_rows': len(page_rows),
+        'dialect': dialect,
+        'sql': sql,
+    })
 
 
 # 用户管理 API（管理员）

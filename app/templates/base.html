@@ -24,6 +24,7 @@
         <li class="nav-item"><a class="nav-link" href="/grade-bands">等级规则</a></li>
         {% if current_user.is_authenticated and current_user.role == 'admin' %}
         <li class="nav-item"><a class="nav-link" href="/users">用户管理</a></li>
+        <li class="nav-item"><a class="nav-link" href="/diagnostics">诊断</a></li>
         {% endif %}
       </ul>
       <ul class="navbar-nav">
