@@ -51,6 +51,12 @@
   <div class="col-auto">
     <button class="btn btn-outline-primary" onclick="savePreset()">保存为预设</button>
   </div>
+  <div class="col-auto">
+    <div class="btn-group">
+      <button class="btn btn-outline-secondary" onclick="renamePreset()">重命名预设</button>
+      <button class="btn btn-outline-danger" onclick="deletePreset()">删除预设</button>
+    </div>
+  </div>
 </div>
 <pre id="diagOut" class="bg-light p-2" style="white-space:pre-wrap"></pre>
 {% endblock %}
@@ -81,10 +87,11 @@ async function loadPresets(){
   if (!res.ok) return;
   const items = await res.json();
   const sel = document.getElementById('preset');
-  sel.innerHTML = '<option value="">选择预设...</option>' + items.map(p=>`<option value="${encodeURIComponent(JSON.stringify(p.payload))}">${p.name}</option>`).join('');
+  sel.innerHTML = '<option value="">选择预设...</option>' + items.map(p=>`<option value="${encodeURIComponent(JSON.stringify({id:p.id,...p.payload}))}">${p.name}</option>`).join('');
   sel.addEventListener('change', ()=>{
     if (!sel.value) return;
     const payload = JSON.parse(decodeURIComponent(sel.value));
+    const pid = payload.id; delete payload.id;
     document.getElementById('dExam').value = (payload.exam_names||[]).join(',');
     document.getElementById('dGrade').value = (payload.grade_levels||[]).join(',');
     document.getElementById('dClass').value = (payload.class_names||[]).join(',');
@@ -100,6 +107,27 @@ async function savePreset(){
   if (!name) return;
   const payload = readForm();
   await fetch('/api/diagnostics/presets', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, payload }) });
+  await loadPresets();
+}
+
+async function renamePreset(){
+  const sel = document.getElementById('preset');
+  if (!sel.value){ alert('先选择预设'); return; }
+  const payload = JSON.parse(decodeURIComponent(sel.value));
+  const pid = payload.id;
+  const name = prompt('新名称');
+  if (!name) return;
+  await fetch(`/api/diagnostics/presets/${pid}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name }) });
+  await loadPresets();
+}
+
+async function deletePreset(){
+  const sel = document.getElementById('preset');
+  if (!sel.value){ alert('先选择预设'); return; }
+  const payload = JSON.parse(decodeURIComponent(sel.value));
+  const pid = payload.id;
+  if (!confirm('确认删除该预设？')) return;
+  await fetch(`/api/diagnostics/presets/${pid}`, { method:'DELETE' });
   await loadPresets();
 }
 

@@ -1083,6 +1083,18 @@ def api_diagnostics_run():
     rows = engine.execute(text(explain_sql)).fetchall()
     plan = [" ".join([str(x) for x in r]) for r in rows]
 
+    # 慢阈值日志（含 SQL 摘要）
+    try:
+        import logging
+        threshold = current_app.config.get('SLOW_QUERY_MS', 500)
+        if t_count > threshold or t_page > threshold:
+            snippet = (sql or '')
+            if len(snippet) > 300:
+                snippet = snippet[:300] + '...'
+            logging.getLogger('slow').warning(f"DIAG slow: count={t_count:.1f}ms page={t_page:.1f}ms SQL={snippet}")
+    except Exception:
+        pass
+
     return jsonify({
         'filters': {
             'exam_names': exam_names,
@@ -1128,6 +1140,32 @@ def api_diag_preset_create():
     p = DiagnosticPreset(user_id=current_user.id, name=name, payload=json.dumps(payload, ensure_ascii=False))
     db.session.add(p); db.session.commit()
     return jsonify({'id': p.id, 'name': p.name})
+
+
+@api_bp.route('/diagnostics/presets/<int:preset_id>', methods=['PUT'])
+@login_required
+def api_diag_preset_rename(preset_id):
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True)
+    name = (data.get('name') or '').strip()
+    p = DiagnosticPreset.query.filter_by(id=preset_id, user_id=current_user.id).first_or_404()
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+    p.name = name
+    db.session.commit()
+    return jsonify({'message':'renamed'})
+
+
+@api_bp.route('/diagnostics/presets/<int:preset_id>', methods=['DELETE'])
+@login_required
+def api_diag_preset_delete(preset_id):
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    p = DiagnosticPreset.query.filter_by(id=preset_id, user_id=current_user.id).first_or_404()
+    db.session.delete(p)
+    db.session.commit()
+    return jsonify({'message':'deleted'})
 
 
 # 用户管理 API（管理员）
