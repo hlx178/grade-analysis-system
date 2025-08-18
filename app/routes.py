@@ -1172,7 +1172,34 @@ def api_export_task_create():
 def api_export_task_status(task_id):
     t = _export_tasks.get(task_id)
     if not t:
-        return jsonify({ 'error': 'not found' }), 404
+        # 回退到持久化记录
+        job = ExportJob.query.get(task_id)
+        if not job:
+            return jsonify({ 'error': 'not found' }), 404
+        if current_user.role != 'admin' and job.user_id != current_user.id:
+            return jsonify({ 'error': 'forbidden' }), 403
+        from json import loads
+        import os as _os
+        p = loads(job.params)
+        def _join(v):
+            if isinstance(v, list):
+                return ','.join(v)
+            return str(v or '')
+        summary = f"考试:{_join(p.get('exam_name') or p.get('exam_names'))} 学科:{p.get('subject_code') or ''} 年级:{_join(p.get('grade_level') or p.get('grade_levels'))} 班级:{_join(p.get('class_name') or p.get('class_names'))} 范围:{p.get('scope') or 'all'} 排序:{p.get('order_by') or 'score_desc'}"
+        file_ready = bool(job.file_path and _os.path.isfile(job.file_path) and job.status=='completed')
+        file_size = _os.path.getsize(job.file_path) if file_ready else None
+        return jsonify({
+            'task_id': job.id,
+            'status': job.status,
+            'progress': job.progress,
+            'filename': _os.path.basename(job.file_path) if job.file_path else None,
+            'file_ready': file_ready,
+            'file_size': file_size,
+            'created_at': job.created_at.isoformat()+'Z' if job.created_at else None,
+            'finished_at': job.finished_at.isoformat()+'Z' if job.finished_at else None,
+            'summary': summary,
+            'params': p,
+        })
     # 仅本人或管理员可查
     if current_user.role != 'admin' and t.user_id != current_user.id:
         return jsonify({ 'error': 'forbidden' }), 403

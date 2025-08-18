@@ -120,6 +120,18 @@
           <button class="btn btn-outline-secondary" onclick="autoRefreshToggle(this)">开启自动刷新</button>
         </div>
         <table class="table table-sm" id="exportTasksTable">
+        <script>
+        // 恢复导出任务筛选记忆
+        (function(){
+          const st = localStorage.getItem('exportTasks.status')||'';
+          const ps = localStorage.getItem('exportTasks.page_size')||'';
+          const qq = localStorage.getItem('exportTasks.q')||'';
+          if (st) document.getElementById('taskStatus').value = st;
+          if (ps) document.getElementById('taskPageSize').value = ps;
+          if (qq) document.getElementById('taskQuery').value = qq;
+        })();
+        </script>
+
           <thead><tr><th><input type="checkbox" onclick="toggleTaskAll(this)"></th><th>创建时间</th><th>任务ID</th><th>状态</th><th>进度</th><th>文件名</th><th>大小</th><th>摘要</th><th>操作</th></tr></thead>
           <tbody></tbody>
         </table>
@@ -394,6 +406,10 @@ async function loadMyTasks(page=1){
   const data = await r.json();
   const tbody = document.querySelector('#exportTasksTable tbody');
   tbody.innerHTML = '';
+  // 记住筛选与分页偏好
+  localStorage.setItem('exportTasks.status', status || '');
+  localStorage.setItem('exportTasks.page_size', String(page_size));
+  localStorage.setItem('exportTasks.q', q || '');
   data.items.forEach(it => {
     const tr = document.createElement('tr');
     tr.dataset.id = it.task_id;
