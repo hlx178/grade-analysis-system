@@ -74,6 +74,36 @@ auth_bp = Blueprint("auth", __name__)
 api_bp = Blueprint("api", __name__)
 import_bp = Blueprint("importer", __name__)
 
+# Prometheus metrics endpoint (/metrics)
+try:
+    from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+    _REQ_COUNT = Counter('gas_http_requests_total', 'Total HTTP requests', ['method','endpoint','status'])
+    _REQ_LATENCY = Histogram('gas_http_request_duration_seconds', 'Request latency', ['endpoint'])
+
+    @main_bp.before_app_request
+    def _metrics_req_start():
+        from flask import g, request
+        g._metrics_path = request.endpoint or request.path or 'unknown'
+        g._metrics_timer = _REQ_LATENCY.labels(g._metrics_path).time()
+
+    @main_bp.after_app_request
+    def _metrics_req_end(response):
+        from flask import g, request
+        try:
+            if getattr(g, '_metrics_timer', None):
+                g._metrics_timer.observe_duration()  # stop timer
+            _REQ_COUNT.labels(request.method, getattr(g, '_metrics_path','unknown'), response.status_code).inc()
+        except Exception:
+            pass
+        return response
+
+    @health_bp.route('/metrics')
+    def metrics():
+        data = generate_latest()
+        return data, 200, {'Content-Type': CONTENT_TYPE_LATEST}
+except Exception:
+    pass
+
 
 # 首页仪表盘
 @main_bp.route("/")

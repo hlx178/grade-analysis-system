@@ -17,3 +17,4 @@ gunicorn==21.2.0
 alembic==1.13.1
 # postgres optional client
 psycopg2-binary==2.9.9
+prometheus-client==0.20.0
