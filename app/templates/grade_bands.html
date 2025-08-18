@@ -30,11 +30,27 @@
   <div class="col-auto">
     <button class="btn btn-outline-secondary" onclick="previewDist()">预览分布</button>
   </div>
-  <div class="col-auto">
-    <button class="btn btn-outline-primary" onclick="applyTemplateToAll()">应用到所有学科（使用首行作为模板）</button>
+  <div class="w-100"></div>
+  <div class="col-auto mt-2">
+    <input id="srcExam" class="form-control" placeholder="来源考试名称，如：期末">
   </div>
-  <div class="col-auto">
-    <button class="btn btn-outline-secondary" onclick="previewDist()">预览分布</button>
+  <div class="col-auto mt-2">
+    <button class="btn btn-outline-secondary" onclick="loadSourceVersions()">拉取来源版本</button>
+  </div>
+  <div class="col-auto mt-2">
+    <select id="srcVersionSelect" class="form-select">
+      <option value="">选择来源版本</option>
+    </select>
+  </div>
+  <div class="col-auto mt-2">
+    <button class="btn btn-outline-primary" onclick="copyFromSource()">从来源复制到当前草稿</button>
+  </div>
+  <div class="col-auto mt-2">
+    <button class="btn btn-outline-dark" onclick="exportCurrent()">导出当前版本JSON</button>
+  </div>
+  <div class="col-auto mt-2">
+    <input type="file" id="importFile" accept="application/json" style="display:none" />
+    <button class="btn btn-outline-dark" onclick="document.getElementById('importFile').click()">导入JSON到当前版本</button>
   </div>
 </div>
 
@@ -238,6 +254,91 @@ async function publishSet(){
   if (!confirm('发布后将覆盖当前活跃规则，确认继续？')) return;
   const res = await fetch(`/api/grade-bands/sets/${setId}/publish`, { method: 'PUT' });
   if (res.ok){ alert('发布成功'); } else { alert('发布失败'); }
+}
+
+async function loadSourceVersions(){
+  const exam = document.getElementById('srcExam').value.trim();
+  if (!exam){ alert('请输入来源考试名称'); return; }
+  const res = await fetch(`/api/grade-bands/sets?exam_name=${encodeURIComponent(exam)}`);
+  const sets = await res.json();
+  const sel = document.getElementById('srcVersionSelect');
+  sel.innerHTML = '<option value="">选择来源版本</option>';
+  sets.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = `${exam} v${s.version} (${s.status})`;
+    sel.appendChild(opt);
+  });
+}
+
+async function copyFromSource(){
+  const srcId = document.getElementById('srcVersionSelect').value;
+  if (!srcId){ alert('请选择来源版本'); return; }
+  const exam_name = document.getElementById('examName').value.trim() || 'default';
+  const dstSetId = document.getElementById('versionSelect').value;
+  if (!dstSetId){ alert('请选择目标草稿版本'); return; }
+  // 取来源JSON
+  const res = await fetch(`/api/grade-bands/sets/${srcId}/export-json`);
+  const data = await res.json();
+  const items = data.items || [];
+  // 写入目标草稿
+  const res2 = await fetch(`/api/grade-bands/sets/${dstSetId}/import-json`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ items })
+  });
+  if (res2.ok){
+    await loadRules();
+    alert('复制完成');
+  } else {
+    alert('复制失败');
+  }
+}
+
+async function exportCurrent(){
+  const setId = document.getElementById('versionSelect').value;
+  const exam_name = document.getElementById('examName').value.trim() || 'default';
+  let url;
+  if (setId){
+    url = `/api/grade-bands/sets/${setId}/export-json`;
+  } else {
+    // 若未选定版本，导出当前活跃规则为 JSON
+    const rulesRes = await fetch(`/api/grade-bands?exam_name=${encodeURIComponent(exam_name)}`);
+    const items = await rulesRes.json();
+    const blob = new Blob([JSON.stringify({ exam_name, items }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${exam_name}_active_rules.json`;
+    a.click();
+    return;
+  }
+  const r = await fetch(url);
+  const d = await r.json();
+  const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${d.exam_name}_v${d.version}.json`;
+  a.click();
+}
+
+// 导入文件处理
+const importInput = document.getElementById('importFile');
+if (importInput){
+  importInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file){ return; }
+    const txt = await file.text();
+    let data;
+    try{ data = JSON.parse(txt); }catch(err){ alert('JSON 解析失败'); return; }
+    const items = data.items || data || [];
+    const dstSetId = document.getElementById('versionSelect').value;
+    if (!dstSetId){ alert('请选择目标草稿版本'); return; }
+    const res = await fetch(`/api/grade-bands/sets/${dstSetId}/import-json`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ items })
+    });
+    if (res.ok){ await loadRules(); alert('导入成功'); } else { alert('导入失败'); }
+    e.target.value = '';
+  });
 }
 
 function applyTemplateToAll(){
