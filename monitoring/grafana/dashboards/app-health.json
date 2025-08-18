@@ -1,0 +1,45 @@
+{
+  "title": "GAS App Health",
+  "tags": ["gas", "health"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "grafana-singlestat-panel",
+      "title": "Ready (probe)",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "probe_success{job=\"blackbox_http\", instance=\"http://app:8000/ready\"}"
+        }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Probe Duration",
+      "gridPos": {"x": 6, "y": 0, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "probe_duration_seconds{job=\"blackbox_http\"}", "legendFormat": "{{instance}}"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "cAdvisor CPU %",
+      "gridPos": {"x": 0, "y": 6, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "rate(container_cpu_usage_seconds_total{image!=\"\"}[5m]) * 100", "legendFormat": "{{name}}"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "cAdvisor Memory (bytes)",
+      "gridPos": {"x": 12, "y": 6, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "container_memory_usage_bytes{image!=\"\"}", "legendFormat": "{{name}}"}
+      ]
+    }
+  ]
+}
+

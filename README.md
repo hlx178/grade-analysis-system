@@ -353,4 +353,26 @@ alembic upgrade head
   - 保留近期版本镜像与备份
 
 
+
+## 监控与可观测（Prometheus + Grafana）
+
+- 组件：cAdvisor（容器指标）、node-exporter（主机指标）、blackbox-exporter（HTTP 探针）、Prometheus、Grafana
+- 启动：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+# 访问 Grafana: http://localhost:3000 （默认密码 admin / admin）
+# 访问 Prometheus: http://localhost:9090
+# cAdvisor: http://localhost:8080
+```
+
+- 已预置：
+  - Prometheus 抓取 cAdvisor/node/blackbox 与自身
+  - Blackbox 探针检查 http://app:8000/health 与 /ready
+  - Grafana 预置 Prometheus 数据源与简单仪表盘（GAS App Health）
+
+- 生产建议：
+  - 给 Grafana 管理员设置强密码（GF_SECURITY_ADMIN_PASSWORD）
+  - 将监控对外访问限制在内网或 VPN
+
 🚧 项目正在持续演进，欢迎反馈与贡献。
