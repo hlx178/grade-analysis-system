@@ -280,6 +280,34 @@ docker compose -f docker-compose.caddy.yml up -d
   - 前往仓库 Packages → 容器包 → Settings，将可见性切换为 Public（如果需要公开拉取）
 
 
+## Nginx 反向代理示例
+
+- 使用 docker-compose.nginx.yml 与 nginx.conf：
+
+```bash
+# 启动
+docker compose -f docker-compose.nginx.yml up -d
+```
+
+- 如需 HTTPS，请将证书挂载并在 nginx.conf 中添加 443 server 块配置（ssl_certificate/ssl_certificate_key）。
+
+## 使用 Postgres 外置数据库
+
+- 使用 docker-compose.postgres.yml：
+
+```bash
+# 启动（将自动拉起 Postgres 并在健康后启动应用）
+docker compose -f docker-compose.postgres.yml up -d
+```
+
+- 连接串由环境变量 DATABASE_URL 指定（已经在 compose 中设置）：
+  - postgresql+psycopg2://gas:gas_pass@db:5432/gas
+
+- 注意事项：
+  - 首次运行会初始化空库，请按 README 的“初始化数据库与管理员”步骤在容器内执行 flask init-db 和 create-admin
+  - 如需数据迁移，可后续接入 Alembic
+
+
 ## 开发状态
 
 🚧 项目正在持续演进，欢迎反馈与贡献。

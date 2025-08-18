@@ -1,0 +1,31 @@
+version: '3.9'
+
+services:
+  app:
+    image: ghcr.io/hlx178/grade-analysis-system:latest
+    container_name: gas
+    environment:
+      - FLASK_CONFIG=production
+      - EXPORT_RETENTION_DAYS=7
+      - EXPORT_MAX_CONCURRENT_PER_USER=2
+      - DOWNLOAD_LINK_TTL_SECONDS=3600
+    volumes:
+      - ./uploads:/app/uploads
+      - ./exports:/app/exports
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: gas-nginx
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      # 如有证书与 HTTPS，可开放 443 并配置 ssl server 块
+      # - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
