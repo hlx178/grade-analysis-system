@@ -1,0 +1,102 @@
+{% extends 'base.html' %}
+{% block title %}考试方案配置 - 成绩分析系统{% endblock %}
+{% block content %}
+<h3>考试方案配置</h3>
+<div class="row g-3 align-items-end mb-3">
+  <div class="col-auto">
+    <label class="form-label">考试类型</label>
+    <select id="examType" class="form-select">
+      <option value="regular">常规考试</option>
+      <option value="mock">模拟考试</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-primary" onclick="loadSchemes()">加载</button>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-success" onclick="addRow()">新增</button>
+  </div>
+</div>
+<table class="table table-bordered align-middle" id="schemeTable">
+  <thead>
+    <tr>
+      <th>学科代码</th>
+      <th>学科名称</th>
+      <th>满分</th>
+      <th style="width:120px;">操作</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadSchemes(){
+  const examType = document.getElementById('examType').value;
+  const res = await fetch(`/api/exam-schemes?exam_type=${examType}`);
+  const items = await res.json();
+  const tbody = document.querySelector('#schemeTable tbody');
+  tbody.innerHTML = '';
+  items.forEach(it => tbody.appendChild(rowFromItem(it)));
+}
+
+function rowFromItem(it){
+  const tr = document.createElement('tr');
+  tr.dataset.id = it.id;
+  tr.innerHTML = `
+    <td><input class="form-control" value="${it.subject_code}" disabled></td>
+    <td><input class="form-control subject-name" value="${it.subject_name}"></td>
+    <td><input class="form-control max-score" type="number" step="0.1" value="${it.max_score}"></td>
+    <td>
+      <button class="btn btn-sm btn-outline-primary me-2" onclick="saveRow(this)">保存</button>
+      <button class="btn btn-sm btn-outline-danger" onclick="deleteRow(this)">删除</button>
+    </td>`;
+  return tr;
+}
+
+function addRow(){
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input class="form-control code" placeholder="如 CN/MA/EN..."></td>
+    <td><input class="form-control name" placeholder="学科名称"></td>
+    <td><input class="form-control score" type="number" step="0.1" placeholder="满分"></td>
+    <td><button class="btn btn-sm btn-success" onclick="createRow(this)">创建</button></td>`;
+  document.querySelector('#schemeTable tbody').appendChild(tr);
+}
+
+async function createRow(btn){
+  const tr = btn.closest('tr');
+  const code = tr.querySelector('.code').value.trim();
+  const name = tr.querySelector('.name').value.trim();
+  const score = parseFloat(tr.querySelector('.score').value);
+  const examType = document.getElementById('examType').value;
+  const res = await fetch('/api/exam-schemes', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ exam_type: examType, subject_code: code, subject_name: name, max_score: score })
+  });
+  if (res.ok){ loadSchemes(); } else { alert('创建失败'); }
+}
+
+async function saveRow(btn){
+  const tr = btn.closest('tr');
+  const id = tr.dataset.id;
+  const name = tr.querySelector('.subject-name').value;
+  const score = parseFloat(tr.querySelector('.max-score').value);
+  const res = await fetch(`/api/exam-schemes/${id}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ subject_name: name, max_score: score })
+  });
+  if (!res.ok) alert('保存失败');
+}
+
+async function deleteRow(btn){
+  const tr = btn.closest('tr');
+  const id = tr.dataset.id;
+  if (!confirm('确认删除该配置？')) return;
+  const res = await fetch(`/api/exam-schemes/${id}`, { method: 'DELETE' });
+  if (res.ok){ tr.remove(); } else { alert('删除失败'); }
+}
+
+window.addEventListener('DOMContentLoaded', loadSchemes);
+</script>
+{% endblock %}

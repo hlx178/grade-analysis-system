@@ -11,7 +11,7 @@ from flask import Blueprint, current_app, flash, jsonify, redirect, render_templ
 from flask_login import login_required, login_user, logout_user
 
 from app import db
-from app.models import Course, Grade, Student, User
+from app.models import Course, Grade, Student, User, ExamScheme
 from app.utils import (
     SUBJECTS,
     TOTAL_SUBJECT,
@@ -39,7 +39,12 @@ def dashboard():
     course_stats = get_course_statistics()
     courses = Course.query.order_by(Course.code).all()
     classes = get_class_list()
-    return render_template("dashboard.html", course_stats=course_stats, courses=courses, classes=classes)
+    return render_template(
+        "dashboard.html",
+        course_stats=course_stats,
+        courses=courses,
+        classes=classes,
+    )
 
 
 # 学生管理页面
@@ -87,6 +92,14 @@ def login():
 @login_required
 def import_page():
     return render_template("import.html")
+
+
+@main_bp.route("/exam-schemes")
+@login_required
+def exam_schemes_page():
+    # 初始显示常规考试，若无则创建默认方案
+    ensure_default_exam_scheme("regular")
+    return render_template("exam_schemes.html")
 
 
 @auth_bp.route("/logout")
@@ -480,3 +493,55 @@ def api_analysis_ranking():
     class_name = request.args.get("class_name")
     rankings = get_student_ranking(course_id=course_id, class_name=class_name)
     return jsonify({"rankings": rankings})
+
+
+# ExamScheme CRUD
+@api_bp.route("/exam-schemes", methods=["GET", "POST"])
+@login_required
+def api_exam_schemes():
+    if request.method == "POST":
+        data = request.get_json() or request.form
+        exam_type = normalize_exam_type(data.get("exam_type"))
+        subject_code = data.get("subject_code")
+        subject_name = data.get("subject_name")
+        max_score = float(data.get("max_score", 100))
+        item = ExamScheme(
+            exam_type=exam_type, subject_code=subject_code, subject_name=subject_name, max_score=max_score
+        )
+        db.session.add(item)
+        db.session.commit()
+        return jsonify({"id": item.id}), 201
+    # GET
+    exam_type = normalize_exam_type(request.args.get("exam_type") or "regular")
+    items = ExamScheme.query.filter_by(exam_type=exam_type).all()
+    return jsonify(
+        [
+            {
+                "id": it.id,
+                "exam_type": it.exam_type,
+                "subject_code": it.subject_code,
+                "subject_name": it.subject_name,
+                "max_score": it.max_score,
+            }
+            for it in items
+        ]
+    )
+
+
+@api_bp.route("/exam-schemes/<int:item_id>", methods=["PUT", "DELETE"])
+@login_required
+def api_exam_scheme_detail(item_id):
+    item = ExamScheme.query.get_or_404(item_id)
+    if request.method == "PUT":
+        data = request.get_json() or request.form
+        if "max_score" in data:
+            item.max_score = float(data.get("max_score"))
+        if "subject_name" in data:
+            item.subject_name = data.get("subject_name")
+        if "exam_type" in data:
+            item.exam_type = normalize_exam_type(data.get("exam_type"))
+        db.session.commit()
+        return jsonify({"message": "updated"})
+    db.session.delete(item)
+    db.session.commit()
+    return jsonify({"message": "deleted"})
