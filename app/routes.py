@@ -1037,18 +1037,30 @@ class ExportTask:
         self.finished_at = None
 
     def to_dict(self):
+        import os as _os
+        # 构造筛选摘要
+        p = self.params or {}
+        def _join(v):
+            if isinstance(v, list):
+                return ','.join(v)
+            return str(v or '')
+        summary = f"考试:{_join(p.get('exam_name') or p.get('exam_names'))} 学科:{p.get('subject_code') or ''} 年级:{_join(p.get('grade_level') or p.get('grade_levels'))} 班级:{_join(p.get('class_name') or p.get('class_names'))} 范围:{p.get('scope') or 'all'} 排序:{p.get('order_by') or 'score_desc'}"
+        file_ready = bool(self.file and _os.path.isfile(self.file) and self.status=='completed')
+        file_size = _os.path.getsize(self.file) if file_ready else None
         d = {
             'task_id': self.id,
             'status': self.status,
             'progress': self.progress,
             'file': self.file,
+            'filename': _os.path.basename(self.file) if self.file else None,
+            'file_ready': file_ready,
+            'file_size': file_size,
             'error': self.error,
             'created_at': self.created_at.isoformat() + 'Z',
             'finished_at': self.finished_at.isoformat() + 'Z' if self.finished_at else None,
+            'summary': summary,
+            'params': p,
         }
-        # 摘要（文件名）
-        if self.file:
-            d['filename'] = os.path.basename(self.file)
         return d
 
 @api_bp.route('/export/tasks', methods=['POST'])
