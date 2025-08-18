@@ -116,7 +116,7 @@
           <button class="btn btn-outline-secondary" onclick="autoRefreshToggle(this)">开启自动刷新</button>
         </div>
         <table class="table table-sm" id="exportTasksTable">
-          <thead><tr><th>创建时间</th><th>任务ID</th><th>状态</th><th>进度</th><th>文件名</th><th>大小</th><th>摘要</th><th>操作</th></tr></thead>
+          <thead><tr><th><input type="checkbox" onclick="toggleTaskAll(this)"></th><th>创建时间</th><th>任务ID</th><th>状态</th><th>进度</th><th>文件名</th><th>大小</th><th>摘要</th><th>操作</th></tr></thead>
           <tbody></tbody>
         </table>
         <div id="taskPager" class="mt-2"></div>
@@ -125,6 +125,9 @@
         <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
         <button class="btn btn-outline-primary" onclick="refreshExportTasks()">刷新</button>
       </div>
+        <button class="btn btn-outline-danger" onclick="deleteSelectedTasks()">删除所选</button>
+        <button class="btn btn-outline-danger" onclick="deleteCompletedTasks()">批量删除已完成</button>
+
     </div>
   </div>
 </div>
@@ -397,6 +400,29 @@ async function loadMyTasks(page=1){
   ensureNotifyPermission();
   data.items.filter(it=>it.status==='completed').forEach(notifyDone);
   renderTaskPager(data.total, data.page, data.page_size);
+
+function toggleTaskAll(cb){
+  document.querySelectorAll('#exportTasksTable tbody .task-cb').forEach(x=> x.checked = cb.checked);
+}
+
+async function deleteSelectedTasks(){
+  const ids = Array.from(document.querySelectorAll('#exportTasksTable tbody tr'))
+    .filter(tr=> tr.querySelector('.task-cb')?.checked)
+    .map(tr=> tr.dataset.id);
+  if (!ids.length){ alert('请选择任务'); return; }
+  if (!confirm('确认删除所选任务及文件？')) return;
+  const r = await fetch('/api/export/my-tasks/batch', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids }) });
+  if (!r.ok){ alert('删除失败'); return; }
+  loadMyTasks(1);
+}
+
+async function deleteCompletedTasks(){
+  if (!confirm('确认删除所有已完成任务及文件？')) return;
+  const r = await fetch('/api/export/my-tasks/batch', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'completed' }) });
+  if (!r.ok){ alert('删除失败'); return; }
+  loadMyTasks(1);
+}
+
 }
 
 async function deleteTask(id){

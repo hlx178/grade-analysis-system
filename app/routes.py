@@ -1241,6 +1241,36 @@ def api_export_my_tasks():
     return jsonify({ 'items': [to_obj(r) for r in rows], 'total': total, 'page': page, 'page_size': page_size })
 
 
+@api_bp.route('/export/my-tasks/batch', methods=['DELETE'])
+@login_required
+def api_export_my_tasks_batch_delete():
+    data = request.get_json(force=True) or {}
+    ids = data.get('ids') or []
+    status = data.get('status')
+    q = ExportJob.query
+    if current_user.role != 'admin':
+        q = q.filter(ExportJob.user_id == current_user.id)
+    if status:
+        q = q.filter(ExportJob.status == status)
+    elif ids:
+        q = q.filter(ExportJob.id.in_(ids))
+    else:
+        return jsonify({'error':'no_target'}), 400
+    rows = q.all()
+    removed = 0
+    for job in rows:
+        try:
+            if job.file_path and os.path.isfile(job.file_path):
+                os.remove(job.file_path)
+        except Exception:
+            pass
+        db.session.delete(job)
+        removed += 1
+        _export_tasks.pop(job.id, None)
+    db.session.commit()
+    return jsonify({'removed': removed})
+
+
 # 简易清理任务：删除过期导出文件（在应用启动后首次调用时触发一次）
 _last_cleanup = None
 
