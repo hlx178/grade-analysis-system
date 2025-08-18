@@ -951,7 +951,9 @@ def api_summary_export():
     name_subject = subject_code or '全部学科'
     name_gl = '-'.join(grade_levels) if grade_levels else '全部年级'
     name_cl = '-'.join(class_names) if class_names else '全部班级'
-    base_name = f"{_safe_name(name_exam)}_{_safe_name(name_subject)}_{_safe_name(name_gl)}_{_safe_name(name_cl)}_{ts}"
+    scope = request.args.get('scope') or 'all'
+    order_by = request.args.get('order_by') or 'score_desc'
+    base_name = f"{_safe_name(name_exam)}_{_safe_name(name_subject)}_{_safe_name(name_gl)}_{_safe_name(name_cl)}_{_safe_name(scope)}_{_safe_name(order_by)}_{ts}"
 
     if fmt == 'xlsx':
         import pandas as pd

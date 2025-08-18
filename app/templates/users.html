@@ -15,8 +15,8 @@
   <div class="ms-auto">
     <div class="btn-group">
       <button class="btn btn-outline-primary" onclick="batchSave()">批量保存</button>
-      <button class="btn btn-outline-primary" onclick="setRoleForSelected()">所选设角色</button>
-      <button class="btn btn-outline-primary" onclick="applyVisibilityToSelected()">所选设可见范围</button>
+      <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#batchRoleModal">所选设角色</button>
+      <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#batchVisModal">所选设可见范围</button>
       <button class="btn btn-outline-secondary" onclick="exportUsers()">导出CSV</button>
       <input type="file" id="importUsersFile" accept="text/csv,application/vnd.ms-excel" class="d-none"/>
       <button class="btn btn-outline-secondary" onclick="document.getElementById('importUsersFile').click()">导入CSV</button>
@@ -38,6 +38,56 @@
   <tbody></tbody>
 </table>
 <div id="pager" class="mt-2"></div>
+
+<!-- 批量设角色 Modal -->
+<div class="modal fade" id="batchRoleModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">批量设置角色</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <select id="batchRoleSelect" class="form-select">
+          <option value="teacher">teacher</option>
+          <option value="student">student</option>
+          <option value="admin">admin</option>
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" onclick="confirmBatchRole()">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 批量设可见范围 Modal -->
+<div class="modal fade" id="batchVisModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">批量设置可见范围</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">可见年级（逗号分隔）</label>
+          <input id="batchGl" class="form-control" placeholder="如：七年级,八年级">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">可见班级（逗号分隔）</label>
+          <input id="batchCl" class="form-control" placeholder="如：一班,二班">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" onclick="confirmBatchVis()">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 {% block scripts %}
 <script>
@@ -121,6 +171,28 @@ async function batchSave(){
   alert('批量保存完成');
 }
 
+async function confirmBatchRole(){
+  const role = document.getElementById('batchRoleSelect').value;
+  const ids = selectedIds();
+  if (!ids.length){ alert('请选择行'); return; }
+  await fetch('/api/users/batch', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ items: ids.map(id=>({ id, role })) }) });
+  loadUsers(1);
+  bootstrap.Modal.getInstance(document.getElementById('batchRoleModal')).hide();
+}
+
+async function confirmBatchVis(){
+  const gl = document.getElementById('batchGl').value.trim();
+  const cl = document.getElementById('batchCl').value.trim();
+  const ids = selectedIds();
+  if (!ids.length){ alert('请选择行'); return; }
+  // 简单校验：允许为空或逗号分隔的非空项
+  const validList = (s)=> s==='' || s.split(',').every(x=>x.trim().length>0);
+  if (!validList(gl) || !validList(cl)){ alert('格式错误，请检查'); return; }
+  await fetch('/api/users/batch', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ items: ids.map(id=>({ id, allowed_grade_levels: gl, allowed_class_names: cl })) }) });
+  loadUsers(1);
+  bootstrap.Modal.getInstance(document.getElementById('batchVisModal')).hide();
+}
+
 async function exportUsers(){
   // 简单CSV导出，包含当前页
   const header = ['id','username','email','role','allowed_grade_levels','allowed_class_names'];
@@ -149,9 +221,11 @@ document.getElementById('importUsersFile').addEventListener('change', async (e)=
   const file = e.target.files[0];
   if (!file) return;
   const text = await file.text();
-  const lines = text.split(/\r?\n/).filter(Boolean);
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length>0);
   if (lines.length < 2){ alert('空文件'); return; }
-  const header = lines[0].split(',');
+  const header = lines[0].split(',').map(h=>h.trim());
+  const required = ['id','username','email','role','allowed_grade_levels','allowed_class_names'];
+  for (const r of required){ if (!header.includes(r)){ alert('缺少列: ' + r); return; } }
   const idx = {
     id: header.indexOf('id'),
     username: header.indexOf('username'),
@@ -160,17 +234,24 @@ document.getElementById('importUsersFile').addEventListener('change', async (e)=
     gl: header.indexOf('allowed_grade_levels'),
     cl: header.indexOf('allowed_class_names'),
   };
+  const allowedRoles = new Set(['admin','teacher','student']);
+  let ok=0, fail=0; const fails=[];
   for (let i=1;i<lines.length;i++){
     const cols = lines[i].split(',');
-    const id = cols[idx.id];
-    const payload = {
-      role: cols[idx.role],
-      allowed_grade_levels: cols[idx.gl],
-      allowed_class_names: cols[idx.cl],
-    };
-    await fetch(`/api/users/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    const id = (cols[idx.id]||'').trim();
+    const role = (cols[idx.role]||'').trim();
+    const gl = (cols[idx.gl]||'').trim();
+    const cl = (cols[idx.cl]||'').trim();
+    if (!id || isNaN(Number(id))){ fail++; fails.push({line:i+1, reason:'id 非数字'}); continue; }
+    if (role && !allowedRoles.has(role)){ fail++; fails.push({line:i+1, reason:'非法角色: '+role}); continue; }
+    const payload = { role, allowed_grade_levels: gl, allowed_class_names: cl };
+    try{
+      const res = await fetch(`/api/users/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+      if (!res.ok){ fail++; fails.push({line:i+1, reason:'接口返回 '+res.status}); }
+      else ok++;
+    }catch(err){ fail++; fails.push({line:i+1, reason: String(err)}); }
   }
-  alert('导入完成');
+  alert(`导入完成：成功 ${ok} 条，失败 ${fail} 条` + (fail? `\n失败明细(最多10条):\n`+fails.slice(0,10).map(f=>`第${f.line}行: ${f.reason}`).join('\n') : ''));
   e.target.value='';
   loadUsers(1);
 });
