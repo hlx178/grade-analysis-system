@@ -225,6 +225,11 @@
             <input class="form-check-input" type="checkbox" id="onlyMeets">
             <label class="form-check-label" for="onlyMeets">仅显示达标</label>
           </div>
+          <select id="compareSortBy" class="form-select form-select-sm d-inline-block" style="width:130px">
+            <option value="avg" selected>按均分</option>
+            <option value="count">按人数</option>
+          </select>
+
 
           <input id="compareExam" class="form-control form-control-sm d-inline-block" style="width:180px" placeholder="考试名称">
           <input id="minCount" type="number" class="form-control form-control-sm d-inline-block" style="width:120px" placeholder="人数阈值(可选)">
@@ -318,6 +323,10 @@ function getPrefs(){
     percentage: document.getElementById('colPercentage').checked,
     rule_version: document.getElementById('colRuleVersion').checked,
     trend_chrono: document.getElementById('trendChrono')?.checked || false,
+    class_compare: {
+      only_meets: document.getElementById('onlyMeets')?.checked || false,
+      sort_by: document.getElementById('compareSortBy')?.value || 'avg',
+    }
   };
 }
 function applyPrefs(p){
@@ -340,6 +349,11 @@ function applyPrefs(p){
   try{ fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), trend_toggles: toggles})}); }catch(e){}
 
   const chrono = document.getElementById('trendChrono'); if (chrono) chrono.checked = !!p.trend_chrono;
+  // 班级对比偏好
+  if (p.class_compare){
+    const onlyMeets = document.getElementById('onlyMeets'); if (onlyMeets) onlyMeets.checked = !!p.class_compare.only_meets;
+    const sortSel = document.getElementById('compareSortBy'); if (sortSel && p.class_compare.sort_by) sortSel.value = p.class_compare.sort_by;
+  }
   // 合并后端偏好中的趋势开关（覆盖 localStorage）
   if (p.trend_toggles){
     const map = {tgAvg:'avg', tgMed:'med', tgBand:'band', tgMax:'max', tgMin:'min'};
@@ -716,6 +730,8 @@ async function loadClassCompare(){
   if (top_n) p.set('top_n', top_n);
   const minCount = Number(document.getElementById('minCount')?.value || 0);
   if (minCount>0) p.set('min_count', String(minCount));
+  const sort_by = (document.getElementById('compareSortBy')?.value || 'avg');
+  p.set('sort_by', sort_by);
   const r = await fetch('/api/analysis/class-compare?'+p.toString());
   if (!r.ok) return;
   const data = await r.json();
@@ -828,9 +844,11 @@ function buildClassExportUrl(){
   const grade_level = (document.getElementById('gradeLevel')?.value || '').trim();
   const top_n = (document.getElementById('compareTopN')?.value || '').trim();
   const minCount = Number(document.getElementById('minCount')?.value || 0);
+  const sort_by = (document.getElementById('compareSortBy')?.value || 'avg');
   if (grade_level) p.set('grade_level', grade_level);
   if (top_n) p.set('top_n', top_n);
   if (minCount>0) p.set('min_count', String(minCount));
+  p.set('sort_by', sort_by);
   return '/api/analysis/class-compare/export?'+p.toString();
 }
 
@@ -840,7 +858,8 @@ function buildExportAllUrl(){
   const { subject_code, grade_level, class_name } = qs();
   const exam = document.getElementById('compareExam').value.trim() || (Array.from(document.getElementById('examName').selectedOptions)[0]?.value || '');
   const top_n = (document.getElementById('compareTopN')?.value || '').trim();
-  const bin_width = Number(document.getElementById('distBin').value)||10;
+  const bin_raw = document.getElementById('distBin').value.trim();
+  const bin_width = (bin_raw.toLowerCase?.() === 'auto' || bin_raw === '') ? 'auto' : (Number(bin_raw)||10);
   const p = new URLSearchParams({ subject_code, grade_level, class_name, bin_width });
   if (exam) p.set('exam_name', exam);
   if (top_n) p.set('top_n', top_n);

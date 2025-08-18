@@ -713,12 +713,16 @@ def api_analysis_class_compare():
       - grade_level（可选）
       - top_n（可选，>0 时返回前 N 个均分最高的班级）
       - min_count（可选，>0 时剔除样本数小于该阈值的班级）
+      - sort_by（可选，avg|count，默认avg）
     """
     exam_name = request.args.get('exam_name')
     subject_code = request.args.get('subject_code')
     grade_level = request.args.get('grade_level')
     top_n = request.args.get('top_n', type=int)
     min_count = request.args.get('min_count', type=int)
+    sort_by = (request.args.get('sort_by') or 'avg').lower()
+    if sort_by not in ('avg','count'):
+        sort_by = 'avg'
     q = Grade.query.join(Course).join(Student)
     if exam_name:
         q = q.filter(Grade.exam_name == exam_name)
@@ -741,7 +745,10 @@ def api_analysis_class_compare():
         out.append({'class_name': cls, 'avg': round(mean,2), 'count': n, 'std': round(math.sqrt(var),2), 'meets_threshold': bool(meets)})
     total_classes = len(out)
     below_threshold = sum(1 for o in out if not o['meets_threshold']) if (min_count and min_count > 0) else 0
-    out.sort(key=lambda x: x['avg'], reverse=True)
+    if sort_by == 'count':
+        out.sort(key=lambda x: x['count'], reverse=True)
+    else:
+        out.sort(key=lambda x: x['avg'], reverse=True)
     if top_n and top_n > 0:
         out = out[:top_n]
     meta = {'min_count': int(min_count or 0), 'total': total_classes, 'below_threshold': below_threshold, 'filtered_out': below_threshold, 'returned': len(out)}
@@ -1201,7 +1208,7 @@ def api_summary_list():
 def api_summary_prefs():
     from app.models import UserPreference
     import json
-    key = 'summary_columns'
+    key = 'summary_prefs'
     if request.method == 'PUT':
         data = request.get_json(force=True)
         # 兼容新增字段：trend_chrono + trend_toggles
@@ -1211,6 +1218,14 @@ def api_summary_prefs():
             data['trend_toggles'] = {
                 'avg': True, 'med': True, 'band': True, 'max': True, 'min': True
             }
+        # 兼容新增字段：class compare 偏好
+        if 'class_compare' not in data or not isinstance(data.get('class_compare'), dict):
+            data['class_compare'] = {'only_meets': False, 'sort_by': 'avg'}
+        else:
+            if 'only_meets' not in data['class_compare']:
+                data['class_compare']['only_meets'] = False
+            if data['class_compare'].get('sort_by') not in ('avg','count'):
+                data['class_compare']['sort_by'] = 'avg'
         pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
         if not pref:
             pref = UserPreference(user_id=current_user.id, key=key, value='{}')
@@ -1224,9 +1239,9 @@ def api_summary_prefs():
         return jsonify({
             'letter': True, 'class_rank': True, 'grade_rank': True,
             'trend_chrono': False,
-            'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True}
+            'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True},
+            'class_compare': {'only_meets': False, 'sort_by': 'avg'}
         })
-    import json
     try:
         val = json.loads(pref.value)
         # 合并默认值，防止旧数据缺字段
@@ -1238,12 +1253,20 @@ def api_summary_prefs():
             for k in ['avg','med','band','max','min']:
                 if k not in val['trend_toggles']:
                     val['trend_toggles'][k] = True
+        if 'class_compare' not in val or not isinstance(val.get('class_compare'), dict):
+            val['class_compare'] = {'only_meets': False, 'sort_by': 'avg'}
+        else:
+            if 'only_meets' not in val['class_compare']:
+                val['class_compare']['only_meets'] = False
+            if val['class_compare'].get('sort_by') not in ('avg','count'):
+                val['class_compare']['sort_by'] = 'avg'
         return jsonify(val)
     except Exception:
         return jsonify({
             'letter': True, 'class_rank': True, 'grade_rank': True,
             'trend_chrono': False,
-            'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True}
+            'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True},
+            'class_compare': {'only_meets': False, 'sort_by': 'avg'}
         })
 
 
