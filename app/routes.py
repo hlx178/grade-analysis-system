@@ -706,41 +706,40 @@ def api_analysis_trends_export():
 @api_bp.route('/analysis/class-compare', methods=['GET'])
 @login_required
 def api_analysis_class_compare():
-    """按考试名称+学科维度，对各班的均分进行对比"""
+    """按考试名称+学科维度，对各班的均分进行对比
+    可选参数：
+      - exam_name
+      - subject_code（默认 TOTAL 时请显式传递）
+      - grade_level（可选）
+      - top_n（可选，>0 时返回前 N 个均分最高的班级）
+    """
     exam_name = request.args.get('exam_name')
     subject_code = request.args.get('subject_code')
+    grade_level = request.args.get('grade_level')
+    top_n = request.args.get('top_n', type=int)
     q = Grade.query.join(Course).join(Student)
     if exam_name:
         q = q.filter(Grade.exam_name == exam_name)
     if subject_code:
         q = q.filter(Course.code == subject_code)
+    if grade_level:
+        q = q.filter(Student.grade_level == grade_level)
     rows = q.with_entities(Student.class_name, Grade.score).all()
     from collections import defaultdict
     import math
     agg = defaultdict(list)
     for cls, score in rows:
         agg[cls or '未知班级'].append(float(score))
-
-    med = _median(arr_sorted)
-    p25 = _percentile(arr_sorted, 25)
-    p75 = _percentile(arr_sorted, 75)
-    out.append({
-        'exam_name': exam_name,
-        'count': n,
-        'avg': round(mean,2),
-        'max': max(arr),
-        'min': min(arr),
-        'std': round(math.sqrt(var),2),
-        'median': round(med,2) if med is not None else None,
-        'p25': round(p25,2) if p25 is not None else None,
-        'p75': round(p75,2) if p75 is not None else None,
-    })
-
     out = []
     for cls, arr in agg.items():
         if not arr: continue
         n = len(arr); mean = sum(arr)/n
         var = sum((x-mean)**2 for x in arr)/n
+        out.append({'class_name': cls, 'avg': round(mean,2), 'count': n, 'std': round(math.sqrt(var),2)})
+    out.sort(key=lambda x: x['avg'], reverse=True)
+    if top_n and top_n > 0:
+        out = out[:top_n]
+    return jsonify({'compare': out})
 
 @api_bp.route('/analysis/distribution', methods=['GET'])
 @login_required
@@ -762,44 +761,6 @@ def api_analysis_distribution():
         if bin_width <= 0: bin_width = 10
     except Exception:
         bin_width = 10
-
-@api_bp.route('/analysis/class-compare/export', methods=['GET'])
-
-@api_bp.route('/analysis/distribution/export', methods=['GET'])
-@login_required
-def api_analysis_distribution_export():
-    """导出直方图分布为 CSV：label,start,end,count + summary 行"""
-    with current_app.test_request_context(query_string=request.query_string):
-        res = api_analysis_distribution()
-        data = res.get_json() if hasattr(res, 'get_json') else res.json
-    import csv, io
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['label','start','end','count'])
-    for b in data.get('bins', []):
-        writer.writerow([b.get('label'), b.get('start'), b.get('end'), b.get('count')])
-    # 空行 + summary
-    writer.writerow([])
-    s = data.get('summary') or {}
-    writer.writerow(['summary', 'count', s.get('count'), 'avg', s.get('avg'), 'max', s.get('max'), 'min', s.get('min'), 'std', s.get('std')])
-    output.seek(0)
-    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=distribution.csv'})
-
-@login_required
-def api_analysis_class_compare_export():
-    """导出班级对比数据为 CSV：class_name, avg, count, std"""
-    with current_app.test_request_context(query_string=request.query_string):
-        res = api_analysis_class_compare()
-        data = res.get_json() if hasattr(res, 'get_json') else res.json
-    import csv, io
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['class_name','avg','count','std'])
-    for row in data.get('compare', []):
-        writer.writerow([row.get('class_name'), row.get('avg'), row.get('count'), row.get('std')])
-    output.seek(0)
-    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=class_compare.csv'})
-
 
     q = Grade.query.join(Course).join(Student)
     if exam_name:
@@ -836,6 +797,42 @@ def api_analysis_class_compare_export():
     var = sum((x-mean)**2 for x in scores)/n
     summary = {'count': n, 'avg': round(mean,2), 'max': smax, 'min': smin, 'std': round(math.sqrt(var),2)}
     return jsonify({'bins': bins, 'summary': summary})
+
+@api_bp.route('/analysis/distribution/export', methods=['GET'])
+@login_required
+def api_analysis_distribution_export():
+    """导出直方图分布为 CSV：label,start,end,count + summary 行"""
+    with current_app.test_request_context(query_string=request.query_string):
+        res = api_analysis_distribution()
+        data = res.get_json() if hasattr(res, 'get_json') else res.json
+    import csv, io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['label','start','end','count'])
+    for b in data.get('bins', []):
+        writer.writerow([b.get('label'), b.get('start'), b.get('end'), b.get('count')])
+    # 空行 + summary
+    writer.writerow([])
+    s = data.get('summary') or {}
+    writer.writerow(['summary', 'count', s.get('count'), 'avg', s.get('avg'), 'max', s.get('max'), 'min', s.get('min'), 'std', s.get('std')])
+    output.seek(0)
+    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=distribution.csv'})
+
+@api_bp.route('/analysis/class-compare/export', methods=['GET'])
+@login_required
+def api_analysis_class_compare_export():
+    """导出班级对比数据为 CSV：class_name, avg, count, std"""
+    with current_app.test_request_context(query_string=request.query_string):
+        res = api_analysis_class_compare()
+        data = res.get_json() if hasattr(res, 'get_json') else res.json
+    import csv, io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['class_name','avg','count','std'])
+    for row in data.get('compare', []):
+        writer.writerow([row.get('class_name'), row.get('avg'), row.get('count'), row.get('std')])
+    output.seek(0)
+    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=class_compare.csv'})
 
 
 # 等级规则：查询

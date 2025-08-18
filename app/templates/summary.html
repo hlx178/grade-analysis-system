@@ -169,6 +169,13 @@
           </div>
           <div class="form-check form-check-inline">
             <input class="form-check-input" type="checkbox" id="tgMed" checked>
+          <select id="compareTopN" class="form-select form-select-sm d-inline-block" style="width:110px">
+            <option value="">全部</option>
+            <option value="5">Top 5</option>
+            <option value="10">Top 10</option>
+            <option value="20">Top 20</option>
+          </select>
+
             <label class="form-check-label" for="tgMed">中位数</label>
           </div>
           <div class="form-check form-check-inline">
@@ -619,7 +626,11 @@ async function loadClassCompare(){
   const exam = document.getElementById('compareExam').value.trim() || (Array.from(document.getElementById('examName').selectedOptions)[0]?.value || '');
   const subject_code = document.getElementById('subjectCode').value;
   if (!exam){ alert('请填写考试名称或在左侧选择一个'); return; }
+  const grade_level = (document.getElementById('gradeLevel')?.value || '').trim();
+  const top_n = (document.getElementById('compareTopN')?.value || '').trim();
   const p = new URLSearchParams({ exam_name: exam, subject_code });
+  if (grade_level) p.set('grade_level', grade_level);
+  if (top_n) p.set('top_n', top_n);
   const r = await fetch('/api/analysis/class-compare?'+p.toString());
   if (!r.ok) return;
   const data = await r.json();
