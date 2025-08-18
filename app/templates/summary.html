@@ -112,6 +112,10 @@
               <option value="failed">failed</option>
             </select>
           </div>
+          <div>
+            <label class="form-label">搜索</label>
+            <input id="taskQuery" class="form-control" placeholder="任务ID/文件名">
+          </div>
           <button class="btn btn-outline-primary" onclick="loadMyTasks(1)">加载我的任务</button>
           <button class="btn btn-outline-secondary" onclick="autoRefreshToggle(this)">开启自动刷新</button>
         </div>
@@ -381,8 +385,10 @@ function autoRefreshToggle(btn){
 async function loadMyTasks(page=1){
   const page_size = Number(document.getElementById('taskPageSize').value)||10;
   const status = document.getElementById('taskStatus').value;
+  const q = document.getElementById('taskQuery').value.trim();
   const qs = new URLSearchParams({ page, page_size });
   if (status) qs.set('status', status);
+  if (q) qs.set('q', q);
   const r = await fetch(`/api/export/my-tasks?${qs.toString()}`);
   if (!r.ok) return;
   const data = await r.json();

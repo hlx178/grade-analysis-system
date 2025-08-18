@@ -1272,11 +1272,16 @@ def api_export_my_tasks():
     page = request.args.get('page', type=int) or 1
     page_size = min(max(request.args.get('page_size', type=int) or 20, 1), 200)
     status = request.args.get('status')  # pending|running|completed|failed
+    qstr = (request.args.get('q') or '').strip()
     q = ExportJob.query
     if current_user.role != 'admin':
         q = q.filter(ExportJob.user_id == current_user.id)
     if status:
         q = q.filter(ExportJob.status == status)
+    if qstr:
+        like = f"%{qstr}%"
+        from sqlalchemy import or_
+        q = q.filter(or_(ExportJob.id.ilike(like), ExportJob.file_path.ilike(like)))
     total = q.count()
     rows = q.order_by(ExportJob.created_at.desc()).offset((page-1)*page_size).limit(page_size).all()
     def to_obj(j):
