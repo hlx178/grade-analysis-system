@@ -106,6 +106,45 @@ isort .
 
 GitHub Actions 会在每次推送时自动运行 lint 和测试。你可以在仓库的 Actions 标签页查看状态与日志。
 
+## 导入与模板
+
+- 推荐模板（多学科一张表，支持多工作表）：
+  - 学号、姓名、班级、语文、数学、英语、科学、社会、道法（可选：考试类型、考试名称）
+  - 总分由系统自动生成（写入虚拟课程 TOTAL）
+  - 上传后先调用 /api/import/preview 获取工作表列表，再携带 file_id + sheet_name 调用 /api/import/grades 导入
+  - 支持“常规考试/模拟考试”（internal: regular/mock）
+
+## 考试方案配置（满分）
+
+- 页面：/exam-schemes，可按考试类型配置各学科及总分满分
+- 模型：ExamScheme(exam_type, subject_code, subject_name, max_score)
+- 首次使用某考试类型会自动生成默认方案（各科100，总分=学科数×100）
+
+## 等级规则配置（A-E）
+
+- 页面：/grade-bands（单页管理所有学科，含 TOTAL）
+- 两种方法（按考试名称 exam_name + 学科 subject_code 生效）：
+  1) range：按分数段阈值设置 A_min/B_min/C_min/D_min（E为其余）
+  2) percentile：按百分比设置 A/B/C/D/E（总和需为100）
+- 默认阈值（用于未配置或回退场景）：80/60/40/20
+- API：
+  - GET /api/grade-bands?exam_name=期末 拉取规则
+  - PUT /api/grade-bands/bulk 批量保存（带校验）
+  - POST /api/grade-bands/preview 预览当前表单规则对选定课程/班级的分布
+- 页面增强：
+  - 一键“应用到所有学科”（以首行作为模板）
+  - 百分比法实时合计提示（合计达到100%为绿色）
+
+## 仪表盘分析
+
+- 页面：/（仪表盘）
+- 新增“考试名称”选择器；传 exam_name 到 /api/analysis/statistics
+- 分布优先规则：range > percentile；都无时按默认阈值 80/60/40/20 计算
+
+## CI 状态
+
+GitHub Actions 会在每次推送时自动运行 lint 和测试。你可以在仓库的 Actions 标签页查看状态与日志。
+
 ## 开发状态
 
-🚧 项目正在开发中...
+🚧 项目正在持续演进，欢迎反馈与贡献。
