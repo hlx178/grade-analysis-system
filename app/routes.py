@@ -818,7 +818,7 @@ def api_analysis_distribution():
 
     n = len(scores); mean = sum(scores)/n
     var = sum((x-mean)**2 for x in scores)/n
-    summary = {'count': n, 'avg': round(mean,2), 'max': smax, 'min': smin, 'std': round(math.sqrt(var),2)}
+    summary = {'count': n, 'avg': round(mean,2), 'max': smax, 'min': smin, 'std': round(math.sqrt(var),2), 'bin_width': int(bin_width)}
     # 追加比例与累计比例
     total = max(1, sum(b['count'] for b in bins))
     cum = 0
