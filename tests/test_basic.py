@@ -42,7 +42,8 @@ def test_create_admin_and_login(client, app):
     # login via form
     resp = client.post('/auth/login', data={'username': 'admin', 'password': 'secret'}, follow_redirects=True)
     assert resp.status_code == 200
-    assert b'登录成功' in resp.data
+    # Avoid non-ASCII bytes literal: decode and check text
+    assert '登录成功' in resp.get_data(as_text=True)
 
     # dashboard accessible after login
     resp2 = client.get('/')
