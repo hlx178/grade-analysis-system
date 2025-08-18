@@ -3,39 +3,44 @@
 """
 
 from datetime import datetime
-from flask_sqlalchemy import SQLAlchemy
+
 from flask_login import UserMixin
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
+
 from app import db
+
 
 class User(UserMixin, db.Model):
     """用户模型"""
-    __tablename__ = 'users'
-    
+
+    __tablename__ = "users"
+
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False, index=True)
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.String(20), nullable=False, default='teacher')  # admin, teacher, student
+    role = db.Column(db.String(20), nullable=False, default="teacher")  # admin, teacher, student
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_login = db.Column(db.DateTime)
-    
+
     def set_password(self, password):
         """设置密码"""
         self.password_hash = generate_password_hash(password)
-    
+
     def check_password(self, password):
         """验证密码"""
         return check_password_hash(self.password_hash, password)
-    
+
     def __repr__(self):
-        return f'<User {self.username}>'
+        return f"<User {self.username}>"
+
 
 class Student(db.Model):
     """学生模型"""
-    __tablename__ = 'students'
-    
+
+    __tablename__ = "students"
+
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.String(20), unique=True, nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
@@ -47,17 +52,21 @@ class Student(db.Model):
     enrollment_date = db.Column(db.Date, default=datetime.utcnow().date())
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
     # 关系
-    grades = db.relationship('Grade', backref='student', lazy='dynamic', cascade='all, delete-orphan')
-    
+    grades = db.relationship(
+        "Grade", backref="student", lazy="dynamic", cascade="all, delete-orphan"
+    )
+
     def __repr__(self):
-        return f'<Student {self.student_id}: {self.name}>'
+        return f"<Student {self.student_id}: {self.name}>"
+
 
 class Course(db.Model):
     """课程模型"""
-    __tablename__ = 'courses'
-    
+
+    __tablename__ = "courses"
+
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String(20), unique=True, nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
@@ -65,55 +74,59 @@ class Course(db.Model):
     credits = db.Column(db.Float, default=1.0)
     semester = db.Column(db.String(20))  # 学期
     academic_year = db.Column(db.String(10))  # 学年
-    teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    teacher_id = db.Column(db.Integer, db.ForeignKey("users.id"))
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
     # 关系
-    grades = db.relationship('Grade', backref='course', lazy='dynamic', cascade='all, delete-orphan')
-    teacher = db.relationship('User', backref='courses')
-    
+    grades = db.relationship(
+        "Grade", backref="course", lazy="dynamic", cascade="all, delete-orphan"
+    )
+    teacher = db.relationship("User", backref="courses")
+
     def __repr__(self):
-        return f'<Course {self.code}: {self.name}>'
+        return f"<Course {self.code}: {self.name}>"
+
 
 class Grade(db.Model):
     """成绩模型"""
-    __tablename__ = 'grades'
-    
+
+    __tablename__ = "grades"
+
     id = db.Column(db.Integer, primary_key=True)
-    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
-    course_id = db.Column(db.Integer, db.ForeignKey('courses.id'), nullable=False)
+    student_id = db.Column(db.Integer, db.ForeignKey("students.id"), nullable=False)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False)
     score = db.Column(db.Float, nullable=False)
-    exam_type = db.Column(db.String(20), default='final')  # midterm, final, quiz, assignment
+    exam_type = db.Column(db.String(20), default="final")  # midterm, final, quiz, assignment
     exam_date = db.Column(db.Date, default=datetime.utcnow().date())
     remarks = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # 复合索引
     __table_args__ = (
-        db.Index('idx_student_course', 'student_id', 'course_id'),
-        db.Index('idx_course_exam', 'course_id', 'exam_type'),
+        db.Index("idx_student_course", "student_id", "course_id"),
+        db.Index("idx_course_exam", "course_id", "exam_type"),
     )
-    
+
     @property
     def letter_grade(self):
         """计算等级成绩"""
         if self.score >= 90:
-            return 'A'
+            return "A"
         elif self.score >= 80:
-            return 'B'
+            return "B"
         elif self.score >= 70:
-            return 'C'
+            return "C"
         elif self.score >= 60:
-            return 'D'
+            return "D"
         else:
-            return 'F'
-    
+            return "F"
+
     @property
     def is_pass(self):
         """是否及格"""
         return self.score >= 60
-    
+
     def __repr__(self):
-        return f'<Grade {self.student.name}-{self.course.name}: {self.score}>'
+        return f"<Grade {self.student.name}-{self.course.name}: {self.score}>"
