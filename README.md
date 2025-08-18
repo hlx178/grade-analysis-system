@@ -258,6 +258,24 @@ docker pull ghcr.io/hlx178/grade-analysis-system:v1.0.0
 # 使用 v1.0.0 运行
 ```
 
+## 反向代理与 HTTPS（Caddy）
+
+- 使用 docker-compose.caddy.yml 与 Caddyfile：
+
+```bash
+# 修改 Caddyfile 中的域名为你的实际域名（示例：gas.example.edu.cn）
+# 可选修改全局 email，用于自动申请/续期证书
+
+# 启动
+docker compose -f docker-compose.caddy.yml up -d
+```
+
+- 说明
+  - Caddy 将自动申请并续期 Let’s Encrypt 证书，默认监听 80/443
+  - 反向代理至 app 服务的 8000 端口
+  - 可在 Caddyfile 中添加更多路由、Header、限流等
+
+
 - 可见性（首次）：
   - 前往仓库 Packages → 容器包 → Settings，将可见性切换为 Public（如果需要公开拉取）
 

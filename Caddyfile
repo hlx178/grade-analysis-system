@@ -1,0 +1,21 @@
+{
+  # 全局设置，可开启自动 HTTPS
+  email you@example.com
+}
+
+# 将域名替换为你的实际域名，例如 gas.example.edu.cn
+example.org {
+  # 反向代理到 Flask 应用容器内部端口
+  reverse_proxy app:8000
+
+  # 可选：限制请求体、设置超时等
+  @large {
+    header Content-Length > 10485760
+  }
+  handle @large {
+    request_body {
+      max_size 32MB
+    }
+  }
+}
+
