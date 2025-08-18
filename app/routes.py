@@ -1056,18 +1056,71 @@ class ExportTask:
 def api_export_task_create():
     # 接收与 /api/summary/export 相同的查询参数
     params = request.get_json(force=True) or {}
-    task_id = str(uuid.uuid4())
     user_id = current_user.id
+
+    # 并发限制
+    max_c = current_app.config.get('EXPORT_MAX_CONCURRENT_PER_USER', 2)
+    running = ExportJob.query.filter(ExportJob.user_id==user_id, ExportJob.status.in_(['pending','running'])).count()
+    if running >= max_c:
+        return jsonify({'error':'too_many_tasks', 'message': f'已有 {running} 个导出任务在进行中（上限 {max_c}），请稍候再试'}), 429
+
+    task_id = str(uuid.uuid4())
     _export_tasks[task_id] = ExportTask(task_id, user_id, params)
     # 持久化记录
     try:
         from json import dumps
-        job = ExportJob(id=task_id, user_id=user_id, params=dumps(params, ensure_ascii=False))
+        job = ExportJob(id=task_id, user_id=user_id, params=dumps(params, ensure_ascii=False), status='pending', progress=0)
         db.session.add(job); db.session.commit()
     except Exception:
         db.session.rollback()
 
     def worker(task_id, params, user_id):
+        try:
+            t = _export_tasks.get(task_id)
+            if not t: return
+            t.status = 'running'; t.progress = 10
+            # 复用逻辑：构建查询，与同步导出一致
+            with current_app.app_context():
+                # 更新DB为running
+                try:
+                    job = ExportJob.query.get(task_id)
+                    if job:
+                        job.status = 'running'; job.progress = 10; db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                from copy import deepcopy
+                args = deepcopy(params)
+                # 将用户可见范围注入参数（按创建者）
+                user = User.query.get(user_id)
+                if user and user.role != 'admin':
+                    if user.allowed_grade_levels and not args.get('grade_level'):
+                        args['grade_level'] = user.allowed_grade_levels
+                    if user.allowed_class_names and not args.get('class_name'):
+                        args['class_name'] = user.allowed_class_names
+                # 生成文件名与导出目录
+                export_dir = current_app.config.get('EXPORT_DIR', 'exports')
+                os.makedirs(export_dir, exist_ok=True)
+                # 调用一个内部函数生成文件
+                filepath = _build_export_file(args, export_dir)
+                t.status = 'completed'; t.file = filepath; t.progress = 100; t.finished_at = dt.datetime.utcnow()
+                try:
+                    job = ExportJob.query.get(task_id)
+                    if job:
+                        job.status = 'completed'; job.progress = 100; job.file_path = filepath; job.finished_at = dt.datetime.utcnow()
+                        db.session.commit()
+                except Exception:
+                    db.session.rollback()
+        except Exception as e:
+            t = _export_tasks.get(task_id)
+            if t:
+                t.status = 'failed'; t.error = str(e)
+            try:
+                job = ExportJob.query.get(task_id)
+                if job:
+                    job.status = 'failed'; job.error = str(e); job.finished_at = dt.datetime.utcnow()
+                    db.session.commit()
+            except Exception:
+                db.session.rollback()
         try:
             t = _export_tasks.get(task_id)
             if not t: return

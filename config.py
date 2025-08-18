@@ -18,6 +18,7 @@ class Config:
     # 导出目录
     EXPORT_DIR = os.environ.get("EXPORT_DIR") or "exports"
     EXPORT_RETENTION_DAYS = int(os.environ.get("EXPORT_RETENTION_DAYS") or 7)
+    EXPORT_MAX_CONCURRENT_PER_USER = int(os.environ.get("EXPORT_MAX_CONCURRENT_PER_USER") or 2)
 
     # 数据库配置
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL") or "sqlite:///grade_analysis.db"
