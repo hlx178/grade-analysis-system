@@ -14,6 +14,9 @@
     <button class="btn btn-success" onclick="saveBulk()">保存全部</button>
   </div>
   <div class="col-auto">
+    <button class="btn btn-outline-primary" onclick="applyTemplateToAll()">应用到所有学科（使用首行作为模板）</button>
+  </div>
+  <div class="col-auto">
     <button class="btn btn-outline-secondary" onclick="previewDist()">预览分布</button>
   </div>
 </div>
@@ -48,7 +51,10 @@
     <td><input class="form-control b_pct" type="number" step="1" min="0" max="100" placeholder="B%"></td>
     <td><input class="form-control c_pct" type="number" step="1" min="0" max="100" placeholder="C%"></td>
     <td><input class="form-control d_pct" type="number" step="1" min="0" max="100" placeholder="D%"></td>
-    <td><input class="form-control e_pct" type="number" step="1" min="0" max="100" placeholder="E%"></td>
+    <td>
+      <input class="form-control e_pct" type="number" step="1" min="0" max="100" placeholder="E%">
+      <small class="text-muted ms-2 pct-sum">合计: 0%</small>
+    </td>
   </tr>
   {% endfor %}
   </tbody>
@@ -70,6 +76,31 @@
 {% endblock %}
 {% block scripts %}
 <script>
+function rowPercentSum(tr){
+  const method = tr.querySelector('.method').value;
+  if (method !== 'percentile') return null;
+  const vals = ['.a_pct','.b_pct','.c_pct','.d_pct','.e_pct']
+    .map(sel => Number(tr.querySelector(sel)?.value || 0));
+  return vals.reduce((a,b)=>a+b,0);
+}
+
+function updatePercentBadges(){
+  document.querySelectorAll('#rulesTable tbody tr').forEach(tr => {
+    const sum = rowPercentSum(tr);
+    const badge = tr.querySelector('.pct-sum');
+    if (!badge){ return; }
+    if (sum === null){ badge.textContent = ''; return; }
+    badge.textContent = `合计: ${isNaN(sum)?0:sum}%`;
+    if (!isNaN(sum) && Math.round(sum) === 100){
+      badge.classList.remove('text-danger');
+      badge.classList.add('text-success');
+    } else {
+      badge.classList.remove('text-success');
+      badge.classList.add('text-danger');
+    }
+  });
+}
+
 function collectItems(){
   const rows = document.querySelectorAll('#rulesTable tbody tr');
   const items = [];
@@ -116,9 +147,31 @@ async function loadRules(){
   });
 }
 
+function validateClient(items){
+  for (const it of items){
+    if (it.method === 'percentile'){
+      const total = (it.a_pct||0)+(it.b_pct||0)+(it.c_pct||0)+(it.d_pct||0)+(it.e_pct||0);
+      if (Math.round(total) !== 100){
+        alert(`百分比法需合计100%，学科: ${it.subject_code}`);
+        return false;
+      }
+    }
+    if (it.method === 'range'){
+      if ([it.a_min,it.b_min,it.c_min,it.d_min].every(v=>v!==null && v!==undefined)){
+        if (!(it.a_min >= it.b_min && it.b_min >= it.c_min && it.c_min >= it.d_min)){
+          alert(`范围法需满足 A>=B>=C>=D，学科: ${it.subject_code}`);
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 async function saveBulk(){
   const exam_name = document.getElementById('examName').value.trim() || 'default';
   const items = collectItems();
+  if (!validateClient(items)) return;
   const res = await fetch('/api/grade-bands/bulk', {
     method: 'PUT', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ exam_name, items })
@@ -129,6 +182,30 @@ async function saveBulk(){
   } else {
     alert('保存失败：' + (data.error || '未知错误'));
   }
+}
+
+function applyTemplateToAll(){
+  const rows = Array.from(document.querySelectorAll('#rulesTable tbody tr'));
+  if (rows.length === 0) return;
+  const first = rows[0];
+  const method = first.querySelector('.method').value;
+  rows.forEach((tr, idx) => {
+    if (idx === 0) return;
+    tr.querySelector('.method').value = method;
+    if (method === 'range'){
+      tr.querySelector('.a_min').value = first.querySelector('.a_min').value;
+      tr.querySelector('.b_min').value = first.querySelector('.b_min').value;
+      tr.querySelector('.c_min').value = first.querySelector('.c_min').value;
+      tr.querySelector('.d_min').value = first.querySelector('.d_min').value;
+    } else {
+      tr.querySelector('.a_pct').value = first.querySelector('.a_pct').value;
+      tr.querySelector('.b_pct').value = first.querySelector('.b_pct').value;
+      tr.querySelector('.c_pct').value = first.querySelector('.c_pct').value;
+      tr.querySelector('.d_pct').value = first.querySelector('.d_pct').value;
+      tr.querySelector('.e_pct').value = first.querySelector('.e_pct').value;
+    }
+  });
+  updatePercentBadges();
 }
 
 async function previewDist(){
@@ -148,5 +225,14 @@ async function previewDist(){
     el.innerHTML = `<div class="alert alert-danger">预览失败：${data.error || '未知错误'}</div>`;
   }
 }
+// 绑定事件以实时更新百分比合计提示
+window.addEventListener('DOMContentLoaded', () => {
+  document.querySelector('#rulesTable').addEventListener('input', (e)=>{
+    if (e.target.matches('.a_pct,.b_pct,.c_pct,.d_pct,.e_pct,.method')){
+      updatePercentBadges();
+    }
+  });
+  updatePercentBadges();
+});
 </script>
 {% endblock %}
