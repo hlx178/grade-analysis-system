@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+.venv
+.git
+.gitignore
+uploads/
+exports/
+.env
+.idea
+.vscode
+.coverage
+htmlcov/
+*.log
+
