@@ -164,6 +164,73 @@ GitHub Actions 会在每次推送时自动运行 lint 和测试。你可以在�
 
 GitHub Actions 会在每次推送时自动运行 lint 和测试。你可以在仓库的 Actions 标签页查看状态与日志。
 
+
+## Docker 使用
+
+- 拉取镜像（GHCR）：
+
+```bash
+# 可将包设为 Public 后无需登录
+# 登录（如为私有包）：
+# echo $GH_PAT | docker login ghcr.io -u <your_github_username> --password-stdin
+
+# 拉取
+docker pull ghcr.io/hlx178/grade-analysis-system:latest
+```
+
+- 运行容器：
+
+```bash
+docker run --name gas \
+  -p 8000:8000 \
+  -e FLASK_CONFIG=production \
+  -v $(pwd)/uploads:/app/uploads \
+  -v $(pwd)/exports:/app/exports \
+  ghcr.io/hlx178/grade-analysis-system:latest
+```
+
+- 初始化数据库与管理员（可进入容器执行）：
+
+```bash
+# 初始化数据库
+docker exec -it gas flask init-db
+
+# 创建管理员
+docker exec -it gas flask create-admin
+```
+
+- 常用环境变量：
+  - FLASK_CONFIG=production
+  - EXPORT_DIR=/app/exports（默认）
+  - EXPORT_RETENTION_DAYS=7
+  - EXPORT_MAX_CONCURRENT_PER_USER=2
+  - DOWNLOAD_LINK_TTL_SECONDS=3600
+
+### docker-compose 示例
+
+```yaml
+version: '3.9'
+services:
+  app:
+    image: ghcr.io/hlx178/grade-analysis-system:latest
+    container_name: gas
+    ports:
+      - "8000:8000"
+    environment:
+      - FLASK_CONFIG=production
+      - EXPORT_RETENTION_DAYS=7
+      - EXPORT_MAX_CONCURRENT_PER_USER=2
+      - DOWNLOAD_LINK_TTL_SECONDS=3600
+    volumes:
+      - ./uploads:/app/uploads
+      - ./exports:/app/exports
+    restart: unless-stopped
+```
+
+- 访问 http://localhost:8000
+
+说明：镜像由 GitHub Actions 在 push 到 main 时自动构建并推送到 GHCR（ghcr.io/hlx178/grade-analysis-system:latest）。首次出现于 Packages 页面时，可将可见性设为 Public 以便公开拉取。
+
 ## 开发状态
 
 🚧 项目正在持续演进，欢迎反馈与贡献。
