@@ -1102,6 +1102,33 @@ def api_diagnostics_run():
     })
 
 
+# 诊断预设 CRUD（管理员）
+@api_bp.route('/diagnostics/presets', methods=['GET'])
+@login_required
+def api_diag_presets_list():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    presets = DiagnosticPreset.query.filter_by(user_id=current_user.id).order_by(DiagnosticPreset.id.desc()).all()
+    import json
+    return jsonify([{ 'id': p.id, 'name': p.name, 'payload': json.loads(p.payload) } for p in presets])
+
+
+@api_bp.route('/diagnostics/presets', methods=['POST'])
+@login_required
+def api_diag_preset_create():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True)
+    name = (data.get('name') or '').strip()
+    payload = data.get('payload') or {}
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+    import json
+    p = DiagnosticPreset(user_id=current_user.id, name=name, payload=json.dumps(payload, ensure_ascii=False))
+    db.session.add(p); db.session.commit()
+    return jsonify({'id': p.id, 'name': p.name})
+
+
 # 用户管理 API（管理员）
 @api_bp.route('/users', methods=['GET'])
 @login_required

@@ -130,6 +130,15 @@ class UserPreference(db.Model):
         return f'<UserPref {self.user_id} {self.key}>'
 
 
+class DiagnosticPreset(db.Model):
+    __tablename__ = 'diagnostic_presets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True, nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    payload = db.Column(db.Text, nullable=False)  # JSON 字符串
+
+
 class Grade(db.Model):
     """成绩模型"""
 
@@ -151,6 +160,8 @@ class Grade(db.Model):
         db.Index("idx_student_course", "student_id", "course_id"),
         db.Index("idx_course_exam", "course_id", "exam_type"),
         db.Index("idx_course_examname", "course_id", "exam_name"),
+        db.Index("idx_course_examname_score", "course_id", "exam_name", "score"),
+        db.Index("idx_exam_name", "exam_name"),
     )
 
     @property

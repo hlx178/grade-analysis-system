@@ -4,6 +4,10 @@
 <h3>性能诊断</h3>
 <div class="row g-2 align-items-end mb-3">
   <div class="col-auto">
+    <label class="form-label">预设</label>
+    <select id="preset" class="form-select" style="min-width:220px"></select>
+  </div>
+  <div class="col-auto">
     <label class="form-label">考试名称(逗号分隔)</label>
     <input id="dExam" class="form-control" placeholder="期末,期中">
   </div>
@@ -44,13 +48,16 @@
   <div class="col-auto">
     <button class="btn btn-primary" onclick="runDiag()">运行</button>
   </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-primary" onclick="savePreset()">保存为预设</button>
+  </div>
 </div>
 <pre id="diagOut" class="bg-light p-2" style="white-space:pre-wrap"></pre>
 {% endblock %}
 {% block scripts %}
 <script>
-async function runDiag(){
-  const payload = {
+function readForm(){
+  return {
     exam_names: (document.getElementById('dExam').value||'').split(',').map(s=>s.trim()).filter(Boolean),
     grade_levels: (document.getElementById('dGrade').value||'').split(',').map(s=>s.trim()).filter(Boolean),
     class_names: (document.getElementById('dClass').value||'').split(',').map(s=>s.trim()).filter(Boolean),
@@ -59,10 +66,43 @@ async function runDiag(){
     page: Number(document.getElementById('dPage').value||1),
     page_size: Number(document.getElementById('dSize').value||50),
   };
+}
+
+async function runDiag(){
+  const payload = readForm();
   const res = await fetch('/api/diagnostics/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
   if (!res.ok){ document.getElementById('diagOut').textContent = '执行失败: '+res.status; return; }
   const data = await res.json();
   document.getElementById('diagOut').textContent = JSON.stringify(data, null, 2);
 }
+
+async function loadPresets(){
+  const res = await fetch('/api/diagnostics/presets');
+  if (!res.ok) return;
+  const items = await res.json();
+  const sel = document.getElementById('preset');
+  sel.innerHTML = '<option value="">选择预设...</option>' + items.map(p=>`<option value="${encodeURIComponent(JSON.stringify(p.payload))}">${p.name}</option>`).join('');
+  sel.addEventListener('change', ()=>{
+    if (!sel.value) return;
+    const payload = JSON.parse(decodeURIComponent(sel.value));
+    document.getElementById('dExam').value = (payload.exam_names||[]).join(',');
+    document.getElementById('dGrade').value = (payload.grade_levels||[]).join(',');
+    document.getElementById('dClass').value = (payload.class_names||[]).join(',');
+    document.getElementById('dSub').value = payload.subject_code || 'TOTAL';
+    document.getElementById('dOrder').value = payload.order_by || 'score_desc';
+    document.getElementById('dPage').value = payload.page || 1;
+    document.getElementById('dSize').value = payload.page_size || 50;
+  });
+}
+
+async function savePreset(){
+  const name = prompt('预设名称');
+  if (!name) return;
+  const payload = readForm();
+  await fetch('/api/diagnostics/presets', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, payload }) });
+  await loadPresets();
+}
+
+window.addEventListener('DOMContentLoaded', loadPresets);
 </script>
 {% endblock %}

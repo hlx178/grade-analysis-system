@@ -34,6 +34,25 @@ def create_app(config_name="default"):
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(api_bp, url_prefix="/api")
 
+    # 慢查询日志（开发/生产均可开启）
+    import logging, time
+    from flask import g, request
+
+    @app.before_request
+    def _start_timer():
+        g._t0 = time.time()
+
+    @app.after_request
+    def _log_slow(response):
+        try:
+            t = (time.time() - getattr(g, '_t0', time.time())) * 1000
+            threshold = app.config.get('SLOW_QUERY_MS', 500)
+            if t >= threshold:
+                logging.getLogger('slow').warning(f"SLOW {int(t)}ms {request.method} {request.path}")
+        except Exception:
+            pass
+        return response
+
     # 用户加载回调
     @login_manager.user_loader
     def load_user(user_id):
