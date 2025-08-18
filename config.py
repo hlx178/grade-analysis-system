@@ -21,6 +21,9 @@ class Config:
     EXPORT_MAX_CONCURRENT_PER_USER = int(os.environ.get("EXPORT_MAX_CONCURRENT_PER_USER") or 2)
     DOWNLOAD_LINK_TTL_SECONDS = int(os.environ.get("DOWNLOAD_LINK_TTL_SECONDS") or 3600)
 
+    # 就绪探针阈值（磁盘剩余，单位 MB）
+    READY_DISK_FREE_MB = int(os.environ.get("READY_DISK_FREE_MB") or 1024)
+
     # 数据库配置
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL") or "sqlite:///grade_analysis.db"
     SQLALCHEMY_TRACK_MODIFICATIONS = False

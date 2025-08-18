@@ -14,13 +14,34 @@ def health():
 
 @health_bp.route('/ready', methods=['GET'])
 def ready():
-    # 轻量 DB 探针
+    from flask import current_app
+    import os, shutil, tempfile
+    # 1) DB 探针
     try:
         from app import db
         db.session.execute('SELECT 1')
-        return {'status': 'ready'}, 200
     except Exception:
-        return {'status': 'not_ready'}, 503
+        return {'status': 'not_ready', 'reason': 'db_unreachable'}, 503
+    # 2) 目录可写
+    upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    export_dir = current_app.config.get('EXPORT_DIR', 'exports')
+    for d in [upload_dir, export_dir]:
+        try:
+            os.makedirs(d, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=d)
+            os.close(fd); os.remove(tmp)
+        except Exception:
+            return {'status': 'not_ready', 'reason': f'dir_not_writable:{d}'}, 503
+    # 3) 磁盘剩余阈值
+    try:
+        total, used, free = shutil.disk_usage('/')
+        free_mb = int(free / (1024*1024))
+        threshold = int(current_app.config.get('READY_DISK_FREE_MB', 1024))
+        if free_mb < threshold:
+            return {'status': 'not_ready', 'reason': f'low_disk:{free_mb}MB < {threshold}MB'}, 503
+    except Exception:
+        return {'status': 'not_ready', 'reason': 'disk_check_failed'}, 503
+    return {'status': 'ready'}, 200
 
 
 import os
