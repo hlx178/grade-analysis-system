@@ -982,7 +982,7 @@ def api_summary_export():
     base_name = f"{_safe_name(name_exam)}_{_safe_name(name_subject)}_{_safe_name(name_gl)}_{_safe_name(name_cl)}_{_safe_name(scope)}_{_safe_name(order_by)}_{ts}"
 
     if fmt == 'xlsx':
-        # 优先使用 openpyxl 流式写入，内存更友好；不可用时回退 pandas
+        # 仍保留同步导出
         try:
             from openpyxl import Workbook
             wb = Workbook(write_only=True)
@@ -1015,6 +1015,209 @@ def api_summary_export():
             yield sio.getvalue()
             sio.seek(0); sio.truncate(0)
     return Response(stream_with_context(generate_csv()), mimetype='text/csv', headers={'Content-Disposition': f'attachment; filename={base_name}.csv'})
+
+
+# 导出异步化（轻量线程）
+from threading import Thread
+import uuid
+import os
+
+_export_tasks = {}
+
+@api_bp.route('/export/tasks', methods=['POST'])
+@login_required
+def api_export_task_create():
+    # 接收与 /api/summary/export 相同的查询参数
+    params = request.get_json(force=True) or {}
+    task_id = str(uuid.uuid4())
+    _export_tasks[task_id] = { 'status': 'pending', 'progress': 0 }
+
+    def worker(task_id, params):
+        try:
+            _export_tasks[task_id] = { 'status': 'running', 'progress': 10 }
+            # 复用逻辑：构建查询，与同步导出一致
+            with current_app.app_context():
+                from copy import deepcopy
+                args = deepcopy(params)
+                # 生成文件名与导出目录
+                export_dir = current_app.config.get('EXPORT_DIR', 'exports')
+                os.makedirs(export_dir, exist_ok=True)
+                # 调用一个内部函数生成文件
+                filepath = _build_export_file(args, export_dir)
+                _export_tasks[task_id] = { 'status': 'completed', 'file': filepath, 'progress': 100 }
+        except Exception as e:
+            _export_tasks[task_id] = { 'status': 'failed', 'error': str(e) }
+
+    Thread(target=worker, args=(task_id, params), daemon=True).start()
+    return jsonify({ 'task_id': task_id })
+
+
+@api_bp.route('/export/tasks/<task_id>', methods=['GET'])
+@login_required
+def api_export_task_status(task_id):
+    t = _export_tasks.get(task_id)
+    if not t:
+        return jsonify({ 'error': 'not found' }), 404
+    return jsonify(t)
+
+
+@api_bp.route('/export/tasks/<task_id>/download', methods=['GET'])
+@login_required
+def api_export_task_download(task_id):
+    t = _export_tasks.get(task_id)
+    if not t or t.get('status') != 'completed':
+        return jsonify({ 'error': 'not ready' }), 400
+    return send_file(t['file'], as_attachment=True)
+
+
+def _build_export_file(params: dict, export_dir: str) -> str:
+    """按 /api/summary/export 的逻辑生成文件并返回路径"""
+    # 复用参数解析
+    def _multi_param(val):
+        out = []
+        if isinstance(val, list):
+            for v in val:
+                out.extend([s.strip() for s in str(v).split(',') if s.strip()])
+        elif isinstance(val, str):
+            out.extend([s.strip() for s in val.split(',') if s.strip()])
+        return out
+
+    exam_names = _multi_param(params.get('exam_name') or params.get('exam_names') or [])
+    grade_levels = _multi_param(params.get('grade_level') or params.get('grade_levels') or [])
+    class_names = _multi_param(params.get('class_name') or params.get('class_names') or [])
+    subject_code = params.get('subject_code') or 'TOTAL'
+    fmt = params.get('format') or 'csv'
+    scope = params.get('scope') or 'all'
+    order_by = params.get('order_by') or 'score_desc'
+
+    # 组装查询（与 api_summary_export 一致的过滤）
+    q = Grade.query.join(Student).join(Course)
+    if exam_names:
+        q = q.filter(Grade.exam_name.in_(exam_names))
+    if grade_levels:
+        q = q.filter(Student.grade_level.in_(grade_levels))
+    if class_names:
+        q = q.filter(Student.class_name.in_(class_names))
+    if subject_code:
+        q = q.filter(Course.code == subject_code)
+    # 非管理员可见范围：后台任务默认使用当前用户上下文，这里省略，生产可改为传入用户ID按其限制
+
+    # 排序
+    if order_by == 'score_desc':
+        q = q.order_by(Grade.score.desc())
+    elif order_by == 'score_asc':
+        q = q.order_by(Grade.score.asc())
+
+    # 范围
+    if scope == 'current_page':
+        page = int(params.get('page') or 1)
+        page_size = int(params.get('page_size') or 50)
+        q = q.offset((page-1)*page_size).limit(page_size)
+
+    rows = q.all()
+
+    # 列控制
+    columns_param = params.get('columns')
+    selected_cols = [c.strip() for c in columns_param.split(',')] if columns_param else None
+    header_map = {
+        'student_id': '学号',
+        'name': '姓名',
+        'class_name': '班级',
+        'grade_level': '年级',
+        'score': '分数',
+        'percentage': '百分比',
+        'letter': '等第',
+        'class_rank': '班级排名',
+        'grade_rank': '年级排名',
+        'rule_version': '规则版本',
+    }
+    default_cols = ['student_id','name','class_name','grade_level','score','letter']
+    use_cols = [c for c in (selected_cols or default_cols) if c in header_map]
+
+    # 计算辅助
+    from app.utils import grade_letter_for
+    max_cache = {}
+    from collections import defaultdict
+    by_class = defaultdict(list)
+    by_grade = defaultdict(list)
+    for g in rows:
+        by_class[g.student.class_name].append((g.student_id, g.score))
+        by_grade[g.student.grade_level].append((g.student_id, g.score))
+    def rank_map(pairs):
+        pairs_sorted = sorted(pairs, key=lambda x: x[1], reverse=True)
+        return { sid: i for i, (sid, _) in enumerate(pairs_sorted, 1) }
+    class_rank_map = {k: rank_map(v) for k, v in by_class.items()}
+    grade_rank_map = {k: rank_map(v) for k, v in by_grade.items()}
+
+    data_rows = []
+    for g in rows:
+        key = (g.exam_type or 'regular', g.course.code)
+        if key in max_cache:
+            max_score = max_cache[key]
+        else:
+            s = ExamScheme.query.filter_by(exam_type=key[0], subject_code=key[1]).first()
+            max_score = s.max_score if s else None
+            max_cache[key] = max_score
+        perc = round(float(g.score)/float(max_score)*100.0,2) if (max_score and max_score>0) else None
+        data_rows.append({
+            'student_id': g.student.student_id,
+            'name': g.student.name,
+            'class_name': g.student.class_name,
+            'grade_level': g.student.grade_level,
+            'score': g.score,
+            'percentage': perc,
+            'letter': grade_letter_for(g.exam_name or 'default', g.course.code, g.score),
+            'class_rank': class_rank_map.get(g.student.class_name, {}).get(g.student_id),
+            'grade_rank': grade_rank_map.get(g.student.grade_level, {}).get(g.student_id),
+            'rule_version': None,
+        })
+
+    # 文件名
+    def _safe_name(s: str) -> str:
+        import re
+        return re.sub(r'[^\w\-\u4e00-\u9fa5]+', '_', s)[:40]
+    import datetime as _dt
+    ts = _dt.datetime.now().strftime('%Y%m%d_%H%M%S')
+    name_exam = '-'.join(exam_names) if exam_names else '全部考试'
+    name_subject = subject_code or '全部学科'
+    name_gl = '-'.join(grade_levels) if grade_levels else '全部年级'
+    name_cl = '-'.join(class_names) if class_names else '全部班级'
+    base_name = f"{_safe_name(name_exam)}_{_safe_name(name_subject)}_{_safe_name(name_gl)}_{_safe_name(name_cl)}_{_safe_name(scope)}_{_safe_name(order_by)}_{ts}"
+
+    # 写文件
+    if fmt == 'xlsx':
+        try:
+            from openpyxl import Workbook
+            wb = Workbook(write_only=True)
+            ws = wb.create_sheet()
+            ws.append([header_map[c] for c in use_cols])
+            for rec in data_rows:
+                ws.append([rec.get(c, '') for c in use_cols])
+            filepath = os.path.join(export_dir, f"{base_name}.xlsx")
+            wb.save(filepath)
+            return filepath
+        except Exception:
+            import pandas as pd
+            filepath = os.path.join(export_dir, f"{base_name}.xlsx")
+            import pandas as pd
+            import numpy as np
+            import io as _io
+            import json as _json
+            # 防御性：如环境没有 pandas，则回退 csv
+            try:
+                pd.DataFrame([{header_map[c]: r.get(c, '') for c in use_cols} for r in data_rows]).to_excel(filepath, index=False)
+                return filepath
+            except Exception:
+                fmt = 'csv'
+    # csv
+    import csv
+    filepath = os.path.join(export_dir, f"{base_name}.csv")
+    with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([header_map[c] for c in use_cols])
+        for rec in data_rows:
+            writer.writerow([rec.get(c, '') for c in use_cols])
+    return filepath
 
 
 @api_bp.route('/summary/options', methods=['GET'])

@@ -15,6 +15,9 @@ class Config:
     # COUNT 微缓存
     SUMMARY_COUNT_TTL_SECONDS = int(os.environ.get("SUMMARY_COUNT_TTL_SECONDS") or 60)
 
+    # 导出目录
+    EXPORT_DIR = os.environ.get("EXPORT_DIR") or "exports"
+
     # 数据库配置
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL") or "sqlite:///grade_analysis.db"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
