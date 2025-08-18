@@ -811,30 +811,105 @@ def api_summary_export():
         q = q.filter(Course.code == subject_code)
 
     rows = q.all()
-    data = []
-    from app.utils import grade_letter_for
+
+    # 计算班级/年级排名
+    from collections import defaultdict
+    by_class = defaultdict(list)
+    by_grade = defaultdict(list)
     for g in rows:
-        data.append({
-            '学号': g.student.student_id,
-            '姓名': g.student.name,
-            '班级': g.student.class_name,
-            '年级': g.student.grade_level,
-            '分数': g.score,
-            '等第': grade_letter_for(g.exam_name or 'default', g.course.code, g.score),
-        })
+        by_class[g.student.class_name].append((g.student_id, g.score))
+        by_grade[g.student.grade_level].append((g.student_id, g.score))
+
+    def rank_map(pairs):
+        pairs_sorted = sorted(pairs, key=lambda x: x[1], reverse=True)
+        rank = {}
+        for i, (sid, _) in enumerate(pairs_sorted, 1):
+            rank[sid] = i
+        return rank
+
+    class_rank_map = {k: rank_map(v) for k, v in by_class.items()}
+    grade_rank_map = {k: rank_map(v) for k, v in by_grade.items()}
+
+    # 规则版本（仅单考试名时）
+    rule_version = None
+    if exam_names and len(exam_names) == 1:
+        published_set = GradeBandSet.query.filter_by(exam_name=exam_names[0], status='published').order_by(GradeBandSet.version.desc()).first()
+        if published_set:
+            rule_version = published_set.version
+
+    # 百分比计算缓存
+    max_cache = {}
+
+    # 列选择
+    columns_param = request.args.get('columns')
+    selected_cols = [c.strip() for c in columns_param.split(',')] if columns_param else None
+
+    # 内部字段与导出表头映射
+    header_map = {
+        'student_id': '学号',
+        'name': '姓名',
+        'class_name': '班级',
+        'grade_level': '年级',
+        'score': '分数',
+        'percentage': '百分比',
+        'letter': '等第',
+        'class_rank': '班级排名',
+        'grade_rank': '年级排名',
+        'rule_version': '规则版本',
+    }
+
+    # 默认列
+    default_cols = ['student_id','name','class_name','grade_level','score','letter']
+    use_cols = [c for c in (selected_cols or default_cols) if c in header_map]
+
+    # 组装数据
+    from app.utils import grade_letter_for
+    data_rows = []
+    for g in rows:
+        # 百分比
+        perc = None
+        key = (g.exam_type or 'regular', g.course.code)
+        if key in max_cache:
+            max_score = max_cache[key]
+        else:
+            s = ExamScheme.query.filter_by(exam_type=key[0], subject_code=key[1]).first()
+            max_score = s.max_score if s else None
+            max_cache[key] = max_score
+        if max_score and max_score > 0:
+            perc = round(float(g.score) / float(max_score) * 100.0, 2)
+
+        rec = {
+            'student_id': g.student.student_id,
+            'name': g.student.name,
+            'class_name': g.student.class_name,
+            'grade_level': g.student.grade_level,
+            'score': g.score,
+            'percentage': perc,
+            'letter': grade_letter_for(g.exam_name or 'default', g.course.code, g.score),
+            'class_rank': class_rank_map.get(g.student.class_name, {}).get(g.student_id),
+            'grade_rank': grade_rank_map.get(g.student.grade_level, {}).get(g.student_id),
+            'rule_version': rule_version,
+        }
+        data_rows.append(rec)
+
+    # 生成导出结构
+    export_rows = []
+    for rec in data_rows:
+        row = { header_map[col]: rec.get(col, '') for col in use_cols }
+        export_rows.append(row)
 
     if fmt == 'xlsx':
         import pandas as pd
         buf = io.BytesIO()
-        pd.DataFrame(data).to_excel(buf, index=False)
+        pd.DataFrame(export_rows).to_excel(buf, index=False)
         buf.seek(0)
         return send_file(buf, as_attachment=True, download_name='summary.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     # 默认csv
     import csv
     si = io.StringIO()
-    writer = csv.DictWriter(si, fieldnames=['学号','姓名','班级','年级','分数','等第'])
+    writer = csv.DictWriter(si, fieldnames=[header_map[c] for c in use_cols])
     writer.writeheader()
-    for row in data:
+    for row in export_rows:
         writer.writerow(row)
     output = si.getvalue().encode('utf-8-sig')
     return Response(output, mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=summary.csv'})

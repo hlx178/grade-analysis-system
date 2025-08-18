@@ -5,15 +5,33 @@
 <div class="row g-2 align-items-end mb-3">
   <div class="col-auto">
     <label class="form-label">考试名称</label>
-    <select id="examName" class="form-select" multiple style="min-width:180px"></select>
+    <div class="d-flex gap-2">
+      <select id="examName" class="form-select" multiple style="min-width:220px"></select>
+      <div class="btn-group btn-group-sm" role="group">
+        <button class="btn btn-outline-secondary" onclick="selectAll('examName')">全选</button>
+        <button class="btn btn-outline-secondary" onclick="clearSel('examName')">清空</button>
+      </div>
+    </div>
   </div>
   <div class="col-auto">
     <label class="form-label">年级</label>
-    <select id="gradeLevel" class="form-select" multiple style="min-width:180px"></select>
+    <div class="d-flex gap-2">
+      <select id="gradeLevel" class="form-select" multiple style="min-width:220px"></select>
+      <div class="btn-group btn-group-sm" role="group">
+        <button class="btn btn-outline-secondary" onclick="selectAll('gradeLevel')">全选</button>
+        <button class="btn btn-outline-secondary" onclick="clearSel('gradeLevel')">清空</button>
+      </div>
+    </div>
   </div>
   <div class="col-auto">
     <label class="form-label">班级</label>
-    <select id="className" class="form-select" multiple style="min-width:180px"></select>
+    <div class="d-flex gap-2">
+      <select id="className" class="form-select" multiple style="min-width:220px"></select>
+      <div class="btn-group btn-group-sm" role="group">
+        <button class="btn btn-outline-secondary" onclick="selectAll('className')">全选</button>
+        <button class="btn btn-outline-secondary" onclick="clearSel('className')">清空</button>
+      </div>
+    </div>
   </div>
   <div class="col-auto">
     <label class="form-label">学科</label>
@@ -38,6 +56,12 @@
   </div>
   <div class="col-auto">
     <button class="btn btn-primary" onclick="loadSummary()">查询</button>
+  </div>
+  <div class="col-auto">
+    <div class="form-check mt-2">
+      <input class="form-check-input" type="checkbox" id="exportUsePrefs" checked>
+      <label class="form-check-label" for="exportUsePrefs">按当前列偏好导出</label>
+    </div>
   </div>
   <div class="col-auto">
     <button class="btn btn-outline-secondary" onclick="exportSummary('csv')">导出CSV</button>
@@ -167,6 +191,15 @@ function qs(){
   return { exam_name, grade_level, class_name, subject_code, order_by };
 }
 
+function selectAll(id){
+  const sel = document.getElementById(id);
+  Array.from(sel.options).forEach(o => o.selected = true);
+}
+function clearSel(id){
+  const sel = document.getElementById(id);
+  Array.from(sel.options).forEach(o => o.selected = false);
+}
+
 function renderPager(total, page, page_size){
   const totalPages = Math.max(1, Math.ceil(total / page_size));
   const pager = document.getElementById('pager');
@@ -205,6 +238,16 @@ function gotoPage(p){
 
 function exportSummary(fmt){
   const params = new URLSearchParams({ ...qs(), format: fmt });
+  if (document.getElementById('exportUsePrefs').checked){
+    const p = getPrefs();
+    const cols = ['student_id','name','class_name','grade_level','score'];
+    if (p.percentage) cols.push('percentage');
+    if (p.letter) cols.push('letter');
+    if (p.class_rank) cols.push('class_rank');
+    if (p.grade_rank) cols.push('grade_rank');
+    if (p.rule_version) cols.push('rule_version');
+    params.append('columns', cols.join(','));
+  }
   window.location = '/api/summary/export?' + params.toString();
 }
 
