@@ -1,6 +1,11 @@
 {% extends 'base.html' %}
 {% block head_extra %}
 <style>
+.skel{ background: linear-gradient(90deg, #eee 25%, #f5f5f5 50%, #eee 75%); background-size: 400% 100%; animation: shimmer 1.2s ease-in-out infinite; border-radius: 4px; }
+@keyframes shimmer { 0%{ background-position: 100% 0 } 100%{ background-position: -100% 0 } }
+</style>
+
+<style>
 @media print {
   nav, .btn, .form-check, select, .form-text { display: none !important; }
   .card { border: none; }
@@ -44,6 +49,8 @@
     <div class="form-check form-check-inline ms-2">
       <input class="form-check-input" type="checkbox" id="trendChrono">
       <label class="form-check-label" for="trendChrono">按时间排序</label>
+<div id="emptyState" class="alert alert-info mt-2" style="display:none">筛选条件下暂无数据，请尝试调整年份/学期或取消部分筛选。</div>
+
     </div>
     <div class="form-check form-check-inline">
       <input class="form-check-input" type="checkbox" id="showClassAvg" checked>
@@ -64,6 +71,8 @@
         <button class="btn btn-sm btn-outline-secondary" onclick="loadTrend()">刷新</button>
       </div>
       <div class="card-body">
+      <div class="skel" id="trendSkel" style="height:160px; display:none"></div>
+
         <canvas id="trendChart" height="140"></canvas>
         <div class="small text-muted mt-2" id="trendMeta"></div>
       </div>
@@ -160,15 +169,16 @@ function buildUrl(code){
 async function loadTrend(){
   const subs = selectedSubjects();
   if (subs.length===0){ alert('请至少选择一个科目'); return; }
-  const loading = document.getElementById('saLoading'); const err = document.getElementById('saError');
+  const loading = document.getElementById('saLoading'); const err = document.getElementById('saError'); const skel = document.getElementById('trendSkel'); const empty = document.getElementById('emptyState');
+  if (skel) skel.style.display='block'; if (empty) empty.style.display='none';
   if (loading) loading.style.display='inline-block'; if (err) err.textContent='';
   let results = [];
   try{
     results = await Promise.all(subs.map(async c=>{
       const res = await fetch(buildUrl(c)); if (!res.ok) throw new Error('网络错误'); return res.json();
     }));
-  }catch(e){ if (err) err.textContent = '加载失败：'+(e.message||''); } finally { if (loading) loading.style.display='none'; }
-  if (!results.length) return;
+  }catch(e){ if (err) err.textContent = '加载失败：'+(e.message||''); } finally { if (loading) loading.style.display='none'; if (skel) skel.style.display='none'; }
+  if (!results.length || !results[0]?.series?.length){ if (empty) empty.style.display='block'; return; }
   const primary = results[0];
   // 以首个科目为主，叠加其他科目的曲线
   let series = primary.series.slice();
@@ -341,13 +351,16 @@ async function exportPDF(){
   const doc = new jsPDF('p','pt','a4');
   const pad = 36;
   let y = pad;
-  // 封面
-  // 优先使用后端配置的 logo
-  let logoCfg = null; try{ const r = await fetch('/api/config/branding'); if (r.ok){ logoCfg = await r.json(); } }catch(e){}
-  const logo = logoCfg?.logo_url ? await (async()=>{ try{ const img=new Image(); img.crossOrigin='anonymous'; const p=new Promise(res=>{ img.onload=()=>res({img}); img.onerror=()=>res(null); }); img.src=logoCfg.logo_url; const got=await p; if (!got) return null; const c=document.createElement('canvas'); const maxH=40; const scale=Math.min(1, maxH/img.height); c.width=img.width*scale; c.height=img.height*scale; const ctx=c.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height); ctx.drawImage(img,0,0,c.width,c.height); return { dataUrl:c.toDataURL('image/png'), w:c.width, h:c.height }; }catch(e){ return null; } })() : await loadLogoDataUrl();
+  // 封面：读取品牌配置（学校名、副标题、封面色、页眉文案）与 logo
+  let brand = null; try{ const r = await fetch('/api/config/branding'); if (r.ok) brand = await r.json(); }catch(e){}
+  // 优先使用品牌 logo
+  const logo = brand?.logo_url ? await (async()=>{ try{ const img=new Image(); img.crossOrigin='anonymous'; const p=new Promise(res=>{ img.onload=()=>res({img}); img.onerror=()=>res(null); }); img.src=brand.logo_url; const got=await p; if (!got) return null; const c=document.createElement('canvas'); const maxH=40; const scale=Math.min(1, maxH/img.height); c.width=img.width*scale; c.height=img.height*scale; const ctx=c.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height); ctx.drawImage(img,0,0,c.width,c.height); return { dataUrl:c.toDataURL('image/png'), w:c.width, h:c.height }; }catch(e){ return null; } })() : await loadLogoDataUrl();
+  if (brand?.cover_color){ doc.setFillColor(brand.cover_color); doc.rect(0,0, doc.internal.pageSize.getWidth(), 54, 'F'); }
   if (logo){ doc.addImage(logo.dataUrl, 'PNG', pad, y-10, logo.w, logo.h); }
   doc.setFontSize(20);
-  doc.text(`学生成绩分析报告`, pad + (logo? (logo.w+12):0), y); y += 30;
+  doc.text(`${brand?.school_name_full || brand?.school_name || '学生成绩分析报告'}`, pad + (logo? (logo.w+12):0), y);
+  y += 26;
+  if (brand?.subtitle){ doc.setFontSize(12); doc.text(`${brand.subtitle}`, pad + (logo? (logo.w+12):0), y); y += 12; }
   doc.setFontSize(12);
   const subNames = selectedSubjects().map(c=>document.querySelector(`#subjectCode option[value="${c}"]`)?.textContent || c).join(', ');
   const filters = [];

@@ -2075,7 +2075,12 @@ def _cleanup_exports_once():
 def api_config_branding():
     # 简单返回可选品牌信息；未来可改为从数据库/配置文件读取
     base = {
-        'school_name': '某某学校',
+        'school_name': current_app.config.get('BRAND_SCHOOL_NAME', '某某学校'),
+        'school_name_full': current_app.config.get('BRAND_SCHOOL_NAME_FULL', None),
+        'subtitle': current_app.config.get('BRAND_REPORT_SUBTITLE', '学业质量监测报告'),
+        'cover_color': current_app.config.get('BRAND_REPORT_COVER_COLOR', '#0d6efd'),
+        'header_text': current_app.config.get('BRAND_HEADER_TEXT', None),
+        'footer_text': current_app.config.get('BRAND_FOOTER_TEXT', None),
         'logo_url': url_for('static', filename='logo.png', _external=False),
     }
     return jsonify(base)
