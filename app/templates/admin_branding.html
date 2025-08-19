@@ -2,6 +2,8 @@
 {% block title %}品牌配置 - 成绩分析系统{% endblock %}
 {% block content %}
 <h3>品牌配置</h3>
+<div id="alertBox" class="alert d-none" role="alert"></div>
+
 <div class="row g-3">
   <div class="col-md-6">
     <div class="card">
@@ -38,6 +40,7 @@
         </div>
         <div>
           <button id="saveBtn" class="btn btn-primary">保存</button>
+          <button id="resetBtn" class="btn btn-outline-secondary ms-2">重置</button>
           <span id="msg" class="ms-2"></span>
         </div>
       </div>
@@ -59,30 +62,54 @@ async function loadBrand(){
   document.getElementById('footerText').value = b.footer_text||'';
   if (b.logo_url){ document.getElementById('logoPreview').src = b.logo_url; }
 }
+function showAlert(cls, text){
+  const box = document.getElementById('alertBox');
+  box.className = `alert ${cls}`; box.textContent = text; box.classList.remove('d-none');
+  setTimeout(()=>{ box.classList.add('d-none'); }, 4000);
+}
 async function saveBrand(){
-  const body = {
-    school_name: document.getElementById('schoolName').value,
-    school_name_full: document.getElementById('schoolNameFull').value,
-    subtitle: document.getElementById('subtitle').value,
-    cover_color: document.getElementById('coverColor').value,
-    header_text: document.getElementById('headerText').value,
-    footer_text: document.getElementById('footerText').value,
-  };
-  const r = await fetch('/api/config/branding', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  const msg = document.getElementById('msg');
-  if (!r.ok){ msg.textContent = '保存失败'; msg.className='text-danger'; return; }
-  msg.textContent = '已保存'; msg.className='text-success';
-  // 上传 logo
-  const f = document.getElementById('logoFile').files[0];
-  if (f){
-    const fd = new FormData(); fd.append('file', f);
-    const rr = await fetch('/api/config/branding/logo', { method:'POST', body: fd });
-    if (rr.ok){ msg.textContent += '，Logo 已更新'; document.getElementById('logoPreview').src = (await rr.json()).logo_url + '?t=' + Date.now(); }
-  }
+  const btn = document.getElementById('saveBtn'); const reset = document.getElementById('resetBtn');
+  btn.disabled = true; reset.disabled = true; btn.textContent = '保存中...';
+  try{
+    const body = {
+      school_name: document.getElementById('schoolName').value,
+      school_name_full: document.getElementById('schoolNameFull').value,
+      subtitle: document.getElementById('subtitle').value,
+      cover_color: document.getElementById('coverColor').value,
+      header_text: document.getElementById('headerText').value,
+      footer_text: document.getElementById('footerText').value,
+    };
+    const r = await fetch('/api/config/branding', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    if (!r.ok){ showAlert('alert-danger', '保存失败'); return; }
+    showAlert('alert-success', '已保存');
+    // 上传 logo
+    const f = document.getElementById('logoFile').files[0];
+    if (f){
+      if (f.type !== 'image/png' || f.size > 1024*1024){ showAlert('alert-warning', 'Logo 仅支持 PNG 且大小 <= 1MB'); }
+      else {
+        const fd = new FormData(); fd.append('file', f);
+        const rr = await fetch('/api/config/branding/logo', { method:'POST', body: fd });
+        if (rr.ok){ const j = await rr.json(); document.getElementById('logoPreview').src = j.logo_url + '?t=' + Date.now(); showAlert('alert-success', 'Logo 已更新'); }
+        else { const err = await rr.json().catch(()=>({error:'上传失败'})); showAlert('alert-danger', '上传失败：'+(err.error||'')); }
+      }
+    }
+  }catch(e){ showAlert('alert-danger', '异常：' + (e.message||e)); }
+  finally{ btn.disabled = false; reset.disabled = false; btn.textContent = '保存'; }
+}
+function resetForm(){
+  document.getElementById('schoolName').value = '';
+  document.getElementById('schoolNameFull').value = '';
+  document.getElementById('subtitle').value = '';
+  document.getElementById('coverColor').value = '#0d6efd';
+  document.getElementById('headerText').value = '';
+  document.getElementById('footerText').value = '';
+  document.getElementById('logoFile').value = '';
+  showAlert('alert-secondary', '已重置为默认值（未保存）');
 }
 window.addEventListener('DOMContentLoaded', ()=>{
   loadBrand();
   document.getElementById('saveBtn').addEventListener('click', saveBrand);
+  document.getElementById('resetBtn').addEventListener('click', resetForm);
 });
 </script>
 {% endblock %}
