@@ -131,8 +131,6 @@ async function loadTrend(){
   if (subs.length===0){ alert('请至少选择一个科目'); return; }
   const results = await Promise.all(subs.map(c=>fetch(buildUrl(c)).then(r=>r.json())));
   const primary = results[0];
-  if (!r.ok) return;
-  const data = await r.json();
   // 以首个科目为主，叠加其他科目的曲线
   let series = primary.series.slice();
   // 按时间排序（解析 YYYY-MM-DD/YYMMDD 或学期关键词）
@@ -150,12 +148,28 @@ async function loadTrend(){
       if (a._d && b._d) return a._d - b._d;
   // 其他科目叠加
   const palette = ['#0d6efd','#198754','#dc3545','#fd7e14','#20c997','#6f42c1','#6c757d'];
+    // 建立主科 exam->date 映射用于对齐
+    const dateOf = new Map(series.map(x=>[x.exam_name, x._d]));
+
   const nameMap = Object.fromEntries(Array.from(document.getElementById('subjectCode').options).map(o=>[o.value,o.textContent]));
   results.forEach((res, idx)=>{
     if (idx===0) return; // 主科
-    // 对齐主科 labels，简单按名称 join；如需严格时间序列可拓展为日期对齐
-    const map = new Map(res.series.map(s=>[s.exam_name, s.score]));
-    const dataArr = labels.map(l=> map.has(l) ? map.get(l) : null);
+    // 严格按时间对齐：先给次科构建 exam->date（按名称解析），再以主科日期序列对齐
+    const parseDate = (s)=>{
+      if (!s) return null; const m1 = s.match(/(\d{4})[-/]?(\d{2})[-/]?(\d{2})/); if (m1) return new Date(`${m1[1]}-${m1[2]}-${m1[3]}`);
+      const m2 = s.match(/(\d{4}).*?(上|下|春|秋|S|F)/i); if (m2){ const y=Number(m2[1]); const half=/下|秋|F/i.test(m2[2])?10:3; return new Date(`${y}-${String(half).padStart(2,'0')}-01`);} return null; };
+    const map = new Map(res.series.map(s=>[s.exam_name, {score:s.score, d: parseDate(s.exam_name)}]));
+    const dataArr = series.map(s=>{
+      const targetD = s._d || dateOf.get(s.exam_name);
+      if (!targetD) return null;
+      // 找到次科中与 targetD 最接近且同年/同学期（若可解析）的数据点
+      let best = null, bestDiff = Infinity;
+      map.forEach((v, k)=>{
+        if (!v.d) return; const diff = Math.abs(v.d - targetD);
+        if (diff < bestDiff) { best = v; bestDiff = diff; }
+      });
+      return best ? best.score : null;
+    });
     const color = palette[idx % palette.length];
     datasets.push({ label: nameMap[res.subject_code]||res.subject_code, data: dataArr, borderColor: color, backgroundColor: 'transparent' });
   });
