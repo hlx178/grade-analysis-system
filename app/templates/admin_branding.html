@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% block title %}品牌配置 - 成绩分析系统{% endblock %}
+{% block content %}
+<h3>品牌配置</h3>
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-body">
+        <div class="mb-2">
+          <label class="form-label">学校简称</label>
+          <input id="schoolName" type="text" class="form-control" placeholder="某某学校">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">学校全名</label>
+          <input id="schoolNameFull" type="text" class="form-control" placeholder="某某市某某学校">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">报告副标题</label>
+          <input id="subtitle" type="text" class="form-control" placeholder="学业质量监测报告">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">封面颜色</label>
+          <input id="coverColor" type="color" class="form-control form-control-color" value="#0d6efd">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">页眉文案（可选）</label>
+          <input id="headerText" type="text" class="form-control" placeholder="">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">页脚文案（可选）</label>
+          <input id="footerText" type="text" class="form-control" placeholder="">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">学校 Logo（PNG）</label>
+          <input id="logoFile" type="file" accept="image/png" class="form-control">
+          <div class="form-text">建议透明底 PNG，宽高比合适将自动缩放</div>
+          <img id="logoPreview" class="mt-2" style="max-height:60px"/>
+        </div>
+        <div>
+          <button id="saveBtn" class="btn btn-primary">保存</button>
+          <span id="msg" class="ms-2"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadBrand(){
+  const r = await fetch('/api/config/branding');
+  if (!r.ok) return;
+  const b = await r.json();
+  document.getElementById('schoolName').value = b.school_name||'';
+  document.getElementById('schoolNameFull').value = b.school_name_full||'';
+  document.getElementById('subtitle').value = b.subtitle||'';
+  document.getElementById('coverColor').value = b.cover_color||'#0d6efd';
+  document.getElementById('headerText').value = b.header_text||'';
+  document.getElementById('footerText').value = b.footer_text||'';
+  if (b.logo_url){ document.getElementById('logoPreview').src = b.logo_url; }
+}
+async function saveBrand(){
+  const body = {
+    school_name: document.getElementById('schoolName').value,
+    school_name_full: document.getElementById('schoolNameFull').value,
+    subtitle: document.getElementById('subtitle').value,
+    cover_color: document.getElementById('coverColor').value,
+    header_text: document.getElementById('headerText').value,
+    footer_text: document.getElementById('footerText').value,
+  };
+  const r = await fetch('/api/config/branding', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const msg = document.getElementById('msg');
+  if (!r.ok){ msg.textContent = '保存失败'; msg.className='text-danger'; return; }
+  msg.textContent = '已保存'; msg.className='text-success';
+  // 上传 logo
+  const f = document.getElementById('logoFile').files[0];
+  if (f){
+    const fd = new FormData(); fd.append('file', f);
+    const rr = await fetch('/api/config/branding/logo', { method:'POST', body: fd });
+    if (rr.ok){ msg.textContent += '，Logo 已更新'; document.getElementById('logoPreview').src = (await rr.json()).logo_url + '?t=' + Date.now(); }
+  }
+}
+window.addEventListener('DOMContentLoaded', ()=>{
+  loadBrand();
+  document.getElementById('saveBtn').addEventListener('click', saveBrand);
+});
+</script>
+{% endblock %}
+

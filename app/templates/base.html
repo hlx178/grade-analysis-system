@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}成绩分析系统{% endblock %}</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  {% block head_extra %}{% endblock %}
+
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
@@ -25,6 +27,7 @@
         {% if current_user.is_authenticated and current_user.role == 'admin' %}
         <li class="nav-item"><a class="nav-link" href="/users">用户管理</a></li>
         <li class="nav-item"><a class="nav-link" href="/diagnostics">诊断</a></li>
+        <li class="nav-item"><a class="nav-link" href="/admin/branding">品牌配置</a></li>
         {% endif %}
       </ul>
       <ul class="navbar-nav">

@@ -60,5 +60,24 @@ def create_app(config_name="default"):
         from app.models import User
 
         return User.query.get(int(user_id))
+    # 启动时加载品牌配置（数据库中的 key/value）
+    with app.app_context():
+        try:
+            from app.models import BrandSetting
+            kv = BrandSetting.get_map()
+            mapping = {
+                'BRAND_SCHOOL_NAME': 'school_name',
+                'BRAND_SCHOOL_NAME_FULL': 'school_name_full',
+                'BRAND_REPORT_SUBTITLE': 'subtitle',
+                'BRAND_REPORT_COVER_COLOR': 'cover_color',
+                'BRAND_HEADER_TEXT': 'header_text',
+                'BRAND_FOOTER_TEXT': 'footer_text',
+            }
+            for cfg_key, k in mapping.items():
+                if k in kv and kv[k] is not None:
+                    app.config[cfg_key] = kv[k]
+        except Exception:
+            pass
+
 
     return app

@@ -2086,6 +2086,52 @@ def api_config_branding():
     return jsonify(base)
 
     global _last_cleanup
+
+@api_bp.route('/config/branding', methods=['PUT'])
+@login_required
+def api_config_branding_update():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(silent=True) or {}
+    # 写入 Flask config（进程内生效）并持久化到数据库
+    from app.models import BrandSetting, db
+    for key, cfg_key in [
+        ('school_name','BRAND_SCHOOL_NAME'),
+        ('school_name_full','BRAND_SCHOOL_NAME_FULL'),
+        ('subtitle','BRAND_REPORT_SUBTITLE'),
+        ('cover_color','BRAND_REPORT_COVER_COLOR'),
+        ('header_text','BRAND_HEADER_TEXT'),
+        ('footer_text','BRAND_FOOTER_TEXT'),
+    ]:
+        if key in data:
+            current_app.config[cfg_key] = data[key]
+            row = BrandSetting.query.get(key) or BrandSetting(key=key)
+            row.value = data[key]
+            db.session.add(row)
+    db.session.commit()
+    return jsonify({'message':'ok'})
+
+@api_bp.route('/config/branding/logo', methods=['POST'])
+@login_required
+def api_config_branding_logo():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    f = request.files.get('file')
+    if not f:
+        return jsonify({'error': 'no file'}), 400
+    static_dir = os.path.join(current_app.root_path, 'static')
+    os.makedirs(static_dir, exist_ok=True)
+    path = os.path.join(static_dir, 'logo.png')
+    f.save(path)
+    return jsonify({'logo_url': url_for('static', filename='logo.png', _external=False)})
+
+@main_bp.route('/admin/branding')
+@login_required
+def admin_branding_page():
+    if current_user.role != 'admin':
+        abort(403)
+    return render_template('admin_branding.html')
+
     import time
     now = time.time()
     if _last_cleanup and now - _last_cleanup < 3600:

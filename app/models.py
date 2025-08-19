@@ -1,4 +1,16 @@
 """
+from app import db
+
+class BrandSetting(db.Model):
+    __tablename__ = 'brand_settings'
+    key = db.Column(db.String(64), primary_key=True)
+    value = db.Column(db.Text, nullable=True)
+
+    @staticmethod
+    def get_map():
+        rows = BrandSetting.query.all()
+        return {r.key: r.value for r in rows}
+
 数据模型定义
 """
 
