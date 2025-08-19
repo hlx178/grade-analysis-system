@@ -42,6 +42,8 @@
           <button id="saveBtn" class="btn btn-primary">保存</button>
           <button id="resetBtn" class="btn btn-outline-secondary ms-2">重置</button>
           <span id="msg" class="ms-2"></span>
+          <button id="clearLogoBtn" class="btn btn-outline-danger ms-2">清除 Logo</button>
+
         </div>
       </div>
     </div>
@@ -106,10 +108,20 @@ function resetForm(){
   document.getElementById('logoFile').value = '';
   showAlert('alert-secondary', '已重置为默认值（未保存）');
 }
+async function clearLogo(){
+  const btn = document.getElementById('clearLogoBtn'); btn.disabled = true;
+  try{
+    const r = await fetch('/api/config/branding/logo', { method:'DELETE' });
+    if (r.ok){ document.getElementById('logoPreview').src=''; showAlert('alert-success','Logo 已清除'); }
+    else { const j = await r.json().catch(()=>({error:'失败'})); showAlert('alert-danger','清除失败：'+(j.error||'')); }
+  }catch(e){ showAlert('alert-danger','异常：'+(e.message||e)); }
+  finally{ btn.disabled = false; }
+}
 window.addEventListener('DOMContentLoaded', ()=>{
   loadBrand();
   document.getElementById('saveBtn').addEventListener('click', saveBrand);
   document.getElementById('resetBtn').addEventListener('click', resetForm);
+  document.getElementById('clearLogoBtn').addEventListener('click', clearLogo);
 });
 </script>
 {% endblock %}

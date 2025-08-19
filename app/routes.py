@@ -2237,6 +2237,24 @@ def api_config_branding_logo():
     f.save(path)
     return jsonify({'logo_url': url_for('static', filename='logo.png', _external=False)})
 
+@api_bp.route('/config/branding/logo', methods=['DELETE'])
+@login_required
+def api_config_branding_logo_delete():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    static_dir = os.path.join(current_app.root_path, 'static')
+    path = os.path.join(static_dir, 'logo.png')
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+        return jsonify({'message': 'deleted'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    path = os.path.join(static_dir, 'logo.png')
+    f.save(path)
+    return jsonify({'logo_url': url_for('static', filename='logo.png', _external=False)})
+
 @main_bp.route('/admin/branding')
 @login_required
 def admin_branding_page():
