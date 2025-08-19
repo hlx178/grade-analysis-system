@@ -82,11 +82,21 @@ def create_app(config_name="default"):
                 'BRAND_HEADER_TEXT': 'header_text',
                 'BRAND_FOOTER_TEXT': 'footer_text',
             }
+
             for cfg_key, k in mapping.items():
                 if k in kv and kv[k] is not None:
                     app.config[cfg_key] = kv[k]
         except Exception:
             pass
+            pass
+
+        @app.context_processor
+        def inject_brand():
+            try:
+                name = app.config.get('BRAND_SCHOOL_NAME') or '成绩分析系统'
+            except Exception:
+                name = '成绩分析系统'
+            return { 'brand_school_name': name }
 
 
     return app
