@@ -63,6 +63,15 @@ def create_app(config_name="default"):
     # 启动时加载品牌配置（数据库中的 key/value）
     with app.app_context():
         try:
+            # 确保 brand_settings 表存在（仅创建此表，不影响其它表）
+            from sqlalchemy import inspect as _insp
+            from app import db as _db
+            if not _insp(_db.engine).has_table('brand_settings'):
+                from app.models import BrandSetting as _BrandSetting
+                _BrandSetting.__table__.create(_db.engine)
+        except Exception:
+            pass
+        try:
             from app.models import BrandSetting
             kv = BrandSetting.get_map()
             mapping = {
