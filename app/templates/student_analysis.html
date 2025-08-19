@@ -107,6 +107,7 @@
 {% block scripts %}
 <script>
 const studentId = {{ student.id }};
+const studentInfo = { id: {{ student.id }}, student_id: '{{ student.student_id }}', name: '{{ student.name }}', class_name: '{{ student.class_name }}', grade_level: '{{ student.grade_level }}' };
 let _chart;
 function selectedSubjects(){
   const sel = document.getElementById('subjectCode');
@@ -260,15 +261,40 @@ async function exportPDF(){
   const { jsPDF } = window.jspdf || {};
   if (!jsPDF){ printPDF(); return; }
   const doc = new jsPDF('p','pt','a4');
-  const pad = 24;
+  const pad = 36;
   let y = pad;
-  // 标题
-  doc.setFontSize(14);
-  doc.text(`学生分析报告`, pad, y); y += 18;
+  // 封面
+  doc.setFontSize(20);
+  doc.text(`学生成绩分析报告`, pad, y); y += 30;
+  doc.setFontSize(12);
   const subNames = selectedSubjects().map(c=>document.querySelector(`#subjectCode option[value="${c}"]`)?.textContent || c).join(', ');
-  doc.setFontSize(10);
-  doc.text(`学生：${document.querySelector('h3')?.textContent||''}`, pad, y); y+=14;
-  doc.text(`科目：${subNames}`, pad, y); y+=18;
+  const filters = [];
+  const yf = document.getElementById('yearFrom')?.value || '';
+  const yt = document.getElementById('yearTo')?.value || '';
+  const term = document.getElementById('termSel')?.value || '';
+  const examType = document.getElementById('examType')?.value || '';
+  if (yf||yt) filters.push(`年份：${yf||''}-${yt||''}`);
+  if (term) filters.push(`学期：${term==='spring'?'春/上':'秋/下'}`);
+  if (examType) filters.push(`考试类型：${examType}`);
+  const hdr = [
+    `学生：${studentInfo.name}（${studentInfo.student_id}） 班级：${studentInfo.class_name||''} 年级：${studentInfo.grade_level||''}`,
+    `科目：${subNames}`,
+    `筛选：${filters.join('；')||'无'}`,
+    `导出时间：${new Date().toLocaleString()}`,
+  ];
+  hdr.forEach(t=>{ doc.text(t, pad, y); y+=18; });
+  // 页眉/页脚
+  const addHeaderFooter = (d)=>{
+    const pageCount = d.getNumberOfPages();
+    for (let i=1;i<=pageCount;i++){
+      d.setPage(i);
+      d.setFontSize(9);
+      d.text(`学生：${studentInfo.name}（${studentInfo.student_id}）`, pad, 20);
+      d.text(`第 ${i}/${pageCount} 页`, d.internal.pageSize.getWidth()-pad-60, d.internal.pageSize.getHeight()-20);
+    }
+  };
+  // 分隔线
+  y += 6; doc.setLineWidth(0.5); doc.line(pad, y, doc.internal.pageSize.getWidth()-pad, y); y += 12;
   // 趋势图截图
   const card = document.getElementById('trendCard');
   if (card){
@@ -277,6 +303,7 @@ async function exportPDF(){
     const pageWidth = doc.internal.pageSize.getWidth() - pad*2;
     const imgW = pageWidth;
     const imgH = canvas.height * (imgW / canvas.width);
+    if (y + imgH > doc.internal.pageSize.getHeight() - pad){ doc.addPage(); y = pad + 24; }
     doc.addImage(imgData, 'PNG', pad, y, imgW, imgH);
     y += imgH + 12;
   }
@@ -293,6 +320,8 @@ async function exportPDF(){
 }
 
 }
+  addHeaderFooter(doc);
+
 
   const csv = document.getElementById('csvBtn');
   csv?.addEventListener('click', (e)=>{
