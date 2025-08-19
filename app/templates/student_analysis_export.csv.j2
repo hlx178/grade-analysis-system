@@ -1,0 +1,5 @@
+exam_name,score,class_rank,class_size,grade_rank,grade_size,class_pct,grade_pct,delta_prev,delta_yoy
+{% for s in series %}
+{{ s.exam_name }},{{ s.score }},{{ ranks[s.exam_name].class_rank }},{{ ranks[s.exam_name].class_size }},{{ ranks[s.exam_name].grade_rank }},{{ ranks[s.exam_name].grade_size }},{{ s.class_pct }},{{ s.grade_pct }},{{ s.delta_prev }},{{ s.delta_yoy }}
+{% endfor %}
+

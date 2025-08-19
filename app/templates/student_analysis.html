@@ -13,6 +13,22 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3>学生分析：{{ student.name }}（{{ student.student_id }}）</h3>
   <div>
+    <input id="yearFrom" type="number" class="form-control form-control-sm d-inline-block ms-2" style="width:100px" placeholder="起始年份">
+    <input id="yearTo" type="number" class="form-control form-control-sm d-inline-block ms-1" style="width:100px" placeholder="结束年份">
+    <a id="csvBtn" class="btn btn-sm btn-outline-success ms-2" href="#">导出CSV(明细)</a>
+
+    <select id="termSel" class="form-select form-select-sm d-inline-block ms-1" style="width:120px">
+      <option value="">学期(全部)</option>
+      <option value="spring">春/上</option>
+      <option value="fall">秋/下</option>
+    </select>
+    <select id="examType" class="form-select form-select-sm d-inline-block ms-1" style="width:130px">
+      <option value="">考试类型(全部)</option>
+      <option value="regular">平时</option>
+      <option value="midterm">期中</option>
+      <option value="final">期末</option>
+    </select>
+
     <select id="subjectCode" multiple size="6" class="form-select form-select-sm d-inline-block" style="width:240px">
       {% for code, name in subjects %}
       <option value="{{ code }}">{{ name }} ({{ code }})</option>
@@ -98,7 +114,15 @@ function selectedSubjects(){
 }
 function buildUrl(code){
   const subject_code = code || selectedSubjects()[0] || 'TOTAL';
+  const year_from = Number(document.getElementById('yearFrom')?.value||'');
+  const year_to = Number(document.getElementById('yearTo')?.value||'');
+  const term = document.getElementById('termSel')?.value||'';
+  const exam_type = document.getElementById('examType')?.value||'';
   const p = new URLSearchParams({ id: studentId, subject_code });
+  if (year_from) p.set('year_from', String(year_from));
+  if (year_to) p.set('year_to', String(year_to));
+  if (term) p.set('term', term);
+  if (exam_type) p.set('exam_type', exam_type);
   return '/api/analysis/student-trend?'+p.toString();
 }
 async function loadTrend(){
@@ -270,6 +294,15 @@ async function exportPDF(){
 
 }
 
+  const csv = document.getElementById('csvBtn');
+  csv?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    const subs = selectedSubjects();
+    const primary = subs[0] || 'TOTAL';
+    const url = buildUrl(primary).replace('/analysis/student-trend?', '/analysis/student-trend/export?');
+    window.location.href = url;
+  });
+
   if (sm.latest!=null) lines.push(`最近一次：${sm.latest}`);
   if (sm.trend) lines.push(`总体趋势：${sm.trend==='up'?'上升':(sm.trend==='down'?'下降':'持平')}`);
   const insights = buildInsights(primary);
@@ -281,6 +314,9 @@ function wireExport(){
 function printPDF(){
   window.print();
 }
+
+  // 过滤器联动刷新
+  ['yearFrom','yearTo','termSel','examType'].forEach(id=>{ document.getElementById(id)?.addEventListener('change', ()=> loadTrend()); });
 
   const a = document.getElementById('exportBtn');
   if (!a) return;

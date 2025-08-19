@@ -915,6 +915,10 @@ def api_analysis_student_trend():
     sid = request.args.get('student_id')
     sid_int = request.args.get('id', type=int)
     subject_code = request.args.get('subject_code') or 'TOTAL'
+    year_from = request.args.get('year_from', type=int)
+    year_to = request.args.get('year_to', type=int)
+    term = (request.args.get('term') or '').lower()  # 'spring' | 'fall' | ''
+    exam_type = request.args.get('exam_type')  # optional
     # 找学生
     student = None
     if sid_int:
@@ -927,7 +931,26 @@ def api_analysis_student_trend():
     q = Grade.query.join(Course).filter(Grade.student_id == student.id)
     if subject_code:
         q = q.filter(Course.code == subject_code)
+    if exam_type:
+        q = q.filter(Grade.exam_type == exam_type)
     rows = q.order_by(Grade.exam_name).all()
+    # 过滤学年/学期（基于 exam_name 解析：YYYY 或 YYYY-.. / YYYYMMDD；学期关键词 上/下/春/秋/S/F）
+    def parse_year_and_term(name: str):
+        import re
+        if not name: return None, None
+        m1 = re.search(r'(\d{4})', name)
+        y = int(m1.group(1)) if m1 else None
+        t = None
+        if re.search(r'(上|春|S)', name, flags=re.I):
+            t = 'spring'
+        elif re.search(r'(下|秋|F)', name, flags=re.I):
+            t = 'fall'
+        return y, t
+    if year_from or year_to or term:
+        rows = [g for g in rows if (
+            (parse_year_and_term(g.exam_name)[0] is None or ((year_from is None or parse_year_and_term(g.exam_name)[0] >= year_from) and (year_to is None or parse_year_and_term(g.exam_name)[0] <= year_to))) and
+            (not term or parse_year_and_term(g.exam_name)[1] == term)
+        )]
     # 聚合 exam_name -> score
     from collections import defaultdict
     exams = defaultdict(list)
@@ -1015,6 +1038,26 @@ def api_analysis_student_trend():
             item['delta_yoy'] = None
         if sc is not None:
             seen_by_base[bt] = sc
+
+@api_bp.route('/analysis/student-trend/export', methods=['GET'])
+@login_required
+def api_analysis_student_trend_export():
+    # 复用查询逻辑
+    from flask import render_template
+    r = api_analysis_student_trend()
+    if isinstance(r, tuple):
+        data, code = r
+        if code != 200:
+            return r
+        payload = data.get_json()
+    else:
+        payload = r.get_json()
+    fmt = (request.args.get('format') or 'csv').lower()
+    if fmt != 'csv':
+        fmt = 'csv'
+    csv_text = render_template('student_analysis_export.csv.j2', series=payload['series'], ranks=payload['ranks'])
+    return Response(csv_text, mimetype='text/csv', headers={'Content-Disposition': f'attachment; filename=student-detail-{payload["student"]["student_id"]}-{payload["subject_code"]}.csv'})
+
     # 生成简单报告
     scores = [s['score'] for s in series_sorted if s['score'] is not None]
     trend = None
