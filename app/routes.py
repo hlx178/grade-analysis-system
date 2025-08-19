@@ -933,14 +933,10 @@ def api_analysis_student_trend():
     exams = defaultdict(list)
     for g in rows:
         exams[g.exam_name].append(g.score)
-    series = []
-    for exam_name, arr in exams.items():
-        sc = float(sum(arr)/len(arr)) if arr else None
-        series.append({'exam_name': exam_name, 'score': sc})
-    # 计算班级/年级排名（同一考试内）
-    # 需要同班/同年级数据
+    # 计算班级/年级排名与均线（同一考试内）
     import math
     ranks = {}
+    avg_map = {}
     for exam_name in exams.keys():
         q_cls = Grade.query.join(Student).join(Course).filter(Grade.exam_name==exam_name)
         if subject_code:
@@ -954,16 +950,31 @@ def api_analysis_student_trend():
         by_class = defaultdict(list)
         by_grade = defaultdict(list)
         for sid0, score0, cls, gl in cls_rows:
-            by_class[cls].append((sid0, score0))
-            by_grade[gl].append((sid0, score0))
+            by_class[cls].append((sid0, float(score0)))
+            by_grade[gl].append((sid0, float(score0)))
         class_rank = rank_map(by_class.get(student.class_name, []))
         grade_rank = rank_map(by_grade.get(student.grade_level, []))
+        # 均线
+        def avg_of(pairs):
+            return round(sum(s for _, s in pairs)/len(pairs), 2) if pairs else None
+        class_pairs = by_class.get(student.class_name, [])
+        grade_pairs = by_grade.get(student.grade_level, [])
+        avg_map[exam_name] = {
+            'class_avg': avg_of(class_pairs),
+            'grade_avg': avg_of(grade_pairs),
+        }
         ranks[exam_name] = {
             'class_rank': class_rank.get(student.student_id),
             'grade_rank': grade_rank.get(student.student_id),
-            'class_size': len(by_class.get(student.class_name, [])),
-            'grade_size': len(by_grade.get(student.grade_level, [])),
+            'class_size': len(class_pairs),
+            'grade_size': len(grade_pairs),
         }
+    # 组装系列（含均线）
+    series = []
+    for exam_name, arr in exams.items():
+        sc = float(sum(arr)/len(arr)) if arr else None
+        am = avg_map.get(exam_name, {})
+        series.append({'exam_name': exam_name, 'score': sc, 'class_avg': am.get('class_avg'), 'grade_avg': am.get('grade_avg')})
     # 生成简单报告
     series_sorted = sorted(series, key=lambda x: x['exam_name'])
     scores = [s['score'] for s in series_sorted if s['score'] is not None]

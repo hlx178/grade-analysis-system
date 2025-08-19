@@ -11,6 +11,19 @@
     </select>
     <a id="exportBtn" class="btn btn-sm btn-outline-primary ms-2" href="#">导出报告</a>
   </div>
+    <div class="form-check form-check-inline ms-2">
+      <input class="form-check-input" type="checkbox" id="trendChrono">
+      <label class="form-check-label" for="trendChrono">按时间排序</label>
+    </div>
+    <div class="form-check form-check-inline">
+      <input class="form-check-input" type="checkbox" id="showClassAvg" checked>
+      <label class="form-check-label" for="showClassAvg">班级均线</label>
+    </div>
+    <div class="form-check form-check-inline">
+      <input class="form-check-input" type="checkbox" id="showGradeAvg" checked>
+      <label class="form-check-label" for="showGradeAvg">年级均线</label>
+    </div>
+
 </div>
 
 <div class="row g-3">
@@ -73,16 +86,42 @@ async function loadTrend(){
   const r = await fetch(buildUrl());
   if (!r.ok) return;
   const data = await r.json();
-  const labels = data.series.map(s=>s.exam_name);
-  const scores = data.series.map(s=>s.score);
+  let series = data.series.slice();
+  // 按时间排序（解析 YYYY-MM-DD/YYMMDD 或学期关键词）
+  if (document.getElementById('trendChrono')?.checked){
+    const parseDate = (s)=>{
+      if (!s) return null;
+      const m1 = s.match(/(\d{4})[-/]?(\d{2})[-/]?(\d{2})/);
+      if (m1) return new Date(`${m1[1]}-${m1[2]}-${m1[3]}`);
+      const m2 = s.match(/(\d{4}).*?(上|下|春|秋|S|F)/i);
+      if (m2){ const y=Number(m2[1]); const half=/下|秋|F/i.test(m2[2])?10:3; return new Date(`${y}-${String(half).padStart(2,'0')}-01`); }
+      return null;
+    };
+    series = series.map(x=>({ ...x, _d: parseDate(x.exam_name)}));
+    series.sort((a,b)=>{
+      if (a._d && b._d) return a._d - b._d;
+      if (a._d && !b._d) return -1;
+      if (!a._d && b._d) return 1;
+      return String(a.exam_name).localeCompare(String(b.exam_name));
+    });
+  }
+  const labels = series.map(s=>s.exam_name);
+  const scores = series.map(s=>s.score);
+  const classAvg = series.map(s=>s.class_avg);
+  const gradeAvg = series.map(s=>s.grade_avg);
+  const showClass = document.getElementById('showClassAvg')?.checked !== false;
+  const showGrade = document.getElementById('showGradeAvg')?.checked !== false;
+  const datasets = [ { label:'分数', data:scores, borderColor:'#0d6efd', backgroundColor:'rgba(13,110,253,0.1)' } ];
+  if (showClass) datasets.push({ label:'班级均线', data: classAvg, borderColor:'#20c997', borderDash:[4,3]});
+  if (showGrade) datasets.push({ label:'年级均线', data: gradeAvg, borderColor:'#6c757d', borderDash:[4,3]});
   const ctx = document.getElementById('trendChart').getContext('2d');
   if (_chart) _chart.destroy();
-  _chart = new Chart(ctx, {
-    type:'line',
-    data:{ labels, datasets:[{ label:'分数', data:scores, borderColor:'#0d6efd', backgroundColor:'rgba(13,110,253,0.1)' }]},
-    options:{ responsive:true, scales:{ y:{ beginAtZero:true }}}
-  });
+  _chart = new Chart(ctx, { type:'line', data:{ labels, datasets }, options:{ responsive:true, scales:{ y:{ beginAtZero:true }}} });
   // 明细表
+  document.getElementById('trendChrono')?.addEventListener('change', loadTrend);
+  document.getElementById('showClassAvg')?.addEventListener('change', loadTrend);
+  document.getElementById('showGradeAvg')?.addEventListener('change', loadTrend);
+
   const tb = document.querySelector('#detailTable tbody');
   tb.innerHTML = '';
   data.series.forEach((s,i)=>{
