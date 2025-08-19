@@ -2069,6 +2069,38 @@ def _cleanup_exports_once():
     except Exception:
         pass
 
+
+@api_bp.route('/config/branding', methods=['GET'])
+@login_required
+def api_config_branding():
+    # 简单返回可选品牌信息；未来可改为从数据库/配置文件读取
+    base = {
+        'school_name': '某某学校',
+        'logo_url': url_for('static', filename='logo.png', _external=False),
+    }
+    return jsonify(base)
+
+    global _last_cleanup
+    import time
+    now = time.time()
+    if _last_cleanup and now - _last_cleanup < 3600:
+        return
+    _last_cleanup = now
+    try:
+        export_dir = current_app.config.get('EXPORT_DIR', 'exports')
+        days = current_app.config.get('EXPORT_RETENTION_DAYS', 7)
+        cutoff = now - days*86400
+        if os.path.isdir(export_dir):
+            for name in os.listdir(export_dir):
+                path = os.path.join(export_dir, name)
+                try:
+                    if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                        os.remove(path)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 # 删除任务与文件
 @api_bp.route('/export/my-tasks/<task_id>', methods=['DELETE'])
 @login_required

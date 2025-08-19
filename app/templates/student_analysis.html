@@ -284,6 +284,12 @@ function buildInsights(primary){
     const std = Math.sqrt(variance);
     lines.push(`整体波动性（标准差）：${std.toFixed(2)}`);
   }
+  // 读取品牌配置（学校名/Logo），覆盖默认
+  try{
+    const r = await fetch('/api/config/branding');
+    if (r.ok){ const b = await r.json(); if (b.school_name){ document.title = `${b.school_name} - 学生成绩分析报告`; } }
+  }catch(e){}
+
   // 拐点检测（简单：最近三次是否出现方向反转）
   if (s.length>=3){
     const a = s[s.length-3].score, b = s[s.length-2].score, c = s[s.length-1].score;
@@ -336,7 +342,9 @@ async function exportPDF(){
   const pad = 36;
   let y = pad;
   // 封面
-  const logo = await loadLogoDataUrl();
+  // 优先使用后端配置的 logo
+  let logoCfg = null; try{ const r = await fetch('/api/config/branding'); if (r.ok){ logoCfg = await r.json(); } }catch(e){}
+  const logo = logoCfg?.logo_url ? await (async()=>{ try{ const img=new Image(); img.crossOrigin='anonymous'; const p=new Promise(res=>{ img.onload=()=>res({img}); img.onerror=()=>res(null); }); img.src=logoCfg.logo_url; const got=await p; if (!got) return null; const c=document.createElement('canvas'); const maxH=40; const scale=Math.min(1, maxH/img.height); c.width=img.width*scale; c.height=img.height*scale; const ctx=c.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height); ctx.drawImage(img,0,0,c.width,c.height); return { dataUrl:c.toDataURL('image/png'), w:c.width, h:c.height }; }catch(e){ return null; } })() : await loadLogoDataUrl();
   if (logo){ doc.addImage(logo.dataUrl, 'PNG', pad, y-10, logo.w, logo.h); }
   doc.setFontSize(20);
   doc.text(`学生成绩分析报告`, pad + (logo? (logo.w+12):0), y); y += 30;
