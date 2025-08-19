@@ -168,6 +168,8 @@
         <canvas id="trendChart" height="140"></canvas>
         <div class="mt-2 small">
           <span class="me-2">显示：</span>
+        <div class="small text-muted" id="trendMeta"></div>
+
           <div class="form-check form-check-inline">
             <input class="form-check-input" type="checkbox" id="tgAvg" checked>
             <label class="form-check-label" for="tgAvg">均分</label>
@@ -728,6 +730,24 @@ async function loadTrendChart(){
   });
 
   const sortTag = document.getElementById('compareSortTag'); if (sortTag) sortTag.textContent = '排序：' + ((document.getElementById('compareSortBy')?.value||'avg')==='count'?'按人数':'按均分');
+  const tmeta = document.getElementById('trendMeta'); if (tmeta){
+    const toggles = {
+      avg: document.getElementById('tgAvg')?.checked !== false,
+      med: document.getElementById('tgMed')?.checked !== false,
+      band: document.getElementById('tgBand')?.checked !== false,
+      max: document.getElementById('tgMax')?.checked !== false,
+      min: document.getElementById('tgMin')?.checked !== false,
+    };
+    const items = [];
+    if (toggles.avg) items.push('均分');
+    if (toggles.med) items.push('中位数');
+    if (toggles.band) items.push('P25/P75');
+    if (toggles.max) items.push('最高');
+    if (toggles.min) items.push('最低');
+    const sortWord = document.getElementById('trendChrono')?.checked ? '按时间排序' : '按名称排序';
+    tmeta.textContent = `排序：${sortWord}；导出曲线：${items.join('、')||'无'}`;
+  }
+
 
   // 勾选联动
   // 导出偏好提示：当“仅导出达标”开启但当前阈值与偏好不同
@@ -831,7 +851,7 @@ async function loadDistribution(){
     datasets.push({ label: '累计(%)', data: cdf, type: 'line', borderColor: '#0d6efd', yAxisID: 'y1' });
   }
   const meta = document.getElementById('distMeta');
-  if (meta) meta.textContent = `实际桶宽: ${data.summary?.bin_width ?? (typeof bin_width==='string'?bin_width:bin_width||'auto')}`;
+  if (meta) meta.textContent = `实际桶宽: ${data.summary?.bin_width ?? (typeof bin_width==='string'?bin_width:bin_width||'auto')}；模式：${usePct?'百分比':'人数'}${showCDF?'；叠加CDF':''}`;
   _distChart = new Chart(ctx, {
   const range = document.getElementById('distRange');
   if (range && data.bins?.length){
