@@ -246,6 +246,19 @@ function buildInsights(primary){
     if (diffGap<0) lines.push(`与班级均线差距缩小 ${Math.abs(diffGap).toFixed(2)} 分`);
   }
   const gapGrade = s.filter(x=>typeof x.grade_avg==='number').slice(-N).map(x=>x.score - x.grade_avg);
+async function loadLogoDataUrl(){
+  return new Promise((resolve)=>{
+    try{
+      const img = new Image(); img.crossOrigin='anonymous';
+      img.onload = ()=>{
+        try{ const c=document.createElement('canvas'); const maxH=40; const scale = Math.min(1, maxH/img.height); c.width = img.width*scale; c.height = img.height*scale; const ctx=c.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height); ctx.drawImage(img,0,0,c.width,c.height); resolve({ dataUrl: c.toDataURL('image/png'), w: c.width, h: c.height }); }catch(e){ resolve(null); }
+      };
+      img.onerror = ()=> resolve(null);
+      img.src = '/static/logo.png';
+    }catch(e){ resolve(null); }
+  });
+}
+
   if (gapGrade.length>=2){
     const diffGap = gapGrade[gapGrade.length-1] - gapGrade[0];
     if (diffGap>0) lines.push(`与年级均线差距扩大 ${diffGap.toFixed(2)} 分`);
@@ -264,8 +277,10 @@ async function exportPDF(){
   const pad = 36;
   let y = pad;
   // 封面
+  const logo = await loadLogoDataUrl();
+  if (logo){ doc.addImage(logo.dataUrl, 'PNG', pad, y-10, logo.w, logo.h); }
   doc.setFontSize(20);
-  doc.text(`学生成绩分析报告`, pad, y); y += 30;
+  doc.text(`学生成绩分析报告`, pad + (logo? (logo.w+12):0), y); y += 30;
   doc.setFontSize(12);
   const subNames = selectedSubjects().map(c=>document.querySelector(`#subjectCode option[value="${c}"]`)?.textContent || c).join(', ');
   const filters = [];
@@ -296,6 +311,30 @@ async function exportPDF(){
   // 分隔线
   y += 6; doc.setLineWidth(0.5); doc.line(pad, y, doc.internal.pageSize.getWidth()-pad, y); y += 12;
   // 趋势图截图
+  // 附录：明细表（主科简表）
+  const detail = primary;
+  if (detail && Array.isArray(detail.series) && detail.series.length){
+    const cols = ['考试名称','分数','班级名次','年级名次','班级百分位','年级百分位'];
+    const rows = detail.series.map(s=>{
+      const rk = detail.ranks[s.exam_name]||{};
+      return [s.exam_name, s.score??'', rk.class_rank? `${rk.class_rank}/${rk.class_size}`:'', rk.grade_rank? `${rk.grade_rank}/${rk.grade_size}`:'', (s.class_pct??'')+(s.class_pct!=null?'%':''), (s.grade_pct??'')+(s.grade_pct!=null?'%':'')];
+    });
+    const pageW = doc.internal.pageSize.getWidth();
+    const colW = (pageW - pad*2) / cols.length;
+    const startY = (y>doc.internal.pageSize.getHeight()-pad-120)? (doc.addPage(), pad) : y;
+    let cursorY = startY;
+    doc.setFontSize(12); doc.text('附录：主科明细简表', pad, cursorY); cursorY += 16;
+    doc.setFontSize(9);
+    // 表头
+    cols.forEach((c,i)=>{ doc.text(String(c), pad + i*colW, cursorY); }); cursorY += 12;
+    // 表体（分页）
+    rows.forEach(r=>{
+      if (cursorY>doc.internal.pageSize.getHeight()-pad-20){ doc.addPage(); addHeaderFooter(doc); cursorY = pad; }
+      r.forEach((cell,i)=>{ doc.text(String(cell), pad + i*colW, cursorY); }); cursorY += 12;
+    });
+    y = cursorY + 6;
+  }
+
   const card = document.getElementById('trendCard');
   if (card){
     const canvas = await html2canvas(card, { scale: 2, backgroundColor: '#ffffff' });
