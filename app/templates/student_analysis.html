@@ -323,16 +323,18 @@ async function exportPDF(){
     const colW = (pageW - pad*2) / cols.length;
     const startY = (y>doc.internal.pageSize.getHeight()-pad-120)? (doc.addPage(), pad) : y;
     let cursorY = startY;
-    doc.setFontSize(12); doc.text('附录：主科明细简表', pad, cursorY); cursorY += 16;
-    doc.setFontSize(9);
-    // 表头
-    cols.forEach((c,i)=>{ doc.text(String(c), pad + i*colW, cursorY); }); cursorY += 12;
-    // 表体（分页）
-    rows.forEach(r=>{
-      if (cursorY>doc.internal.pageSize.getHeight()-pad-20){ doc.addPage(); addHeaderFooter(doc); cursorY = pad; }
-      r.forEach((cell,i)=>{ doc.text(String(cell), pad + i*colW, cursorY); }); cursorY += 12;
+    doc.setFontSize(12); doc.text('附录：主科明细', pad, cursorY); cursorY += 10;
+    doc.autoTable({
+      head: [cols],
+      body: rows,
+      startY: cursorY,
+      theme: 'striped',
+      styles: { fontSize: 9 },
+      margin: { left: pad, right: pad },
+      headStyles: { fillColor: [52, 58, 64] },
+      didDrawPage: (data)=>{ addHeaderFooter(doc); }
     });
-    y = cursorY + 6;
+    y = doc.lastAutoTable.finalY + 6;
   }
 
   const card = document.getElementById('trendCard');
