@@ -208,6 +208,23 @@ def grade_bands_page():
     courses = Course.query.order_by(Course.code).all()
     # 版本信息初步加载（默认exam_name=default）
     sets = GradeBandSet.query.filter_by(exam_name='default').order_by(GradeBandSet.version.desc()).all()
+
+@main_bp.route('/student-analysis')
+@login_required
+def student_analysis_page():
+    sid = request.args.get('student_id')
+    sid_int = request.args.get('id', type=int)
+    student = None
+    if sid_int:
+        student = Student.query.get_or_404(sid_int)
+    elif sid:
+        student = Student.query.filter_by(student_id=sid).first_or_404()
+    else:
+        abort(400)
+    from app.utils import SUBJECTS, TOTAL_SUBJECT
+    subjects = [('TOTAL', TOTAL_SUBJECT[1])] + [(code, name) for (_col, code, name) in SUBJECTS]
+    return render_template('student_analysis.html', student=student, subjects=subjects)
+
     return render_template("grade_bands.html", courses=courses, subjects=SUBJECTS + [TOTAL_SUBJECT], sets=sets)
 
 
@@ -891,6 +908,86 @@ def api_analysis_export_all():
     import io, zipfile
 
     # 构造各自 querystring
+
+@api_bp.route('/analysis/student-trend', methods=['GET'])
+@login_required
+def api_analysis_student_trend():
+    sid = request.args.get('student_id')
+    sid_int = request.args.get('id', type=int)
+    subject_code = request.args.get('subject_code') or 'TOTAL'
+    # 找学生
+    student = None
+    if sid_int:
+        student = Student.query.get_or_404(sid_int)
+    elif sid:
+        student = Student.query.filter_by(student_id=sid).first_or_404()
+    else:
+        return jsonify({'error': 'missing student id'}), 400
+    # 查询该生该科多次考试
+    q = Grade.query.join(Course).filter(Grade.student_id == student.id)
+    if subject_code:
+        q = q.filter(Course.code == subject_code)
+    rows = q.order_by(Grade.exam_name).all()
+    # 聚合 exam_name -> score
+    from collections import defaultdict
+    exams = defaultdict(list)
+    for g in rows:
+        exams[g.exam_name].append(g.score)
+    series = []
+    for exam_name, arr in exams.items():
+        sc = float(sum(arr)/len(arr)) if arr else None
+        series.append({'exam_name': exam_name, 'score': sc})
+    # 计算班级/年级排名（同一考试内）
+    # 需要同班/同年级数据
+    import math
+    ranks = {}
+    for exam_name in exams.keys():
+        q_cls = Grade.query.join(Student).join(Course).filter(Grade.exam_name==exam_name)
+        if subject_code:
+            q_cls = q_cls.filter(Course.code==subject_code)
+        cls_rows = q_cls.with_entities(Student.student_id, Grade.score, Student.class_name, Student.grade_level).all()
+        # 排序映射
+        def rank_map(pairs):
+            ps = sorted(pairs, key=lambda x: x[1], reverse=True)
+            return { sid: i for i, (sid, _) in enumerate(ps, 1) }
+        from collections import defaultdict
+        by_class = defaultdict(list)
+        by_grade = defaultdict(list)
+        for sid0, score0, cls, gl in cls_rows:
+            by_class[cls].append((sid0, score0))
+            by_grade[gl].append((sid0, score0))
+        class_rank = rank_map(by_class.get(student.class_name, []))
+        grade_rank = rank_map(by_grade.get(student.grade_level, []))
+        ranks[exam_name] = {
+            'class_rank': class_rank.get(student.student_id),
+            'grade_rank': grade_rank.get(student.student_id),
+            'class_size': len(by_class.get(student.class_name, [])),
+            'grade_size': len(by_grade.get(student.grade_level, [])),
+        }
+    # 生成简单报告
+    series_sorted = sorted(series, key=lambda x: x['exam_name'])
+    scores = [s['score'] for s in series_sorted if s['score'] is not None]
+    trend = None
+    if len(scores) >= 2:
+        trend = 'up' if scores[-1] > scores[0] else ('down' if scores[-1] < scores[0] else 'flat')
+    report = {
+        'summary': {
+            'exams': len(series_sorted),
+            'avg': round(sum(scores)/len(scores),2) if scores else None,
+            'min': min(scores) if scores else None,
+            'max': max(scores) if scores else None,
+            'latest': scores[-1] if scores else None,
+            'trend': trend
+        }
+    }
+    return jsonify({
+        'student': { 'id': student.id, 'student_id': student.student_id, 'name': student.name, 'class_name': student.class_name, 'grade_level': student.grade_level },
+        'subject_code': subject_code,
+        'series': series_sorted,
+        'ranks': ranks,
+        'report': report
+    })
+
     args = request.args
     trends_qs = urlencode({k: v for k, v in args.items() if k in ('subject_code','grade_level','class_name')})
     class_qs_dict = {k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','top_n','min_count','sort_by')}

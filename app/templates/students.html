@@ -12,6 +12,7 @@
       <th>姓名</th>
       <th>班级</th>
       <th>邮箱</th>
+      <th>分析</th>
     </tr>
   </thead>
   <tbody>
@@ -21,6 +22,7 @@
       <td>{{ s.name }}</td>
       <td>{{ s.class_name }}</td>
       <td>{{ s.email }}</td>
+        <td><a class="btn btn-sm btn-outline-primary" href="/student-analysis?id={{ s.id }}">分析</a></td>
     </tr>
   {% endfor %}
   </tbody>

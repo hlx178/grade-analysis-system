@@ -1,0 +1,144 @@
+{% extends 'base.html' %}
+{% block title %}学生分析 - 成绩分析系统{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3>学生分析：{{ student.name }}（{{ student.student_id }}）</h3>
+  <div>
+    <select id="subjectCode" class="form-select form-select-sm d-inline-block" style="width:200px">
+      {% for code, name in subjects %}
+      <option value="{{ code }}">{{ name }} ({{ code }})</option>
+      {% endfor %}
+    </select>
+    <a id="exportBtn" class="btn btn-sm btn-outline-primary ms-2" href="#">导出报告</a>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>多次考试趋势</span>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadTrend()">刷新</button>
+      </div>
+      <div class="card-body">
+        <canvas id="trendChart" height="140"></canvas>
+        <div class="small text-muted mt-2" id="trendMeta"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>成绩与排名明细</span>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-sm table-striped" id="detailTable">
+            <thead>
+              <tr>
+                <th>考试名称</th>
+                <th>分数</th>
+                <th>班级名次</th>
+                <th>年级名次</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>分析报告</span>
+    <div class="text-muted small">自动生成的简要分析，包含均分、最高/最低与近期趋势</div>
+  </div>
+  <div class="card-body">
+    <pre id="reportBox" class="mb-0" style="white-space: pre-wrap"></pre>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const studentId = {{ student.id }};
+let _chart;
+function buildUrl(){
+  const subject_code = document.getElementById('subjectCode').value;
+  const p = new URLSearchParams({ id: studentId, subject_code });
+  return '/api/analysis/student-trend?'+p.toString();
+}
+async function loadTrend(){
+  const r = await fetch(buildUrl());
+  if (!r.ok) return;
+  const data = await r.json();
+  const labels = data.series.map(s=>s.exam_name);
+  const scores = data.series.map(s=>s.score);
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  if (_chart) _chart.destroy();
+  _chart = new Chart(ctx, {
+    type:'line',
+    data:{ labels, datasets:[{ label:'分数', data:scores, borderColor:'#0d6efd', backgroundColor:'rgba(13,110,253,0.1)' }]},
+    options:{ responsive:true, scales:{ y:{ beginAtZero:true }}}
+  });
+  // 明细表
+  const tb = document.querySelector('#detailTable tbody');
+  tb.innerHTML = '';
+  data.series.forEach((s,i)=>{
+    const rk = data.ranks[s.exam_name]||{};
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${s.exam_name}</td><td>${s.score??''}</td><td>${rk.class_rank? rk.class_rank+"/"+rk.class_size: ''}</td><td>${rk.grade_rank? rk.grade_rank+"/"+rk.grade_size: ''}</td>`;
+    tb.appendChild(tr);
+  });
+  // 报告
+  const rep = data.report||{}; const sm = rep.summary||{};
+  const lines = [];
+  lines.push(`科目：${data.subject_code}`);
+  lines.push(`参与考试：${sm.exams||0} 次`);
+  if (sm.avg!=null) lines.push(`平均分：${sm.avg}`);
+  if (sm.max!=null && sm.min!=null) lines.push(`区间：${sm.min} ~ ${sm.max}`);
+  if (sm.latest!=null) lines.push(`最近一次：${sm.latest}`);
+  if (sm.trend) lines.push(`总体趋势：${sm.trend==='up'?'上升':(sm.trend==='down'?'下降':'持平')}`);
+  document.getElementById('reportBox').textContent = lines.join('\n');
+  document.getElementById('trendMeta').textContent = `数据点：${scores.filter(x=>x!=null).length}；缺失：${scores.filter(x=>x==null).length}`;
+}
+function wireExport(){
+  const a = document.getElementById('exportBtn');
+  if (!a) return;
+  a.addEventListener('click', async (e)=>{
+    e.preventDefault();
+    const res = await fetch(buildUrl());
+    if (!res.ok) return;
+    const data = await res.json();
+    // 生成简单 Markdown 报告并下载
+    const md = [
+      `# 学生成绩分析报告`,
+      `- 学生：${data.student.name}（${data.student.student_id}） 班级：${data.student.class_name||''} 年级：${data.student.grade_level||''}`,
+      `- 科目：${data.subject_code}`,
+      `- 参与考试：${data.report?.summary?.exams||0} 次`,
+      `- 平均分：${data.report?.summary?.avg??''}`,
+      `- 最高/最低：${data.report?.summary?.max??''} / ${data.report?.summary?.min??''}`,
+      `- 最近一次：${data.report?.summary?.latest??''}`,
+      `- 趋势：${data.report?.summary?.trend||''}`,
+      ``,
+      `## 明细`,
+      `考试名称, 分数, 班级排名, 年级排名`,
+      ...data.series.map(s=>{
+        const rk = data.ranks[s.exam_name]||{};
+        const cr = rk.class_rank? `${rk.class_rank}/${rk.class_size}`:'';
+        const gr = rk.grade_rank? `${rk.grade_rank}/${rk.grade_size}`:'';
+        return `- ${s.exam_name}: ${s.score??''}, ${cr}, ${gr}`;
+      })
+    ].join('\n');
+    const blob = new Blob([md], {type:'text/markdown;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const tmp = document.createElement('a'); tmp.href = url; tmp.download = `student-report-${data.student.student_id}-${data.subject_code}.md`;
+    document.body.appendChild(tmp); tmp.click(); tmp.remove();
+    URL.revokeObjectURL(url);
+  })
+}
+window.addEventListener('DOMContentLoaded', ()=>{ wireExport(); loadTrend(); });
+</script>
+{% endblock %}
+
