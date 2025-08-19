@@ -2222,6 +2222,27 @@ def api_config_branding_update():
     db.session.commit()
     return jsonify({'message':'ok'})
 
+
+@api_bp.route('/config/branding', methods=['DELETE'])
+@login_required
+def api_config_branding_reset():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    # 删除 BrandSetting 中相关键，使系统回退到默认配置
+    from app.models import BrandSetting
+    keys = ['school_name','school_name_full','subtitle','cover_color','header_text','footer_text']
+    for k in keys:
+        row = BrandSetting.query.get(k)
+        if row:
+            db.session.delete(row)
+    db.session.commit()
+    # 清空进程内配置（回退默认）
+    for cfg_key in ['BRAND_SCHOOL_NAME','BRAND_SCHOOL_NAME_FULL','BRAND_REPORT_SUBTITLE','BRAND_REPORT_COVER_COLOR','BRAND_HEADER_TEXT','BRAND_FOOTER_TEXT']:
+        if cfg_key in current_app.config:
+            current_app.config.pop(cfg_key, None)
+    return jsonify({'message': 'reset to defaults'})
+    return jsonify({'message':'ok'})
+
 @api_bp.route('/config/branding/logo', methods=['POST'])
 @login_required
 def api_config_branding_logo():

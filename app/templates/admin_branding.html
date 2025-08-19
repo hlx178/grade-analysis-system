@@ -40,7 +40,8 @@
         </div>
         <div>
           <button id="saveBtn" class="btn btn-primary">保存</button>
-          <button id="resetBtn" class="btn btn-outline-secondary ms-2">重置</button>
+          <button id="resetBtn" class="btn btn-outline-secondary ms-2">重置表单</button>
+          <button id="resetDefaultBtn" class="btn btn-warning ms-2">恢复默认配置</button>
           <span id="msg" class="ms-2"></span>
           <button id="clearLogoBtn" class="btn btn-outline-danger ms-2">清除 Logo</button>
 
@@ -117,11 +118,22 @@ async function clearLogo(){
   }catch(e){ showAlert('alert-danger','异常：'+(e.message||e)); }
   finally{ btn.disabled = false; }
 }
+async function resetDefaults(){
+  if (!confirm('确认恢复默认配置？将清除已保存的品牌设置。')) return;
+  const btn = document.getElementById('resetDefaultBtn'); btn.disabled = true;
+  try{
+    const r = await fetch('/api/config/branding', { method:'DELETE' });
+    if (r.ok){ showAlert('alert-success','已恢复默认配置'); loadBrand(); }
+    else { const j = await r.json().catch(()=>({error:'失败'})); showAlert('alert-danger','操作失败：'+(j.error||'')); }
+  }catch(e){ showAlert('alert-danger','异常：'+(e.message||e)); }
+  finally{ btn.disabled = false; }
+}
 window.addEventListener('DOMContentLoaded', ()=>{
   loadBrand();
   document.getElementById('saveBtn').addEventListener('click', saveBrand);
   document.getElementById('resetBtn').addEventListener('click', resetForm);
   document.getElementById('clearLogoBtn').addEventListener('click', clearLogo);
+  document.getElementById('resetDefaultBtn').addEventListener('click', resetDefaults);
 });
 </script>
 {% endblock %}
