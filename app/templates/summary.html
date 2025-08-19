@@ -879,6 +879,18 @@ async function loadDistribution(){
     type: 'bar',
     data: { labels, datasets: [{ label: '均分', data: avgs, backgroundColor: bgColors, borderColor: borderColors, borderWidth: 1 }]},
     options: { responsive: true, scales: { y: { beginAtZero: true }}, plugins:{
+      annotation: {
+        annotations: (function(){
+          const m = Number(document.getElementById('minCount')?.value||0);
+          if (!m) return {};
+          return {
+            threshold: {
+              type: 'line', yMin: m, yMax: m, borderColor: '#6c757d', borderDash: [6,4], borderWidth: 1,
+              label: { enabled: true, content: `阈值 ${m}`, position: 'start', backgroundColor: 'rgba(108,117,125,0.1)', color: '#6c757d' }
+            }
+          };
+        })()
+      },
       legend: { display: showLegend, labels: { generateLabels(chart){
         return [
           { text: '达标', fillStyle: '#198754', strokeStyle: '#198754' },
