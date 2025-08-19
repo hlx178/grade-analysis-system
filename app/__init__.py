@@ -81,6 +81,9 @@ def create_app(config_name="default"):
                 'BRAND_REPORT_COVER_COLOR': 'cover_color',
                 'BRAND_HEADER_TEXT': 'header_text',
                 'BRAND_FOOTER_TEXT': 'footer_text',
+                'BRAND_SHOW_HEADER': 'show_header',
+                'BRAND_SHOW_FOOTER': 'show_footer',
+
             }
 
             for cfg_key, k in mapping.items():

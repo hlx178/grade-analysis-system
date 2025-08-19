@@ -32,6 +32,14 @@
           <label class="form-label">页脚文案（可选）</label>
           <input id="footerText" type="text" class="form-control" placeholder="">
         </div>
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="showHeader">
+          <label class="form-check-label" for="showHeader">显示页眉</label>
+        </div>
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" id="showFooter">
+          <label class="form-check-label" for="showFooter">显示页脚</label>
+        </div>
         <div class="mb-3">
           <label class="form-label">学校 Logo（PNG）</label>
           <input id="logoFile" type="file" accept="image/png" class="form-control">
@@ -64,6 +72,8 @@ async function loadBrand(){
   document.getElementById('headerText').value = b.header_text||'';
   document.getElementById('footerText').value = b.footer_text||'';
   if (b.logo_url){ document.getElementById('logoPreview').src = b.logo_url; }
+  document.getElementById('showHeader').checked = (b.show_header !== false);
+  document.getElementById('showFooter').checked = (b.show_footer !== false);
 }
 function showAlert(cls, text){
   const box = document.getElementById('alertBox');
@@ -81,6 +91,8 @@ async function saveBrand(){
       cover_color: document.getElementById('coverColor').value,
       header_text: document.getElementById('headerText').value,
       footer_text: document.getElementById('footerText').value,
+      show_header: document.getElementById('showHeader').checked,
+      show_footer: document.getElementById('showFooter').checked,
     };
     const r = await fetch('/api/config/branding', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     if (!r.ok){ showAlert('alert-danger', '保存失败'); return; }

@@ -386,10 +386,12 @@ async function exportPDF(){
       d.setFontSize(9);
       const headerText = brand?.header_text || `学生：${studentInfo.name}（${studentInfo.student_id}）`;
       const footerText = brand?.footer_text || '';
-      d.text(headerText, pad, 20);
+      const showHeader = brand?.show_header !== false;
+      const showFooter = brand?.show_footer !== false;
+      if (showHeader){ d.text(headerText, pad, 20); }
       const right = d.internal.pageSize.getWidth()-pad-60;
-      d.text(`第 ${i}/${pageCount} 页`, right, d.internal.pageSize.getHeight()-20);
-      if (footerText){ d.text(footerText, pad, d.internal.pageSize.getHeight()-20); }
+      if (showFooter){ d.text(`第 ${i}/${pageCount} 页`, right, d.internal.pageSize.getHeight()-20); }
+      if (showFooter && footerText){ d.text(footerText, pad, d.internal.pageSize.getHeight()-20); }
     }
   };
   // 分隔线

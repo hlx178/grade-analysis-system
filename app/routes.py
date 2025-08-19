@@ -967,6 +967,11 @@ def api_analysis_export_all():
                 f"bin_width：{request.args.get('bin_width') or ''}",
                 f"sort_by：{request.args.get('sort_by') or ''}",
                 f"top_n：{request.args.get('top_n') or ''}",
+                '',
+                '系统信息：',
+                f"系统：{current_app.config.get('SYSTEM_NAME', '成绩分析系统')}",
+                f"版本：{current_app.config.get('SYSTEM_VERSION', 'v1')}",
+                f"导出用户：{getattr(current_user, 'username', '')}（{getattr(current_user, 'role', '')}）",
             ]
             zf.writestr('README.md', '\n'.join(lines))
         except Exception:
@@ -2192,6 +2197,8 @@ def api_config_branding():
         'cover_color': current_app.config.get('BRAND_REPORT_COVER_COLOR', '#0d6efd'),
         'header_text': current_app.config.get('BRAND_HEADER_TEXT', None),
         'footer_text': current_app.config.get('BRAND_FOOTER_TEXT', None),
+        'show_header': current_app.config.get('BRAND_SHOW_HEADER', True),
+        'show_footer': current_app.config.get('BRAND_SHOW_FOOTER', True),
         'logo_url': url_for('static', filename='logo.png', _external=False),
     }
     return jsonify(base)
@@ -2213,6 +2220,8 @@ def api_config_branding_update():
         ('cover_color','BRAND_REPORT_COVER_COLOR'),
         ('header_text','BRAND_HEADER_TEXT'),
         ('footer_text','BRAND_FOOTER_TEXT'),
+        ('show_header','BRAND_SHOW_HEADER'),
+        ('show_footer','BRAND_SHOW_FOOTER'),
     ]:
         if key in data:
             current_app.config[cfg_key] = data[key]
@@ -2230,7 +2239,7 @@ def api_config_branding_reset():
         return jsonify({'error': 'forbidden'}), 403
     # 删除 BrandSetting 中相关键，使系统回退到默认配置
     from app.models import BrandSetting
-    keys = ['school_name','school_name_full','subtitle','cover_color','header_text','footer_text']
+    keys = ['school_name','school_name_full','subtitle','cover_color','header_text','footer_text','show_header','show_footer']
     for k in keys:
         row = BrandSetting.query.get(k)
         if row:
