@@ -151,7 +151,20 @@ async function loadTrend(){
   if (showGrade) datasets.push({ label:'年级均线', data: gradeAvg, borderColor:'#6c757d', borderDash:[4,3]});
   const ctx = document.getElementById('trendChart').getContext('2d');
   if (_chart) _chart.destroy();
-  _chart = new Chart(ctx, { type:'line', data:{ labels, datasets }, options:{ responsive:true, scales:{ y:{ beginAtZero:true }}} });
+  _chart = new Chart(ctx, { type:'line', data:{ labels, datasets }, options:{ responsive:true, scales:{ y:{ beginAtZero:true }} , plugins:{ tooltip:{ callbacks:{
+    afterBody(items){
+      const i = items[0].dataIndex;
+      const s = series[i]||{};
+      const parts = [];
+      if (typeof s.class_avg==='number') parts.push(`班级均线: ${s.class_avg}`);
+      if (typeof s.grade_avg==='number') parts.push(`年级均线: ${s.grade_avg}`);
+      if (typeof s.class_pct==='number') parts.push(`班级百分位: ${s.class_pct}%`);
+      if (typeof s.grade_pct==='number') parts.push(`年级百分位: ${s.grade_pct}%`);
+      if (typeof s.delta_prev==='number') parts.push(`环比Δ: ${s.delta_prev>0?'+':''}${s.delta_prev.toFixed(2)}`);
+      if (typeof s.delta_yoy==='number') parts.push(`同比Δ: ${s.delta_yoy>0?'+':''}${s.delta_yoy.toFixed(2)}`);
+      return parts.join('\n');
+    }
+  }}} });
   // 明细表（主科）
   document.getElementById('trendChrono')?.addEventListener('change', loadTrend);
   document.getElementById('showClassAvg')?.addEventListener('change', loadTrend);
