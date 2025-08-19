@@ -52,6 +52,9 @@ def test_branding_get_put(client):
 
 
 def test_export_all_zip_includes_readme(client):
+    # 设置品牌名以便断言 README 内容
+    client.put('/api/config/branding', json={'school_name': '测试学校', 'subtitle': '报告副标题'})
+
     # 直接请求 ZIP（无需数据，也应返回 zip 容器与 README）
     r = client.get('/api/analysis/export-all')
     assert r.status_code == 200
@@ -61,6 +64,10 @@ def test_export_all_zip_includes_readme(client):
         names = zf.namelist()
         assert 'README.md' in names
         # 可选 logo.png 不做强断言
+        readme = zf.read('README.md').decode('utf-8', errors='ignore')
+        assert '测试学校' in readme
+        assert '报告副标题' in readme
+
         assert 'trends.csv' in names
         assert 'class_compare.csv' in names
         assert 'distribution.csv' in names
