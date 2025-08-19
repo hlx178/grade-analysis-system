@@ -229,6 +229,12 @@
             <option value="avg" selected>按均分</option>
             <option value="count">按人数</option>
           </select>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="exportOnlyMeets">
+            <label class="form-check-label" for="exportOnlyMeets">仅导出达标</label>
+          </div>
+          <span class="badge bg-light text-dark" id="compareSortTag"></span>
+
           <div class="form-text small text-muted">图例：绿色=达标，红色=低于阈值</div>
 
 
@@ -716,6 +722,8 @@ async function loadTrendChart(){
     }}
   });
 
+  const sortTag = document.getElementById('compareSortTag'); if (sortTag) sortTag.textContent = '排序：' + ((document.getElementById('compareSortBy')?.value||'avg')==='count'?'按人数':'按均分');
+
   // 勾选联动
   ['tgAvg','tgMed','tgBand','tgMax','tgMin'].forEach(id=>{
     const el = document.getElementById(id); if (!el) return;
@@ -847,8 +855,13 @@ function buildClassExportUrl(){
   if (exam) p.set('exam_name', exam);
   const grade_level = (document.getElementById('gradeLevel')?.value || '').trim();
   const top_n = (document.getElementById('compareTopN')?.value || '').trim();
-  const minCount = Number(document.getElementById('minCount')?.value || 0);
+  let minCount = Number(document.getElementById('minCount')?.value || 0);
   const sort_by = (document.getElementById('compareSortBy')?.value || 'avg');
+  const onlyExportMeets = document.getElementById('exportOnlyMeets')?.checked || false;
+  if (onlyExportMeets){
+    const prefMin = Number((await (async()=>{ try{ const r=await fetch('/api/summary/prefs'); if(r.ok){ const j=await r.json(); return j?.class_compare?.min_count||0;} }catch(e){}; return 0;})())||0);
+    if (prefMin>0) minCount = prefMin;
+  }
   if (grade_level) p.set('grade_level', grade_level);
   if (top_n) p.set('top_n', top_n);
   if (minCount>0) p.set('min_count', String(minCount));
@@ -900,7 +913,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
   const minCountEl = document.getElementById('minCount'); if (minCountEl) minCountEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, min_count: Number(minCountEl.value||0) }})}); }catch(e){}; };
 
   const onlyMeetsEl = document.getElementById('onlyMeets'); if (onlyMeetsEl) onlyMeetsEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, only_meets: onlyMeetsEl.checked }})}); }catch(e){}; loadClassCompare(); };
-  const sortByEl = document.getElementById('compareSortBy'); if (sortByEl) sortByEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, sort_by: sortByEl.value }})}); }catch(e){}; loadClassCompare(); };
+  const sortByEl = document.getElementById('compareSortBy'); if (sortByEl) sortByEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, sort_by: sortByEl.value }})}); }catch(e){}; const sortTag = document.getElementById('compareSortTag'); if (sortTag) sortTag.textContent = '排序：' + ((sortByEl.value||'avg')==='count'?'按人数':'按均分'); loadClassCompare(); };
 
   const oldLoadSummary = loadSummary;
   window.loadSummary = async function(){ await oldLoadSummary(); await loadTrendChart(); }
