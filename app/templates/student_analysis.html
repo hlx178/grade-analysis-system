@@ -1,4 +1,13 @@
 {% extends 'base.html' %}
+{% block head_extra %}
+<style>
+@media print {
+  nav, .btn, .form-check, select, .form-text { display: none !important; }
+  .card { border: none; }
+}
+</style>
+{% endblock %}
+
 {% block title %}学生分析 - 成绩分析系统{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -9,7 +18,8 @@
       <option value="{{ code }}">{{ name }} ({{ code }})</option>
       {% endfor %}
     </select>
-    <a id="exportBtn" class="btn btn-sm btn-outline-primary ms-2" href="#">导出报告</a>
+    <a id="exportBtn" class="btn btn-sm btn-outline-primary ms-2" href="#">导出Markdown</a>
+    <a id="printBtn" class="btn btn-sm btn-outline-secondary ms-1" href="#">导出PDF</a>
     <div class="form-text small text-muted">可多选科目（首个为主科目，用于明细和均线）</div>
   </div>
     <div class="form-check form-check-inline ms-2">
@@ -163,12 +173,45 @@ async function loadTrend(){
   lines.push(`参与考试：${sm.exams||0} 次`);
   if (sm.avg!=null) lines.push(`平均分：${sm.avg}`);
   if (sm.max!=null && sm.min!=null) lines.push(`区间：${sm.min} ~ ${sm.max}`);
+function buildInsights(primary){
+  const s = primary.series||[];
+  if (!s.length) return [];
+  const last = s[s.length-1];
+  const N = Math.min(3, s.length);
+  const recent = s.slice(-N).map(x=>x.score).filter(v=>v!=null);
+  const lines = [];
+  if (recent.length>=2){
+    const diff = recent[recent.length-1] - recent[0];
+    if (diff>0) lines.push(`近${recent.length}次成绩提升 ${diff.toFixed(2)} 分`);
+    if (diff<0) lines.push(`近${recent.length}次成绩下降 ${Math.abs(diff).toFixed(2)} 分`);
+  }
+  if (typeof last.class_pct === 'number'){
+    lines.push(`最近一次班级百分位：${last.class_pct}%`);
+  }
+  if (typeof last.grade_pct === 'number'){
+    lines.push(`最近一次年级百分位：${last.grade_pct}%`);
+  }
+  if (typeof last.delta_prev === 'number'){
+    const d = last.delta_prev; lines.push(`环比：${d>0?'+':''}${d.toFixed(2)} 分`);
+  }
+  if (typeof last.delta_yoy === 'number'){
+    const d = last.delta_yoy; lines.push(`同比：${d>0?'+':''}${d.toFixed(2)} 分`);
+  }
+  return lines;
+}
+
   if (sm.latest!=null) lines.push(`最近一次：${sm.latest}`);
   if (sm.trend) lines.push(`总体趋势：${sm.trend==='up'?'上升':(sm.trend==='down'?'下降':'持平')}`);
+  const insights = buildInsights(primary);
+  if (insights.length){ lines.push('', '关键洞见：'); insights.forEach(x=>lines.push('- '+x)); }
   document.getElementById('reportBox').textContent = lines.join('\n');
   document.getElementById('trendMeta').textContent = `数据点：${scores.filter(x=>x!=null).length}；缺失：${scores.filter(x=>x==null).length}`;
 }
 function wireExport(){
+function printPDF(){
+  window.print();
+}
+
   const a = document.getElementById('exportBtn');
   if (!a) return;
   a.addEventListener('click', async (e)=>{
@@ -176,16 +219,21 @@ function wireExport(){
     const res = await fetch(buildUrl());
     if (!res.ok) return;
     const data = await res.json();
+    const subs = selectedSubjects();
+    const subNames = subs.map(c=>document.querySelector(`#subjectCode option[value="${c}"]`)?.textContent || c).join(', ');
     // 生成简单 Markdown 报告并下载
     const md = [
       `# 学生成绩分析报告`,
       `- 学生：${data.student.name}（${data.student.student_id}） 班级：${data.student.class_name||''} 年级：${data.student.grade_level||''}`,
-      `- 科目：${data.subject_code}`,
+      `- 科目：${subNames}`,
       `- 参与考试：${data.report?.summary?.exams||0} 次`,
       `- 平均分：${data.report?.summary?.avg??''}`,
       `- 最高/最低：${data.report?.summary?.max??''} / ${data.report?.summary?.min??''}`,
       `- 最近一次：${data.report?.summary?.latest??''}`,
       `- 趋势：${data.report?.summary?.trend||''}`,
+      ``,
+      `## 关键洞见`,
+      ...buildInsights(data).map(x=>`- ${x}`),
       ``,
       `## 明细`,
       `考试名称, 分数, 班级排名, 年级排名`,
@@ -194,6 +242,9 @@ function wireExport(){
         const cr = rk.class_rank? `${rk.class_rank}/${rk.class_size}`:'';
         const gr = rk.grade_rank? `${rk.grade_rank}/${rk.grade_size}`:'';
         return `- ${s.exam_name}: ${s.score??''}, ${cr}, ${gr}`;
+  const p = document.getElementById('printBtn');
+  p?.addEventListener('click', (e)=>{ e.preventDefault(); printPDF(); });
+
       })
     ].join('\n');
     const blob = new Blob([md], {type:'text/markdown;charset=utf-8'});
