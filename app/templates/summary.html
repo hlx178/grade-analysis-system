@@ -901,6 +901,7 @@ function wireExportLinks(){
 
 function buildExportAllUrl(){
   async function updateExportHint(){
+    if (sessionStorage.getItem('suppress_export_hints')==='1') return;
     const expOnly = document.getElementById('exportOnlyMeets')?.checked || false;
     const hint = document.getElementById('exportPrefHint'); if (!hint) return;
     hint.textContent = '';
@@ -912,11 +913,10 @@ function buildExportAllUrl(){
       const curMin = Number(document.getElementById('minCount')?.value||0);
       if (prefMin !== curMin){
         const a = document.createElement('a'); a.href='#'; a.textContent='将偏好阈值更新为当前值'; a.onclick = async (e)=>{ e.preventDefault(); try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, min_count: curMin}})}); hint.textContent='已更新偏好阈值为 '+curMin; }catch(e){ hint.textContent='更新失败'; }};
+        const b = document.createElement('a'); b.href='#'; b.textContent='本次不再提示'; b.onclick = (e)=>{ e.preventDefault(); try{ sessionStorage.setItem('suppress_export_hints','1'); }catch(_){}; hint.textContent=''; };
         hint.innerHTML = `提示：导出将按偏好中的阈值(${prefMin})执行，当前设置为(${curMin})。`;
         hint.appendChild(document.createTextNode(' ')); hint.appendChild(a);
-  document.getElementById('minCount')?.addEventListener('change', updateExportHint);
-  document.getElementById('exportOnlyMeets')?.addEventListener('change', updateExportHint);
-
+        hint.appendChild(document.createTextNode(' | ')); hint.appendChild(b);
       }
     }catch(e){}
   }
