@@ -129,7 +129,13 @@ def dashboard():
 @main_bp.route("/students")
 @login_required
 def students():
-    students = Student.query.order_by(Student.class_name, Student.student_id).all()
+    # 学生角色仅查看本人（通过学号=登录账号绑定）
+    if current_user.role == 'student':
+        u = current_user
+        stu = Student.query.filter_by(student_id=u.username).first() if u.username else None
+        students = [stu] if stu else []
+    else:
+        students = Student.query.order_by(Student.class_name, Student.student_id).all()
     return render_template("students.html", students=students)
 
 
@@ -145,7 +151,12 @@ def courses():
 @main_bp.route("/grades")
 @login_required
 def grades():
-    grades = Grade.query.order_by(Grade.created_at.desc()).limit(100).all()
+    # 学生角色仅查看本人（通过学号=登录账号绑定）
+    if current_user.role == 'student':
+        u = current_user
+        grades = Grade.query.join(Student).filter(Student.student_id==u.username).order_by(Grade.created_at.desc()).limit(100).all()
+    else:
+        grades = Grade.query.order_by(Grade.created_at.desc()).limit(100).all()
     return render_template("grades.html", grades=grades)
 
 
@@ -153,9 +164,19 @@ def grades():
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username")
+        username = (request.form.get("username") or '').strip()
         password = request.form.get("password")
+        # 支持学生用学号作为登录账号
         user = User.query.filter_by(username=username).first()
+        if not user:
+            # 若用户不存在且是有效学号格式，则可按需自动为学生创建账号（初始密码123456）
+            import re
+            if re.fullmatch(r"\d{8}", username):
+                stu = Student.query.filter_by(student_id=username).first()
+                if stu:
+                    user = User(username=username, email=f"{username}@example.com", role='student')
+                    user.set_password('123456')
+                    db.session.add(user); db.session.commit()
         if user and user.check_password(password):
             login_user(user)
             flash("登录成功", "success")
@@ -201,6 +222,15 @@ def exam_schemes_page():
     ensure_default_exam_scheme("regular")
     return render_template("exam_schemes.html")
 
+    # 学生角色只能查看本人
+    if current_user.role == 'student':
+        u = current_user
+        sid_ok = False
+        if getattr(u, 'student_ref_id', None):
+            sid_ok = (student.id == u.student_ref_id)
+        if not sid_ok:
+            return abort(403)
+
 
 @main_bp.route("/grade-bands")
 @login_required
@@ -221,6 +251,10 @@ def student_analysis_page():
         student = Student.query.filter_by(student_id=sid).first_or_404()
     else:
         abort(400)
+    # 权限：学生仅能查看本人（学号=登录账号）
+    if current_user.role == 'student':
+        if student.student_id != current_user.username:
+            abort(403)
     from app.utils import SUBJECTS, TOTAL_SUBJECT
     subjects = [('TOTAL', TOTAL_SUBJECT[1])] + [(code, name) for (_col, code, name) in SUBJECTS]
     return render_template('student_analysis.html', student=student, subjects=subjects)
@@ -242,8 +276,12 @@ def logout():
 def api_students():
     if request.method == "POST":
         data = request.get_json() or request.form
+        sid = (data.get("student_id") or '').strip()
+        import re
+        if not re.fullmatch(r"\d{8}", sid):
+            return jsonify({"error": "student_id must be 8-digit: 4-digit year + 4-digit sequence"}), 400
         student = Student(
-            student_id=data.get("student_id"),
+            student_id=sid,
             name=data.get("name"),
             class_name=data.get("class_name"),
             email=data.get("email"),
@@ -620,9 +658,81 @@ def api_import_grades():
     try:
         os.remove(file_path)
     except Exception:
-        pass
+            pass
 
     return jsonify({"message": "Import finished", "created": created, "updated": updated})
+
+# 导入: 学生主数据（可选自动创建用户账号）
+@api_bp.route("/import/students", methods=["POST"])
+@login_required
+def api_import_students():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json() or request.form
+    file_id = data.get("file_id")
+    sheet_name = data.get("sheet_name")
+    auto_create_users = bool(data.get("auto_create_users"))
+    default_password = (data.get("default_password") or '123456').strip() or '123456'
+    if not file_id or not sheet_name:
+        return jsonify({"error": "file_id and sheet_name are required"}), 400
+
+    upload_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
+    file_path = os.path.join(upload_dir, f"{file_id}.xlsx")
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Uploaded file not found or expired"}), 400
+
+    try:
+        df = pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl")
+    except Exception as e:
+        return jsonify({"error": f"Failed to read sheet: {e}"}), 400
+
+    # 期望列：学号、姓名、班级、年级、邮箱(可选)
+    required_cols = ["学号", "姓名", "班级"]
+    for col in required_cols:
+        if col not in df.columns:
+            return jsonify({"error": f"Missing required column: {col}"}), 400
+
+    import re
+    created = 0
+    updated = 0
+    users_created = 0
+    for _, row in df.iterrows():
+        sid = str(row["学号"]).strip()
+        if not re.fullmatch(r"\d{8}", sid):
+            # 跳过非法学号
+            continue
+        name = str(row.get("姓名") or '').strip()
+        class_name = str(row.get("班级") or '').strip()
+        grade_level = str(row.get("年级") or '').strip() or None
+        email = str(row.get("邮箱") or '').strip() or None
+        stu = Student.query.filter_by(student_id=sid).first()
+        if not stu:
+            stu = Student(student_id=sid, name=name, class_name=class_name, grade_level=grade_level, email=email)
+            db.session.add(stu)
+            created += 1
+        else:
+            # 更新基础信息
+            if name: stu.name = name
+            if class_name: stu.class_name = class_name
+            if grade_level: stu.grade_level = grade_level
+            if email: stu.email = email
+            updated += 1
+        db.session.flush()
+        if auto_create_users:
+            # 用户名=学号，若不存在则创建学生用户
+            u = User.query.filter_by(username=sid).first()
+            if not u:
+                u = User(username=sid, email=(email or f"{sid}@example.com"), role='student')
+                u.set_password(default_password)
+                db.session.add(u)
+                users_created += 1
+
+    db.session.commit()
+    try:
+        os.remove(file_path)
+    except Exception:
+        pass
+    return jsonify({"message": "Import finished", "students_created": created, "students_updated": updated, "users_created": users_created})
 
 
 @api_bp.route("/analysis/ranking", methods=["GET"])
@@ -987,7 +1097,7 @@ def api_analysis_export_all():
                 zf.write(logo_path, arcname='logo.png')
         except Exception:
             pass
-        # 三份 CSV
+        # 写入三份 CSV
         zf.writestr('trends.csv', trends_csv)
         zf.writestr('class_compare.csv', class_csv)
         zf.writestr('distribution.csv', dist_csv)
@@ -2298,6 +2408,68 @@ def api_config_branding_logo_delete():
 def admin_branding_page():
     if current_user.role != 'admin':
         abort(403)
+
+# 角色权限与模块设置（管理员）
+@api_bp.route('/admin/role-permissions', methods=['GET','PUT'])
+@login_required
+def api_role_permissions():
+    if current_user.role != 'admin':
+        return jsonify({'error':'forbidden'}), 403
+    from app.models import RolePermission
+    import json
+    if request.method == 'GET':
+        rows = RolePermission.query.all()
+        def to_obj(r):
+            try:
+                mods = json.loads(r.modules) if r.modules else []
+            except Exception:
+                mods = []
+            return {'role': r.role, 'modules': mods}
+        return jsonify({'items': [to_obj(r) for r in rows]})
+    data = request.get_json(force=True)
+    items = data.get('items') or []
+    for it in items:
+        role = (it.get('role') or '').strip()
+        modules = it.get('modules') or []
+        if not role: continue
+        row = RolePermission.query.get(role) or RolePermission(role=role)
+        try:
+            row.modules = json.dumps([m for m in modules if isinstance(m, str)], ensure_ascii=False)
+        except Exception:
+            row.modules = json.dumps([], ensure_ascii=False)
+        db.session.add(row)
+    db.session.commit()
+    return jsonify({'message':'updated'})
+
+@api_bp.route('/admin/module-settings', methods=['GET','PUT'])
+@login_required
+def api_module_settings():
+    if current_user.role != 'admin':
+        return jsonify({'error':'forbidden'}), 403
+    from app.models import ModuleSetting
+    import json
+    if request.method == 'GET':
+        rows = ModuleSetting.query.all()
+        def to_obj(r):
+            try:
+                val = json.loads(r.value) if r.value else None
+            except Exception:
+                val = None
+            return {'key': r.key, 'value': val}
+        return jsonify({'items': [to_obj(r) for r in rows]})
+    data = request.get_json(force=True)
+    items = data.get('items') or []
+    for it in items:
+        key = (it.get('key') or '').strip()
+        val = it.get('value')
+        if not key: continue
+        row = ModuleSetting.query.filter_by(key=key).first()
+        if not row:
+            row = ModuleSetting(key=key)
+        row.value = json.dumps(val, ensure_ascii=False)
+        db.session.add(row)
+    db.session.commit(); return jsonify({'message':'updated'})
+
     return render_template('admin_branding.html')
 
     import time
@@ -2741,6 +2913,27 @@ def api_users_list():
         'page_size': page_size,
     })
 
+# 导出用户列表（按当前搜索过滤，不分页）
+@api_bp.route('/users/export', methods=['GET'])
+@login_required
+def api_users_export():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    qstr = request.args.get('q', '').strip()
+    q = User.query
+    if qstr:
+        like = f"%{qstr}%"
+        q = q.filter((User.username.ilike(like)) | (User.email.ilike(like)))
+    rows = q.order_by(User.id.asc()).all()
+    import io, csv
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['id','username','email','role','allowed_grade_levels','allowed_class_names'])
+    for u in rows:
+        writer.writerow([u.id, u.username or '', u.email or '', u.role or '', u.allowed_grade_levels or '', u.allowed_class_names or ''])
+    from flask import Response
+    data = '\ufeff' + buf.getvalue()
+    return Response(data, mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=users.csv'})
 
 
 @api_bp.route('/users', methods=['POST'])
@@ -2822,21 +3015,50 @@ def api_master_grades():
     data = request.get_json(force=True)
     items = data.get('items')
     if items and isinstance(items, list):
-        created=0
+        created = 0
         for it in items:
             name = (it.get('name') or '').strip()
-            if not name: continue
-            if GradeMaster.query.filter_by(name=name).first(): continue
+            if not name:
+                continue
+            if GradeMaster.query.filter_by(name=name).first():
+                continue
             db.session.add(GradeMaster(name=name, order_no=int(it.get('order_no') or 0), is_active=bool(it.get('is_active', True))))
-            created+=1
+            created += 1
         db.session.commit()
-        return jsonify({'message':'batch created','created':created})
+        return jsonify({'message': 'batch created', 'created': created})
+    # 单个创建
     name = (data.get('name') or '').strip()
-    if not name: return jsonify({'error':'name required'}), 400
-    if GradeMaster.query.filter_by(name=name).first(): return jsonify({'error':'exists'}), 400
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+    if GradeMaster.query.filter_by(name=name).first():
+        return jsonify({'error': 'exists'}), 400
     r = GradeMaster(name=name, order_no=int(data.get('order_no') or 0), is_active=bool(data.get('is_active', True)))
     db.session.add(r); db.session.commit()
     return jsonify({'id': r.id, 'message': 'created'})
+
+# 下载导入模板
+@api_bp.route('/import/template/<string:kind>', methods=['GET'])
+@login_required
+def api_download_import_template(kind):
+    if current_user.role != 'admin':
+        abort(403)
+    import io
+    from openpyxl import Workbook
+    wb = Workbook(); ws = wb.active; ws.title = 'Sheet1'
+    if kind == 'grades':
+        ws.append(['学号','姓名','班级','课程代码','课程名称','成绩','考试类型','考试日期'])
+        ws.append(['20240001','张三','高一(1)班','MATH','数学','95','期中','2024-05-01'])
+        ws.append(['20240002','李四','高一(1)班','CHN','语文','88','期中','2024-05-01'])
+    elif kind == 'students':
+        ws.append(['学号','姓名','班级','年级','邮箱'])
+        ws.append(['20240001','张三','高一(1)班','高一','20240001@example.com'])
+        ws.append(['20240002','李四','高一(1)班','高一','20240002@example.com'])
+    else:
+        return jsonify({'error':'unknown template kind'}), 400
+    buf = io.BytesIO()
+    wb.save(buf); buf.seek(0)
+    from flask import send_file
+    return send_file(buf, as_attachment=True, download_name=f'{kind}_template.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 @api_bp.route('/master/grades/<int:gid>', methods=['PUT'])
 @login_required
@@ -2910,6 +3132,59 @@ def api_user_update(user_id):
     db.session.commit()
     return jsonify({'message': 'updated'})
 
+@api_bp.route('/auth/password', methods=['PUT'])
+@login_required
+def api_change_my_password():
+    data = request.get_json(force=True)
+    old_pwd = data.get('old_password')
+    new_pwd = data.get('new_password')
+    if not new_pwd:
+        return jsonify({'error':'new_password required'}), 400
+    # 学生/教师需校验旧密码；管理员可直接改自己的
+    if current_user.role != 'admin':
+        if not old_pwd or not current_user.check_password(old_pwd):
+            return jsonify({'error':'invalid old password'}), 400
+    u = User.query.get(current_user.id)
+    u.set_password(new_pwd)
+    db.session.commit()
+    return jsonify({'message':'password updated'})
+
+@api_bp.route('/admin/users/passwords', methods=['PUT'])
+@login_required
+def api_admin_batch_update_passwords():
+    if current_user.role != 'admin':
+        return jsonify({'error':'forbidden'}), 403
+    data = request.get_json(force=True)
+    items = data.get('items') or []  # [{id|username, new_password}]
+    updated = 0
+    for it in items:
+        new_pwd = it.get('new_password')
+        if not new_pwd:
+            continue
+        u = None
+        if it.get('id'):
+            u = User.query.get(it['id'])
+        elif it.get('username'):
+            u = User.query.filter_by(username=it['username']).first()
+        if u:
+            u.set_password(new_pwd); updated += 1
+    db.session.commit()
+    return jsonify({'message':'batch updated', 'updated': updated})
+
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    u = User.query.get_or_404(user_id)
+    data = request.get_json(force=True)
+    # 仅允许更新可见范围与角色（可选）
+    if 'allowed_grade_levels' in data:
+        u.allowed_grade_levels = data.get('allowed_grade_levels')
+    if 'allowed_class_names' in data:
+        u.allowed_class_names = data.get('allowed_class_names')
+    if 'role' in data:
+        u.role = data.get('role')
+    db.session.commit()
+    return jsonify({'message': 'updated'})
+
 
 @api_bp.route('/users/batch', methods=['PUT'])
 @login_required
@@ -2922,6 +3197,7 @@ def api_users_batch_update():
         u = User.query.get(it.get('id'))
         if not u:
             continue
+        # 批量更新用户属性
         if 'role' in it and it.get('role'):
             u.role = it.get('role')
         if 'allowed_grade_levels' in it:
@@ -2929,6 +3205,98 @@ def api_users_batch_update():
         if 'allowed_class_names' in it:
             u.allowed_class_names = it.get('allowed_class_names')
     db.session.commit()
+    return jsonify({'message': 'batch updated', 'count': len(items)})
+    return jsonify({'message': 'batch updated', 'count': len(items)})
+
+# 批量创建学生账号（管理员，直接粘贴学号列表）
+@api_bp.route('/admin/users/students/batch-create', methods=['POST'])
+@login_required
+def api_admin_batch_create_student_users():
+    if current_user.role != 'admin':
+        return jsonify({'error':'forbidden'}), 403
+    data = request.get_json(force=True)
+    ids_text = (data.get('student_ids') or '').strip()
+    default_password = (data.get('default_password') or '123456').strip() or '123456'
+    import re
+    sids = [s.strip() for s in re.split(r'[\s,;\n\r]+', ids_text) if s.strip()]
+    created = 0; skipped = 0; no_student = 0
+    for sid in sids:
+        if not re.fullmatch(r'\d{8}', sid):
+            skipped += 1
+            continue
+        stu = Student.query.filter_by(student_id=sid).first()
+        if not stu:
+            no_student += 1
+            continue
+        u = User.query.filter_by(username=sid).first()
+        if u:
+            skipped += 1
+            continue
+        u = User(username=sid, email=(stu.email or f'{sid}@example.com'), role='student')
+        u.set_password(default_password)
+        db.session.add(u); created += 1
+
+# 导出学生用户初始化清单（用户名=学号，含初始密码可选）
+@api_bp.route('/admin/users/students/export-init', methods=['GET'])
+@login_required
+def api_admin_export_student_init():
+    if current_user.role != 'admin':
+        return jsonify({'error':'forbidden'}), 403
+    fmt = (request.args.get('format') or 'csv').lower()
+    initial_password = (request.args.get('default_password') or '').strip()
+    # 仅导出已创建的学生用户
+    q = db.session.query(User.username, Student.name, Student.class_name, Student.email) \
+        .join(Student, Student.student_id == User.username) \
+        .filter(User.role == 'student') \
+        .order_by(Student.class_name.asc(), Student.student_id.asc())
+    rows = q.all()
+    if fmt == 'xlsx':
+        import io
+        from openpyxl import Workbook
+        wb = Workbook(); ws = wb.active; ws.title = '学生用户'
+        headers = ['用户名(学号)','姓名','班级','邮箱']
+        if initial_password:
+            headers.append('初始密码')
+        else:
+            headers.append('说明')
+        ws.append(headers)
+        for u, name, cls, email in rows:
+            rec = [u, name or '', cls or '', email or '']
+            if initial_password:
+                rec.append(initial_password)
+            else:
+                rec.append('初始密码为管理员设置或123456；请首次登录后修改密码')
+            ws.append(rec)
+        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        from flask import send_file
+        return send_file(buf, as_attachment=True, download_name='student_users_init.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    # 默认 CSV
+    import io, csv
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    headers = ['用户名(学号)','姓名','班级','邮箱']
+    if initial_password:
+        headers.append('初始密码')
+    else:
+        headers.append('说明')
+    writer.writerow(headers)
+    for u, name, cls, email in rows:
+        rec = [u, name or '', cls or '', email or '']
+        if initial_password:
+            rec.append(initial_password)
+        else:
+            rec.append('初始密码为管理员设置或123456；请首次登录后修改密码')
+        writer.writerow(rec)
+    from flask import Response
+    data = '\ufeff' + buf.getvalue()
+    return Response(
+        data,
+        mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename=student_users_init.csv'}
+    )
+    db.session.commit()
+    return jsonify({'message':'batch created', 'created': created, 'skipped': skipped, 'no_student': no_student})
+
     return jsonify({'message': 'batch updated', 'count': len(items)})
 
 

@@ -33,7 +33,7 @@ def test_student_crud(client, app):
 
     # Create
     r = client.post('/api/students', json={
-        'student_id': 'S001', 'name': 'Alice', 'class_name': 'Class A', 'email': 'a@example.com'
+        'student_id': '20240001', 'name': 'Alice', 'class_name': 'Class A', 'email': 'a@example.com'
     })
     assert r.status_code == 201
     sid = r.get_json()['id']
@@ -98,7 +98,7 @@ def test_grade_crud_and_analysis(client, app):
 
     # Prepare student and course
     rs = client.post('/api/students', json={
-        'student_id': 'S100', 'name': 'Bob', 'class_name': 'Class B', 'email': 'b@example.com'
+        'student_id': '20240002', 'name': 'Bob', 'class_name': 'Class B', 'email': 'b@example.com'
     })
     rc = client.post('/api/courses', json={'code': 'C100', 'name': 'Physics'})
     assert rs.status_code == 201 and rc.status_code == 201

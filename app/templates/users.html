@@ -17,12 +17,37 @@
       <button class="btn btn-outline-primary" onclick="batchSave()">批量保存</button>
       <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#batchRoleModal">所选设角色</button>
       <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#batchVisModal">所选设可见范围</button>
-      <button class="btn btn-outline-secondary" onclick="exportUsers()">导出CSV</button>
+      <button class="btn btn-outline-secondary" onclick="exportUsers()">导出CSV(当前页)</button>
+      <button class="btn btn-outline-secondary" onclick="exportUsersAll()">导出CSV(按搜索条件)</button>
+      <input class="form-control form-control-sm d-inline-block" id="exportInitPwd" placeholder="初始密码(可选)" style="width: 160px;"/>
+      <button class="btn btn-outline-secondary" onclick="exportStudentInitXlsx()">导出学生初始化清单(XLSX)</button>
       <input type="file" id="importUsersFile" accept="text/csv,application/vnd.ms-excel" class="d-none"/>
       <button class="btn btn-outline-secondary" onclick="document.getElementById('importUsersFile').click()">导入CSV</button>
     </div>
   </div>
 </div>
+
+<!-- 批量创建学生账号 -->
+<div class="card mb-3">
+  <div class="card-body">
+    <h5 class="card-title">批量创建学生账号</h5>
+    <div class="row g-3">
+      <div class="col-12">
+        <label class="form-label">粘贴学号列表（换行、逗号或分号分隔；每项为8位数字：入学年份4位+流水号4位）</label>
+        <textarea id="batchSids" class="form-control" rows="4" placeholder="如：\n20240001\n20240002\n20240003"></textarea>
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label">默认密码</label>
+        <input id="batchPwd" class="form-control" placeholder="默认 123456">
+      </div>
+      <div class="col-sm-6 d-flex align-items-end">
+        <button class="btn btn-primary" onclick="batchCreateStudentUsers()">创建账号</button>
+      </div>
+    </div>
+    <div id="batchCreateResult" class="mt-3"></div>
+  </div>
+</div>
+
 <table class="table table-bordered" id="userTable">
   <thead>
     <tr>
@@ -243,9 +268,45 @@ document.getElementById('importUsersFile').addEventListener('change', async (e)=
     const gl = (cols[idx.gl]||'').trim();
     const cl = (cols[idx.cl]||'').trim();
     if (!id || isNaN(Number(id))){ fail++; fails.push({line:i+1, reason:'id 非数字'}); continue; }
+
+async function exportUsersAll(){
+  const q = document.getElementById('userSearch').value.trim();
+  const qs = new URLSearchParams();
+  if (q) qs.set('q', q);
+  const url = '/api/users/export?' + qs.toString();
+  window.open(url || '/api/users/export', '_blank');
+}
+
     if (role && !allowedRoles.has(role)){ fail++; fails.push({line:i+1, reason:'非法角色: '+role}); continue; }
     const payload = { role, allowed_grade_levels: gl, allowed_class_names: cl };
+
+function exportStudentInitXlsx(){
+  const pwd = (document.getElementById('exportInitPwd')?.value || '').trim();
+  const qs = new URLSearchParams({ format: 'xlsx' });
+  if (pwd) qs.set('default_password', pwd);
+  const url = '/api/admin/users/students/export-init?' + qs.toString();
+  window.open(url, '_blank');
+}
+
     try{
+
+async function batchCreateStudentUsers(){
+  const sids = document.getElementById('batchSids').value.trim();
+  if (!sids){ alert('请输入学号列表'); return; }
+  const pwd = document.getElementById('batchPwd').value.trim() || '123456';
+  const res = await fetch('/api/admin/users/students/batch-create', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ student_ids: sids, default_password: pwd })
+  });
+  const data = await res.json();
+  const el = document.getElementById('batchCreateResult');
+  if (res.ok){
+    el.innerHTML = `<div class="alert alert-success">创建完成：新增 ${data.created}，跳过 ${data.skipped}，无对应学生 ${data.no_student}。</div>`;
+  } else {
+    el.innerHTML = `<div class="alert alert-danger">操作失败：${data.error || '未知错误'}</div>`;
+  }
+}
+
       const res = await fetch(`/api/users/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
       if (!res.ok){ fail++; fails.push({line:i+1, reason:'接口返回 '+res.status}); }
       else ok++;

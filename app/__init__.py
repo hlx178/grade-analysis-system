@@ -72,6 +72,18 @@ def create_app(config_name="default"):
         except Exception:
             pass
         try:
+            # 轻量迁移：如 users 表缺少 student_ref_id 列则添加
+            from sqlalchemy import text as _text
+            from sqlalchemy import inspect as _insp2
+            insp = _insp2(_db.engine)
+            if insp.has_table('users'):
+                res = _db.engine.execute(_text('PRAGMA table_info(users)')).fetchall()
+                cols = {row[1] for row in res} if res else set()
+                if 'student_ref_id' not in cols:
+                    _db.engine.execute(_text('ALTER TABLE users ADD COLUMN student_ref_id INTEGER'))
+        except Exception:
+            pass
+        try:
             from app.models import BrandSetting
             kv = BrandSetting.get_map()
             mapping = {
@@ -83,14 +95,11 @@ def create_app(config_name="default"):
                 'BRAND_FOOTER_TEXT': 'footer_text',
                 'BRAND_SHOW_HEADER': 'show_header',
                 'BRAND_SHOW_FOOTER': 'show_footer',
-
             }
-
             for cfg_key, k in mapping.items():
                 if k in kv and kv[k] is not None:
                     app.config[cfg_key] = kv[k]
         except Exception:
-            pass
             pass
 
         @app.context_processor
@@ -99,7 +108,100 @@ def create_app(config_name="default"):
                 name = app.config.get('BRAND_SCHOOL_NAME') or '成绩分析系统'
             except Exception:
                 name = '成绩分析系统'
-            return { 'brand_school_name': name }
+            # 角色模块权限（用于导航显示）
+            try:
+                from flask_login import current_user as _cu
+                from app.models import RolePermission as _RP
+                import json as _json
+                def _default_modules(role: str):
+                    all_mods = ['students','courses','grades','summary','import','exam_schemes','grade_bands','users','diagnostics','branding','student_analysis']
+                    if role == 'admin': return set(all_mods)
+                    if role == 'teacher': return set(['students','courses','grades','summary','import'])
+                    if role == 'student': return set(['students','grades','summary','student_analysis'])
+                    return set()
+                mods = set()
+                if _cu.is_authenticated:
+                    rp = _RP.query.filter_by(role=_cu.role).first()
+                    if rp and rp.modules:
+                        try:
+                            mods = set(m for m in _json.loads(rp.modules) if isinstance(m, str))
+                        except Exception:
+                            mods = _default_modules(_cu.role)
+                    else:
+                        mods = _default_modules(_cu.role)
+                return { 'brand_school_name': name, 'allowed_modules': mods }
+            except Exception:
+                return { 'brand_school_name': name, 'allowed_modules': set() }
+
+        # 确保模型对应的数据表就绪（避免测试环境未导入模型导致缺列）
+        try:
+            from app import models as _models  # noqa: F401
+            db.create_all()
+        except Exception:
+            pass
+        except Exception:
+            pass
+        try:
+            # 轻量迁移：如 users 表缺少 student_ref_id 列则添加
+            from sqlalchemy import text as _text
+            from sqlalchemy import inspect as _insp2
+            insp = _insp2(_db.engine)
+            if insp.has_table('users'):
+                res = _db.engine.execute(_text('PRAGMA table_info(users)')).fetchall()
+                cols = {row[1] for row in res} if res else set()
+                if 'student_ref_id' not in cols:
+                    _db.engine.execute(_text('ALTER TABLE users ADD COLUMN student_ref_id INTEGER'))
+        except Exception:
+            pass
+        try:
+            from app.models import BrandSetting
+            kv = BrandSetting.get_map()
+            mapping = {
+                'BRAND_SCHOOL_NAME': 'school_name',
+                'BRAND_SCHOOL_NAME_FULL': 'school_name_full',
+                'BRAND_REPORT_SUBTITLE': 'subtitle',
+                'BRAND_REPORT_COVER_COLOR': 'cover_color',
+                'BRAND_HEADER_TEXT': 'header_text',
+                'BRAND_FOOTER_TEXT': 'footer_text',
+                'BRAND_SHOW_HEADER': 'show_header',
+                'BRAND_SHOW_FOOTER': 'show_footer',
+            }
+            for cfg_key, k in mapping.items():
+                if k in kv and kv[k] is not None:
+                    app.config[cfg_key] = kv[k]
+        except Exception:
+            pass
+
+        @app.context_processor
+        def inject_brand():
+            try:
+                name = app.config.get('BRAND_SCHOOL_NAME') or '成绩分析系统'
+            except Exception:
+                name = '成绩分析系统'
+            # 角色模块权限（用于导航显示）
+            try:
+                from flask_login import current_user as _cu
+                from app.models import RolePermission as _RP
+                import json as _json
+                def _default_modules(role: str):
+                    all_mods = ['students','courses','grades','summary','import','exam_schemes','grade_bands','users','diagnostics','branding']
+                    if role == 'admin': return set(all_mods)
+                    if role == 'teacher': return set(['students','courses','grades','summary','import','exam_schemes','grade_bands'])
+                    if role == 'student': return set(['students','grades','summary'])
+                    return set()
+                mods = set()
+                if _cu.is_authenticated:
+                    rp = _RP.query.filter_by(role=_cu.role).first()
+                    if rp and rp.modules:
+                        try:
+                            mods = set(m for m in _json.loads(rp.modules) if isinstance(m, str))
+                        except Exception:
+                            mods = _default_modules(_cu.role)
+                    else:
+                        mods = _default_modules(_cu.role)
+                return { 'brand_school_name': name, 'allowed_modules': mods }
+            except Exception:
+                return { 'brand_school_name': name, 'allowed_modules': set() }
 
 
     return app

@@ -182,8 +182,8 @@ def get_grade_distribution(grades_query, exam_name: str | None = None, subject_c
     return dist
 
 
-def get_student_ranking(course_id=None, class_name=None):
-    """获取学生排名"""
+def get_student_ranking(course_id=None, class_name=None, grade_level=None, exam_name=None):
+    """获取学生排名（支持按班级/年级、按考试名称）"""
     from app import db
 
     # 构建查询
@@ -192,6 +192,7 @@ def get_student_ranking(course_id=None, class_name=None):
         Student.student_id,
         Student.name,
         Student.class_name,
+        Student.grade_level,
         func.avg(Grade.score).label("avg_score"),
         func.count(Grade.id).label("grade_count"),
     ).join(Grade)
@@ -201,6 +202,12 @@ def get_student_ranking(course_id=None, class_name=None):
 
     if class_name:
         query = query.filter(Student.class_name == class_name)
+
+    if grade_level:
+        query = query.filter(Student.grade_level == grade_level)
+
+    if exam_name:
+        query = query.filter(Grade.exam_name == exam_name)
 
     # 按学生分组并排序
     rankings = query.group_by(Student.id).order_by(func.avg(Grade.score).desc()).all()
@@ -214,6 +221,7 @@ def get_student_ranking(course_id=None, class_name=None):
                 "student_id": student.student_id,
                 "name": student.name,
                 "class_name": student.class_name,
+                "grade_level": student.grade_level,
                 "avg_score": round(float(student.avg_score), 2),
                 "grade_count": student.grade_count,
             }
