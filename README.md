@@ -80,6 +80,17 @@ python run.py init-db
 python run.py
 ```
 
+
+> 如果在本机安装依赖时遇到“metadata-generation-failed”，可先尝试：
+>
+> - 升级打包工具链：`python -m pip install --upgrade pip setuptools wheel`
+> - 优先安装二进制轮子：`python -m pip install --prefer-binary -r requirements.txt`
+> - Linux: 安装构建工具 `sudo apt-get update && sudo apt-get install -y build-essential`；如与图形库相关，再装 `libjpeg-dev zlib1g-dev pkg-config libfreetype6-dev`
+> - macOS: `xcode-select --install`；Apple Silicon 建议 Python 3.11/3.12
+> - Windows: 使用 64 位 Python，若触发 C/C++ 扩展编译，需安装 Build Tools；优先 `--prefer-binary`
+>
+> 也可直接使用 Docker 运行（见下文 Docker 使用），避免本地依赖问题。
+
 6. 访问 http://localhost:5000
 
 ## 本地开发与测试
@@ -154,6 +165,9 @@ GitHub Actions 会在每次推送时自动运行 lint 和测试。你可以在�
   - GET /api/summary/options：返回 exam_names、grade_levels、class_names
   - GET /api/summary/export?…&format=csv|xlsx[&columns=student_id,name,…]
   - GET/PUT /api/summary/prefs：按用户保存/读取列显示偏好
+
+> 注：本仓库已配置 GitHub Actions 在 push 到 main 时自动构建并推送 Docker 镜像到 GHCR（以及可选 Docker Hub）。如需 Docker Hub 推送，请在仓库 Secrets 中配置 DOCKERHUB_USERNAME、DOCKERHUB_TOKEN、DOCKERHUB_REPO。
+
 - 注意
   - 多选参数支持多值或逗号分隔
   - percentage 需 ExamScheme 配置对应学科/总分的满分
