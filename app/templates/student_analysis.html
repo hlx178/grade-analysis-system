@@ -187,29 +187,50 @@ async function loadTrend(){
   if (sm.avg!=null) lines.push(`平均分：${sm.avg}`);
   if (sm.max!=null && sm.min!=null) lines.push(`区间：${sm.min} ~ ${sm.max}`);
 function buildInsights(primary){
-  const s = primary.series||[];
+  const s = (primary.series||[]).filter(x=>x.score!=null);
   if (!s.length) return [];
   const last = s[s.length-1];
   const N = Math.min(3, s.length);
-  const recent = s.slice(-N).map(x=>x.score).filter(v=>v!=null);
+  const recent = s.slice(-N).map(x=>x.score);
   const lines = [];
+  // 近N次净变化
   if (recent.length>=2){
     const diff = recent[recent.length-1] - recent[0];
     if (diff>0) lines.push(`近${recent.length}次成绩提升 ${diff.toFixed(2)} 分`);
     if (diff<0) lines.push(`近${recent.length}次成绩下降 ${Math.abs(diff).toFixed(2)} 分`);
   }
-  if (typeof last.class_pct === 'number'){
-    lines.push(`最近一次班级百分位：${last.class_pct}%`);
+  // 波动性（标准差）
+  if (s.length>=3){
+    const avg = s.reduce((a,b)=>a+b.score,0)/s.length;
+    const variance = s.reduce((a,b)=>a+Math.pow(b.score-avg,2),0)/s.length;
+    const std = Math.sqrt(variance);
+    lines.push(`整体波动性（标准差）：${std.toFixed(2)}`);
   }
-  if (typeof last.grade_pct === 'number'){
-    lines.push(`最近一次年级百分位：${last.grade_pct}%`);
+  // 拐点检测（简单：最近三次是否出现方向反转）
+  if (s.length>=3){
+    const a = s[s.length-3].score, b = s[s.length-2].score, c = s[s.length-1].score;
+    if ((b-a)*(c-b) < 0){
+      lines.push('近期出现趋势拐点');
+    }
   }
-  if (typeof last.delta_prev === 'number'){
-    const d = last.delta_prev; lines.push(`环比：${d>0?'+':''}${d.toFixed(2)} 分`);
+  // 与均线差距的持续变化（近N次）
+  const gapClass = s.filter(x=>typeof x.class_avg==='number').slice(-N).map(x=>x.score - x.class_avg);
+  if (gapClass.length>=2){
+    const diffGap = gapClass[gapClass.length-1] - gapClass[0];
+    if (diffGap>0) lines.push(`与班级均线差距扩大 ${diffGap.toFixed(2)} 分`);
+    if (diffGap<0) lines.push(`与班级均线差距缩小 ${Math.abs(diffGap).toFixed(2)} 分`);
   }
-  if (typeof last.delta_yoy === 'number'){
-    const d = last.delta_yoy; lines.push(`同比：${d>0?'+':''}${d.toFixed(2)} 分`);
+  const gapGrade = s.filter(x=>typeof x.grade_avg==='number').slice(-N).map(x=>x.score - x.grade_avg);
+  if (gapGrade.length>=2){
+    const diffGap = gapGrade[gapGrade.length-1] - gapGrade[0];
+    if (diffGap>0) lines.push(`与年级均线差距扩大 ${diffGap.toFixed(2)} 分`);
+    if (diffGap<0) lines.push(`与年级均线差距缩小 ${Math.abs(diffGap).toFixed(2)} 分`);
   }
+  // 最近一次百分位与环比/同比
+  if (typeof last.class_pct === 'number') lines.push(`最近一次班级百分位：${last.class_pct}%`);
+  if (typeof last.grade_pct === 'number') lines.push(`最近一年级百分位：${last.grade_pct}%`);
+  if (typeof last.delta_prev === 'number') { const d = last.delta_prev; lines.push(`环比：${d>0?'+':''}${d.toFixed(2)} 分`); }
+  if (typeof last.delta_yoy === 'number') { const d = last.delta_yoy; lines.push(`同比：${d>0?'+':''}${d.toFixed(2)} 分`); }
   return lines;
 async function exportPDF(){
   const { jsPDF } = window.jspdf || {};
