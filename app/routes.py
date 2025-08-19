@@ -2119,6 +2119,12 @@ def api_config_branding_logo():
     f = request.files.get('file')
     if not f:
         return jsonify({'error': 'no file'}), 400
+    # 校验大小（<= 1MB）和类型（PNG）
+    f.seek(0, os.SEEK_END); size = f.tell(); f.seek(0)
+    if size > 1 * 1024 * 1024:
+        return jsonify({'error': 'file too large (<=1MB)'}), 400
+    if not (f.mimetype in ('image/png',) or (f.filename or '').lower().endswith('.png')):
+        return jsonify({'error': 'only PNG allowed'}), 400
     static_dir = os.path.join(current_app.root_path, 'static')
     os.makedirs(static_dir, exist_ok=True)
     path = os.path.join(static_dir, 'logo.png')

@@ -4,10 +4,32 @@
 <div class="row justify-content-center">
   <div class="col-md-4">
     <h3 class="mb-3">登录</h3>
+    <div class="login-brand"><img id="loginLogo" alt="Logo"/><div id="loginSchool">{{ brand_school_name }}</div></div>
+
+{% block head_extra %}
+<style>
+.login-brand{ display:flex; align-items:center; gap:10px; margin-top:30px; margin-bottom:10px; }
+.login-brand img{ height:40px; }
+</style>
+{% endblock %}
+
     <form method="post">
       <div class="mb-3">
         <label class="form-label">用户名</label>
         <input type="text" name="username" class="form-control" required>
+{% block scripts %}
+<script>
+(async function(){
+  try{
+    const r = await fetch('/api/config/branding'); if (!r.ok) return; const b = await r.json();
+    if (b.logo_url){ const img = document.getElementById('loginLogo'); img.src = b.logo_url; img.style.display='block'; }
+    if (b.school_name){ const t = document.getElementById('loginSchool'); t.textContent = b.school_name; }
+    document.title = (b.school_name||'成绩分析系统') + ' - 登录';
+  }catch(e){}
+})();
+</script>
+{% endblock %}
+
       </div>
       <div class="mb-3">
         <label class="form-label">密码</label>
