@@ -2334,6 +2334,20 @@ def _build_export_file(params: dict, export_dir: str) -> str:
             from openpyxl import Workbook
             wb = Workbook(write_only=True)
             ws = wb.create_sheet()
+            # 品牌说明工作表（封面）
+            try:
+                cover = wb.create_sheet(title='说明')
+                cover.append(['学校', current_app.config.get('BRAND_SCHOOL_NAME_FULL') or current_app.config.get('BRAND_SCHOOL_NAME') or '某某学校'])
+                cover.append(['副标题', current_app.config.get('BRAND_REPORT_SUBTITLE') or '学业质量监测报告'])
+                cover.append(['导出时间', _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
+                cover.append(['科目', name_subject])
+                cover.append(['年级', name_gl])
+                cover.append(['班级', name_cl])
+                cover.append(['考试', name_exam])
+                cover.append(['范围/排序', f'{scope}/{order_by}'])
+            except Exception:
+                pass
+
             ws.append([header_map[c] for c in use_cols])
             for rec in data_rows:
                 ws.append([rec.get(c, '') for c in use_cols])
