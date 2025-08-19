@@ -722,10 +722,10 @@ def api_analysis_trends_export():
 
 def _brand_prefix_filename(name: str) -> str:
     try:
-        school = current_app.config.get('BRAND_SCHOOL_NAME')
+        school = current_app.config.get('BRAND_SCHOOL_NAME_FULL') or current_app.config.get('BRAND_SCHOOL_NAME')
         if school:
             import re
-            safe = re.sub(r'[^\w\-\u4e00-\u9fa5]+', '_', school)[:30]
+            safe = re.sub(r'[^\w\-\u4e00-\u9fa5]+', '_', school)[:40]
             return f"{safe}_{name}"
     except Exception:
         pass
