@@ -908,6 +908,66 @@ def api_analysis_export_all():
     import io, zipfile
 
     # 构造各自 querystring
+    # 构造各自 querystring
+    args = request.args
+    trends_qs = urlencode({k: v for k, v in args.items() if k in ('subject_code','grade_level','class_name')})
+    class_qs_dict = {k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','top_n','min_count','sort_by')}
+    class_qs = urlencode(class_qs_dict)
+    dist_qs = urlencode({k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','class_name','bin_width')})
+
+    # 生成各 CSV 文本
+    with current_app.test_request_context(query_string=trends_qs):
+        trends_res = api_analysis_trends_export()
+        trends_csv = trends_res.get_data(as_text=True)
+    with current_app.test_request_context(query_string=class_qs):
+        class_res = api_analysis_class_compare_export()
+        class_csv = class_res.get_data(as_text=True)
+    with current_app.test_request_context(query_string=dist_qs):
+        dist_res = api_analysis_distribution_export()
+        dist_csv = dist_res.get_data(as_text=True)
+
+    # 打包 ZIP（含品牌封面说明 README.md 与可选 logo.png）
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # 品牌与筛选说明
+        try:
+            bname = current_app.config.get('BRAND_SCHOOL_NAME_FULL') or current_app.config.get('BRAND_SCHOOL_NAME') or '某某学校'
+            subtitle = current_app.config.get('BRAND_REPORT_SUBTITLE') or '学业质量监测报告'
+            import datetime as _dt
+            ts = _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            # 汇总筛选参数快照
+            lines = [
+                f"# {bname} - {subtitle}",
+                '',
+                f"导出时间：{ts}",
+                f"科目：{request.args.get('subject_code') or 'TOTAL'}",
+                f"年级：{request.args.get('grade_level') or ''}",
+                f"班级：{request.args.get('class_name') or ''}",
+                f"考试：{request.args.get('exam_name') or ''}",
+                '',
+                '本压缩包包含：',
+                '- trends.csv 趋势汇总',
+                '- class_compare.csv 班级对比',
+                '- distribution.csv 分布直方图数据',
+            ]
+            zf.writestr('README.md', '\n'.join(lines))
+        except Exception:
+            pass
+        # 可选 logo
+        try:
+            import os as _os
+            logo_path = _os.path.join(current_app.root_path, 'static', 'logo.png')
+            if _os.path.isfile(logo_path):
+                zf.write(logo_path, arcname='logo.png')
+        except Exception:
+            pass
+        # 三份 CSV
+        zf.writestr('trends.csv', trends_csv)
+        zf.writestr('class_compare.csv', class_csv)
+        zf.writestr('distribution.csv', dist_csv)
+    buf.seek(0)
+    return current_app.response_class(buf.read(), mimetype='application/zip', headers={'Content-Disposition': 'attachment; filename=analysis_exports.zip'})
+
 
 @api_bp.route('/analysis/student-trend', methods=['GET'])
 @login_required
@@ -2127,7 +2187,7 @@ def api_config_branding_update():
         return jsonify({'error': 'forbidden'}), 403
     data = request.get_json(silent=True) or {}
     # 写入 Flask config（进程内生效）并持久化到数据库
-    from app.models import BrandSetting, db
+    from app.models import BrandSetting
     for key, cfg_key in [
         ('school_name','BRAND_SCHOOL_NAME'),
         ('school_name_full','BRAND_SCHOOL_NAME_FULL'),

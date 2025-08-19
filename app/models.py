@@ -1,4 +1,12 @@
 """
+数据模型定义
+"""
+
+from datetime import datetime
+
+from flask_login import UserMixin
+from werkzeug.security import check_password_hash, generate_password_hash
+
 from app import db
 
 class BrandSetting(db.Model):
@@ -10,16 +18,6 @@ class BrandSetting(db.Model):
     def get_map():
         rows = BrandSetting.query.all()
         return {r.key: r.value for r in rows}
-
-数据模型定义
-"""
-
-from datetime import datetime
-
-from flask_login import UserMixin
-from werkzeug.security import check_password_hash, generate_password_hash
-
-from app import db
 
 
 class ExamScheme(db.Model):
