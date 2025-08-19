@@ -969,14 +969,53 @@ def api_analysis_student_trend():
             'class_size': len(class_pairs),
             'grade_size': len(grade_pairs),
         }
-    # 组装系列（含均线）
+    # 组装系列（含均线与百分位）
+    def percentile(score_list, value):
+        if not score_list: return None
+        sorted_scores = sorted(score_list)
+        import bisect
+        idx = bisect.bisect_right(sorted_scores, value)
+        return round(idx / len(sorted_scores) * 100.0, 2)
     series = []
+    # 缓存用于百分位的集合（避免重复构建）
+    class_sets = {}
+    grade_sets = {}
     for exam_name, arr in exams.items():
         sc = float(sum(arr)/len(arr)) if arr else None
         am = avg_map.get(exam_name, {})
-        series.append({'exam_name': exam_name, 'score': sc, 'class_avg': am.get('class_avg'), 'grade_avg': am.get('grade_avg')})
-    # 生成简单报告
+        # 准备集合
+        if exam_name not in class_sets:
+            # 重建与上面 ranks 使用的相同集合
+            q_tmp = Grade.query.join(Student).join(Course).filter(Grade.exam_name==exam_name)
+            if subject_code:
+                q_tmp = q_tmp.filter(Course.code==subject_code)
+            rows_tmp = q_tmp.with_entities(Student.class_name, Student.grade_level, Grade.score).all()
+            c_scores = [float(s) for (cls, _gl, s) in rows_tmp if cls == student.class_name]
+            g_scores = [float(s) for (_cls, gl, s) in rows_tmp if gl == student.grade_level]
+            class_sets[exam_name] = c_scores
+            grade_sets[exam_name] = g_scores
+        cp = percentile(class_sets.get(exam_name, []), sc) if sc is not None else None
+        gp = percentile(grade_sets.get(exam_name, []), sc) if sc is not None else None
+        series.append({'exam_name': exam_name, 'score': sc, 'class_avg': am.get('class_avg'), 'grade_avg': am.get('grade_avg'), 'class_pct': cp, 'grade_pct': gp})
+    # 计算环比/同比（按考试名字典序近似，yoy 以去年份前缀匹配）
+    def base_token(name: str) -> str:
+        import re
+        return re.sub(r'^\s*\d{4}[-/年]?\s*', '', name or '').strip()
     series_sorted = sorted(series, key=lambda x: x['exam_name'])
+    last_score = None
+    seen_by_base = {}
+    for item in series_sorted:
+        sc = item.get('score')
+        item['delta_prev'] = (sc - last_score) if (sc is not None and last_score is not None) else None
+        last_score = sc if sc is not None else last_score
+        bt = base_token(item['exam_name'])
+        if bt in seen_by_base and sc is not None and seen_by_base[bt] is not None:
+            item['delta_yoy'] = sc - seen_by_base[bt]
+        else:
+            item['delta_yoy'] = None
+        if sc is not None:
+            seen_by_base[bt] = sc
+    # 生成简单报告
     scores = [s['score'] for s in series_sorted if s['score'] is not None]
     trend = None
     if len(scores) >= 2:

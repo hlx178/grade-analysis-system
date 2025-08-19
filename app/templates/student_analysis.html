@@ -54,6 +54,10 @@
                 <th>分数</th>
                 <th>班级名次</th>
                 <th>年级名次</th>
+                <th>班级百分位</th>
+                <th>年级百分位</th>
+                <th>环比Δ</th>
+                <th>同比Δ</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -148,7 +152,8 @@ async function loadTrend(){
   primary.series.forEach((s,i)=>{
     const rk = primary.ranks[s.exam_name]||{};
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${s.exam_name}</td><td>${s.score??''}</td><td>${rk.class_rank? rk.class_rank+"/"+rk.class_size: ''}</td><td>${rk.grade_rank? rk.grade_rank+"/"+rk.grade_size: ''}</td>`;
+    const dp = (v)=> v==null? '' : (v>0? '+'+v : v);
+    tr.innerHTML = `<td>${s.exam_name}</td><td>${s.score??''}</td><td>${rk.class_rank? rk.class_rank+"/"+rk.class_size: ''}</td><td>${rk.grade_rank? rk.grade_rank+"/"+rk.grade_size: ''}</td><td>${s.class_pct??''}%</td><td>${s.grade_pct??''}%</td><td>${dp(s.delta_prev)}</td><td>${dp(s.delta_yoy)}</td>`;
     tb.appendChild(tr);
   });
   // 报告
