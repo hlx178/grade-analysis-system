@@ -379,13 +379,17 @@ async function exportPDF(){
   ];
   hdr.forEach(t=>{ doc.text(t, pad, y); y+=18; });
   // 页眉/页脚
-  const addHeaderFooter = (d)=>{
+  const addHeaderFooter = (d, brand)=>{
     const pageCount = d.getNumberOfPages();
     for (let i=1;i<=pageCount;i++){
       d.setPage(i);
       d.setFontSize(9);
-      d.text(`学生：${studentInfo.name}（${studentInfo.student_id}）`, pad, 20);
-      d.text(`第 ${i}/${pageCount} 页`, d.internal.pageSize.getWidth()-pad-60, d.internal.pageSize.getHeight()-20);
+      const headerText = brand?.header_text || `学生：${studentInfo.name}（${studentInfo.student_id}）`;
+      const footerText = brand?.footer_text || '';
+      d.text(headerText, pad, 20);
+      const right = d.internal.pageSize.getWidth()-pad-60;
+      d.text(`第 ${i}/${pageCount} 页`, right, d.internal.pageSize.getHeight()-20);
+      if (footerText){ d.text(footerText, pad, d.internal.pageSize.getHeight()-20); }
     }
   };
   // 分隔线
@@ -412,7 +416,7 @@ async function exportPDF(){
       styles: { fontSize: 9 },
       margin: { left: pad, right: pad },
       headStyles: { fillColor: [52, 58, 64] },
-      didDrawPage: (data)=>{ addHeaderFooter(doc); }
+      didDrawPage: (data)=>{ addHeaderFooter(doc, brand); }
     });
     y = doc.lastAutoTable.finalY + 6;
   }
@@ -437,11 +441,15 @@ async function exportPDF(){
   // 表格简化导出（仅明细标题提示，详细明细另导出为CSV/Markdown）
   if (y>780){ doc.addPage(); y=pad; }
   doc.text('明细见系统导出（Markdown/CSV）', pad, y);
-  doc.save(`student-report-${Date.now()}.pdf`);
+  const sanitizeFilename = (s)=> (s||'').replace(/[^\w\-\u4e00-\u9fa5]+/g,'_').slice(0,60);
+  const school = brand?.school_name_full || brand?.school_name;
+  const sid = (studentInfo && (studentInfo.student_id||studentInfo.id)) ? `_${studentInfo.student_id||studentInfo.id}` : '';
+  const prefix = school ? sanitizeFilename(school) + '_' : '';
+  doc.save(`${prefix}student-report${sid}_${Date.now()}.pdf`);
 }
 
 }
-  addHeaderFooter(doc);
+  addHeaderFooter(doc, brand);
 
 
   const csv = document.getElementById('csvBtn');

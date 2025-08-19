@@ -962,6 +962,11 @@ def api_analysis_export_all():
                 '- trends.csv 趋势汇总',
                 '- class_compare.csv 班级对比',
                 '- distribution.csv 分布直方图数据',
+                '',
+                '参数说明：',
+                f"bin_width：{request.args.get('bin_width') or ''}",
+                f"sort_by：{request.args.get('sort_by') or ''}",
+                f"top_n：{request.args.get('top_n') or ''}",
             ]
             zf.writestr('README.md', '\n'.join(lines))
         except Exception:
