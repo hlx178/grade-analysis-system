@@ -139,6 +139,29 @@ class UserPreference(db.Model):
     def __repr__(self):
         return f'<UserPref {self.user_id} {self.key}>'
 
+class GradeMaster(db.Model):
+    """年级主数据"""
+    __tablename__ = 'grade_master'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    order_no = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class ClassMaster(db.Model):
+    """班级主数据"""
+    __tablename__ = 'class_master'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False)
+    grade_level = db.Column(db.String(50), nullable=True, index=True)
+    order_no = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (
+        db.UniqueConstraint('grade_level', 'name', name='uix_grade_class'),
+    )
+
+
 
 class DiagnosticPreset(db.Model):
     __tablename__ = 'diagnostic_presets'
@@ -257,12 +280,22 @@ class GradeBandSet(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     published_at = db.Column(db.DateTime)
 
-    __table_args__ = (
-        db.UniqueConstraint('exam_name', 'version', name='uix_examname_version'),
-    )
+class ModuleSetting(db.Model):
+    """模块显示与成绩相关配置（由管理员设置）"""
+    __tablename__ = 'module_settings'
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(64), unique=True, nullable=False)
+    value = db.Column(db.Text, nullable=True)  # JSON 字符串
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    def __repr__(self):
-        return f'<GradeBandSet {self.exam_name} v{self.version} {self.status}>'
+class RolePermission(db.Model):
+    """按角色配置可见模块等权限（由管理员分配）"""
+    __tablename__ = 'role_permissions'
+    role = db.Column(db.String(20), primary_key=True)  # admin/teacher/student
+    modules = db.Column(db.Text, nullable=True)  # JSON 数组，如 ["students","courses",...]
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 
 
 class AuditLog(db.Model):

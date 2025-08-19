@@ -2742,6 +2742,157 @@ def api_users_list():
     })
 
 
+
+@api_bp.route('/users', methods=['POST'])
+@login_required
+def api_user_create():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True)
+    items = data.get('items')
+    if items and isinstance(items, list):
+        # 批量创建
+        created = 0; existed = 0
+        for it in items:
+            username = (it.get('username') or '').strip()
+            email = (it.get('email') or '').strip()
+            role = it.get('role') or 'teacher'
+            pwd = it.get('password') or '123456'
+            if not username or not email:
+                continue
+            if User.query.filter((User.username==username)|(User.email==email)).first():
+                existed += 1; continue
+            u = User(username=username, email=email, role=role)
+            u.set_password(pwd)
+            db.session.add(u)
+            created += 1
+        db.session.commit()
+        return jsonify({'message': 'batch created', 'created': created, 'existed': existed})
+    # 单个创建
+    username = (data.get('username') or '').strip()
+    email = (data.get('email') or '').strip()
+    role = data.get('role') or 'teacher'
+    pwd = data.get('password') or '123456'
+    if not username or not email:
+        return jsonify({'error':'username and email required'}), 400
+    if User.query.filter((User.username==username)|(User.email==email)).first():
+        return jsonify({'error':'user exists'}), 400
+    u = User(username=username, email=email, role=role)
+    u.set_password(pwd)
+    db.session.add(u); db.session.commit()
+    return jsonify({'id': u.id, 'message':'created'})
+
+@api_bp.route('/users/<int:user_id>', methods=['DELETE'])
+@login_required
+def api_user_delete(user_id):
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    u = User.query.get_or_404(user_id)
+    db.session.delete(u); db.session.commit()
+    return jsonify({'message': 'deleted'})
+
+@api_bp.route('/users/batch', methods=['DELETE'])
+@login_required
+def api_users_batch_delete():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True)
+    ids = data.get('ids') or []
+    if not isinstance(ids, list):
+        return jsonify({'error':'ids must be list'}), 400
+    deleted = 0
+    for uid in ids:
+        u = User.query.get(uid)
+        if u:
+            db.session.delete(u); deleted += 1
+    db.session.commit()
+    return jsonify({'message':'batch deleted', 'deleted': deleted})
+
+
+# 年级/班级主数据管理（管理员）
+@api_bp.route('/master/grades', methods=['GET','POST'])
+@login_required
+def api_master_grades():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    from app.models import GradeMaster
+    if request.method == 'GET':
+        rows = GradeMaster.query.order_by(GradeMaster.order_no.asc(), GradeMaster.name.asc()).all()
+        return jsonify({'items': [{'id': r.id, 'name': r.name, 'order_no': r.order_no, 'is_active': r.is_active} for r in rows]})
+    data = request.get_json(force=True)
+    items = data.get('items')
+    if items and isinstance(items, list):
+        created=0
+        for it in items:
+            name = (it.get('name') or '').strip()
+            if not name: continue
+            if GradeMaster.query.filter_by(name=name).first(): continue
+            db.session.add(GradeMaster(name=name, order_no=int(it.get('order_no') or 0), is_active=bool(it.get('is_active', True))))
+            created+=1
+        db.session.commit()
+        return jsonify({'message':'batch created','created':created})
+    name = (data.get('name') or '').strip()
+    if not name: return jsonify({'error':'name required'}), 400
+    if GradeMaster.query.filter_by(name=name).first(): return jsonify({'error':'exists'}), 400
+    r = GradeMaster(name=name, order_no=int(data.get('order_no') or 0), is_active=bool(data.get('is_active', True)))
+    db.session.add(r); db.session.commit()
+    return jsonify({'id': r.id, 'message': 'created'})
+
+@api_bp.route('/master/grades/<int:gid>', methods=['PUT'])
+@login_required
+def api_master_grade_update(gid):
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    from app.models import GradeMaster
+    r = GradeMaster.query.get_or_404(gid)
+    data = request.get_json(force=True)
+    if 'name' in data and data.get('name'): r.name = data.get('name').strip()
+    if 'order_no' in data: r.order_no = int(data.get('order_no') or 0)
+    if 'is_active' in data: r.is_active = bool(data.get('is_active'))
+    db.session.commit(); return jsonify({'message':'updated'})
+
+@api_bp.route('/master/classes', methods=['GET','POST'])
+@login_required
+def api_master_classes():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    from app.models import ClassMaster
+    if request.method == 'GET':
+        rows = ClassMaster.query.order_by(ClassMaster.grade_level.asc(), ClassMaster.order_no.asc(), ClassMaster.name.asc()).all()
+        return jsonify({'items': [{'id': r.id, 'name': r.name, 'grade_level': r.grade_level, 'order_no': r.order_no, 'is_active': r.is_active} for r in rows]})
+    data = request.get_json(force=True)
+    items = data.get('items')
+    if items and isinstance(items, list):
+        created=0
+        for it in items:
+            name = (it.get('name') or '').strip(); gl = (it.get('grade_level') or '').strip() or None
+            if not name: continue
+            from app.models import ClassMaster as CM
+            if CM.query.filter_by(grade_level=gl, name=name).first(): continue
+            db.session.add(ClassMaster(name=name, grade_level=gl, order_no=int(it.get('order_no') or 0), is_active=bool(it.get('is_active', True))))
+            created+=1
+        db.session.commit(); return jsonify({'message':'batch created','created':created})
+    name = (data.get('name') or '').strip(); gl = (data.get('grade_level') or '').strip() or None
+    if not name: return jsonify({'error':'name required'}), 400
+    from app.models import ClassMaster as CM
+    if CM.query.filter_by(grade_level=gl, name=name).first(): return jsonify({'error':'exists'}), 400
+    r = ClassMaster(name=name, grade_level=gl, order_no=int(data.get('order_no') or 0), is_active=bool(data.get('is_active', True)))
+    db.session.add(r); db.session.commit(); return jsonify({'id': r.id, 'message':'created'})
+
+@api_bp.route('/master/classes/<int:cid>', methods=['PUT'])
+@login_required
+def api_master_class_update(cid):
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    from app.models import ClassMaster
+    r = ClassMaster.query.get_or_404(cid)
+    data = request.get_json(force=True)
+    if 'name' in data and data.get('name'): r.name = data.get('name').strip()
+    if 'grade_level' in data: r.grade_level = (data.get('grade_level') or '').strip() or None
+    if 'order_no' in data: r.order_no = int(data.get('order_no') or 0)
+    if 'is_active' in data: r.is_active = bool(data.get('is_active'))
+    db.session.commit(); return jsonify({'message':'updated'})
+
 @api_bp.route('/users/<int:user_id>', methods=['PUT'])
 @login_required
 def api_user_update(user_id):
