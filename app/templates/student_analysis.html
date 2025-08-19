@@ -4,12 +4,13 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3>学生分析：{{ student.name }}（{{ student.student_id }}）</h3>
   <div>
-    <select id="subjectCode" class="form-select form-select-sm d-inline-block" style="width:200px">
+    <select id="subjectCode" multiple size="6" class="form-select form-select-sm d-inline-block" style="width:240px">
       {% for code, name in subjects %}
       <option value="{{ code }}">{{ name }} ({{ code }})</option>
       {% endfor %}
     </select>
     <a id="exportBtn" class="btn btn-sm btn-outline-primary ms-2" href="#">导出报告</a>
+    <div class="form-text small text-muted">可多选科目（首个为主科目，用于明细和均线）</div>
   </div>
     <div class="form-check form-check-inline ms-2">
       <input class="form-check-input" type="checkbox" id="trendChrono">
@@ -77,16 +78,24 @@
 <script>
 const studentId = {{ student.id }};
 let _chart;
-function buildUrl(){
-  const subject_code = document.getElementById('subjectCode').value;
+function selectedSubjects(){
+  const sel = document.getElementById('subjectCode');
+  return Array.from(sel.selectedOptions).map(o=>o.value);
+}
+function buildUrl(code){
+  const subject_code = code || selectedSubjects()[0] || 'TOTAL';
   const p = new URLSearchParams({ id: studentId, subject_code });
   return '/api/analysis/student-trend?'+p.toString();
 }
 async function loadTrend(){
-  const r = await fetch(buildUrl());
+  const subs = selectedSubjects();
+  if (subs.length===0){ alert('请至少选择一个科目'); return; }
+  const results = await Promise.all(subs.map(c=>fetch(buildUrl(c)).then(r=>r.json())));
+  const primary = results[0];
   if (!r.ok) return;
   const data = await r.json();
-  let series = data.series.slice();
+  // 以首个科目为主，叠加其他科目的曲线
+  let series = primary.series.slice();
   // 按时间排序（解析 YYYY-MM-DD/YYMMDD 或学期关键词）
   if (document.getElementById('trendChrono')?.checked){
     const parseDate = (s)=>{
@@ -100,6 +109,18 @@ async function loadTrend(){
     series = series.map(x=>({ ...x, _d: parseDate(x.exam_name)}));
     series.sort((a,b)=>{
       if (a._d && b._d) return a._d - b._d;
+  // 其他科目叠加
+  const palette = ['#0d6efd','#198754','#dc3545','#fd7e14','#20c997','#6f42c1','#6c757d'];
+  const nameMap = Object.fromEntries(Array.from(document.getElementById('subjectCode').options).map(o=>[o.value,o.textContent]));
+  results.forEach((res, idx)=>{
+    if (idx===0) return; // 主科
+    // 对齐主科 labels，简单按名称 join；如需严格时间序列可拓展为日期对齐
+    const map = new Map(res.series.map(s=>[s.exam_name, s.score]));
+    const dataArr = labels.map(l=> map.has(l) ? map.get(l) : null);
+    const color = palette[idx % palette.length];
+    datasets.push({ label: nameMap[res.subject_code]||res.subject_code, data: dataArr, borderColor: color, backgroundColor: 'transparent' });
+  });
+
       if (a._d && !b._d) return -1;
       if (!a._d && b._d) return 1;
       return String(a.exam_name).localeCompare(String(b.exam_name));
@@ -117,15 +138,15 @@ async function loadTrend(){
   const ctx = document.getElementById('trendChart').getContext('2d');
   if (_chart) _chart.destroy();
   _chart = new Chart(ctx, { type:'line', data:{ labels, datasets }, options:{ responsive:true, scales:{ y:{ beginAtZero:true }}} });
-  // 明细表
+  // 明细表（主科）
   document.getElementById('trendChrono')?.addEventListener('change', loadTrend);
   document.getElementById('showClassAvg')?.addEventListener('change', loadTrend);
   document.getElementById('showGradeAvg')?.addEventListener('change', loadTrend);
 
   const tb = document.querySelector('#detailTable tbody');
   tb.innerHTML = '';
-  data.series.forEach((s,i)=>{
-    const rk = data.ranks[s.exam_name]||{};
+  primary.series.forEach((s,i)=>{
+    const rk = primary.ranks[s.exam_name]||{};
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${s.exam_name}</td><td>${s.score??''}</td><td>${rk.class_rank? rk.class_rank+"/"+rk.class_size: ''}</td><td>${rk.grade_rank? rk.grade_rank+"/"+rk.grade_size: ''}</td>`;
     tb.appendChild(tr);
