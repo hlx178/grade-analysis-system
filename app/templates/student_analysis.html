@@ -39,7 +39,7 @@
 
 <div class="row g-3">
   <div class="col-md-6">
-    <div class="card">
+    <div class="card" id="trendCard">
       <div class="card-header d-flex justify-content-between align-items-center">
         <span>多次考试趋势</span>
         <button class="btn btn-sm btn-outline-secondary" onclick="loadTrend()">刷新</button>
@@ -211,6 +211,42 @@ function buildInsights(primary){
     const d = last.delta_yoy; lines.push(`同比：${d>0?'+':''}${d.toFixed(2)} 分`);
   }
   return lines;
+async function exportPDF(){
+  const { jsPDF } = window.jspdf || {};
+  if (!jsPDF){ printPDF(); return; }
+  const doc = new jsPDF('p','pt','a4');
+  const pad = 24;
+  let y = pad;
+  // 标题
+  doc.setFontSize(14);
+  doc.text(`学生分析报告`, pad, y); y += 18;
+  const subNames = selectedSubjects().map(c=>document.querySelector(`#subjectCode option[value="${c}"]`)?.textContent || c).join(', ');
+  doc.setFontSize(10);
+  doc.text(`学生：${document.querySelector('h3')?.textContent||''}`, pad, y); y+=14;
+  doc.text(`科目：${subNames}`, pad, y); y+=18;
+  // 趋势图截图
+  const card = document.getElementById('trendCard');
+  if (card){
+    const canvas = await html2canvas(card, { scale: 2, backgroundColor: '#ffffff' });
+    const imgData = canvas.toDataURL('imagePNG');
+    const pageWidth = doc.internal.pageSize.getWidth() - pad*2;
+    const imgW = pageWidth;
+    const imgH = canvas.height * (imgW / canvas.width);
+    doc.addImage(imgData, 'PNG', pad, y, imgW, imgH);
+    y += imgH + 12;
+  }
+  // 关键洞见 + 概览（用多行）
+  const box = document.getElementById('reportBox');
+  if (box){
+    const lines = box.textContent.split('\n');
+    lines.forEach(line=>{ if (y>780){ doc.addPage(); y=pad; } doc.text(line, pad, y); y+=14; });
+  }
+  // 表格简化导出（仅明细标题提示，详细明细另导出为CSV/Markdown）
+  if (y>780){ doc.addPage(); y=pad; }
+  doc.text('明细见系统导出（Markdown/CSV）', pad, y);
+  doc.save(`student-report-${Date.now()}.pdf`);
+}
+
 }
 
   if (sm.latest!=null) lines.push(`最近一次：${sm.latest}`);
@@ -256,7 +292,7 @@ function printPDF(){
         const gr = rk.grade_rank? `${rk.grade_rank}/${rk.grade_size}`:'';
         return `- ${s.exam_name}: ${s.score??''}, ${cr}, ${gr}`;
   const p = document.getElementById('printBtn');
-  p?.addEventListener('click', (e)=>{ e.preventDefault(); printPDF(); });
+  p?.addEventListener('click', (e)=>{ e.preventDefault(); exportPDF(); });
 
       })
     ].join('\n');
