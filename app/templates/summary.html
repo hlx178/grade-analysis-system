@@ -866,7 +866,14 @@ async function loadDistribution(){
         ];
       }}},
       tooltip:{ callbacks:{
-        afterBody(items){ const i = items[0].dataIndex; const flag = meets[i] ? '' : '（低于阈值）'; return '人数:'+counts[i]+' 标准差:'+stds[i] + ' ' + flag; }
+        afterBody(items){
+          const i = items[0].dataIndex;
+          const flag = meets[i] ? '' : '（低于阈值）';
+          const m = Number(document.getElementById('minCount')?.value||0);
+          const delta = Math.max(0, m - Number(counts[i]||0));
+          const extra = delta>0 ? ` 距达标还差${delta}人` : '';
+          return '人数:'+counts[i]+' 标准差:'+stds[i] + ' ' + flag + extra;
+        }
       }}
     }}
   });
