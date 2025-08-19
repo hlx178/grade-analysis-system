@@ -27,6 +27,9 @@
       <option value="regular">平时</option>
       <option value="midterm">期中</option>
       <option value="final">期末</option>
+    <span id="saLoading" class="spinner-border spinner-border-sm text-secondary ms-2" role="status" aria-hidden="true" style="display:none"></span>
+    <span id="saError" class="text-danger small ms-2"></span>
+
     </select>
 
     <select id="subjectCode" multiple size="6" class="form-select form-select-sm d-inline-block" style="width:240px">
@@ -106,6 +109,34 @@
 {% endblock %}
 {% block scripts %}
 <script>
+// 偏好记忆（localStorage）
+function savePrefs(){
+  const obj = {
+    subjects: selectedSubjects(),
+    yearFrom: document.getElementById('yearFrom')?.value||'',
+    yearTo: document.getElementById('yearTo')?.value||'',
+    term: document.getElementById('termSel')?.value||'',
+    examType: document.getElementById('examType')?.value||'',
+    chrono: document.getElementById('trendChrono')?.checked||false,
+    showClass: document.getElementById('showClassAvg')?.checked||false,
+    showGrade: document.getElementById('showGradeAvg')?.checked||false,
+  };
+  try{ localStorage.setItem('student_analysis_prefs', JSON.stringify(obj)); }catch(e){}
+}
+function applyPrefs(){
+  try{
+    const s = localStorage.getItem('student_analysis_prefs'); if (!s) return; const p = JSON.parse(s);
+    const setVal = (id, val)=>{ const el=document.getElementById(id); if (!el) return; el.value = val; };
+    if (Array.isArray(p.subjects)){
+      const sel = document.getElementById('subjectCode');
+      Array.from(sel.options).forEach(o=>{ o.selected = p.subjects.includes(o.value); });
+    }
+    setVal('yearFrom', p.yearFrom||''); setVal('yearTo', p.yearTo||''); setVal('termSel', p.term||''); setVal('examType', p.examType||'');
+    const setChk = (id, val)=>{ const el=document.getElementById(id); if (el) el.checked = !!val; };
+    setChk('trendChrono', p.chrono); setChk('showClassAvg', p.showClass); setChk('showGradeAvg', p.showGrade);
+  }catch(e){}
+}
+
 const studentId = {{ student.id }};
 const studentInfo = { id: {{ student.id }}, student_id: '{{ student.student_id }}', name: '{{ student.name }}', class_name: '{{ student.class_name }}', grade_level: '{{ student.grade_level }}' };
 let _chart;
@@ -129,7 +160,15 @@ function buildUrl(code){
 async function loadTrend(){
   const subs = selectedSubjects();
   if (subs.length===0){ alert('请至少选择一个科目'); return; }
-  const results = await Promise.all(subs.map(c=>fetch(buildUrl(c)).then(r=>r.json())));
+  const loading = document.getElementById('saLoading'); const err = document.getElementById('saError');
+  if (loading) loading.style.display='inline-block'; if (err) err.textContent='';
+  let results = [];
+  try{
+    results = await Promise.all(subs.map(async c=>{
+      const res = await fetch(buildUrl(c)); if (!res.ok) throw new Error('网络错误'); return res.json();
+    }));
+  }catch(e){ if (err) err.textContent = '加载失败：'+(e.message||''); } finally { if (loading) loading.style.display='none'; }
+  if (!results.length) return;
   const primary = results[0];
   // 以首个科目为主，叠加其他科目的曲线
   let series = primary.series.slice();
@@ -269,6 +308,12 @@ async function loadLogoDataUrl(){
       };
       img.onerror = ()=> resolve(null);
       img.src = '/static/logo.png';
+  // 保存偏好
+  ['yearFrom','yearTo','termSel','examType','trendChrono','showClassAvg','showGradeAvg'].forEach(id=>{
+    document.getElementById(id)?.addEventListener('change', savePrefs);
+  });
+  document.getElementById('subjectCode')?.addEventListener('change', savePrefs);
+
     }catch(e){ resolve(null); }
   });
 }
@@ -444,7 +489,7 @@ function printPDF(){
     URL.revokeObjectURL(url);
   })
 }
-window.addEventListener('DOMContentLoaded', ()=>{ wireExport(); loadTrend(); });
+window.addEventListener('DOMContentLoaded', ()=>{ applyPrefs(); wireExport(); loadTrend(); });
 </script>
 {% endblock %}
 
