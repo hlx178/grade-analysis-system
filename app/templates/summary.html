@@ -363,6 +363,7 @@ function applyPrefs(p){
     const onlyMeets = document.getElementById('onlyMeets'); if (onlyMeets) onlyMeets.checked = !!p.class_compare.only_meets;
     const sortSel = document.getElementById('compareSortBy'); if (sortSel && p.class_compare.sort_by) sortSel.value = p.class_compare.sort_by;
     const minCountEl = document.getElementById('minCount'); if (minCountEl && (p.class_compare.min_count ?? null) !== null) minCountEl.value = p.class_compare.min_count;
+    const expMeets = document.getElementById('exportOnlyMeets'); if (expMeets) expMeets.checked = !!p.class_compare.export_only_meets;
   }
   // 合并后端偏好中的趋势开关（覆盖 localStorage）
   if (p.trend_toggles){
@@ -898,6 +899,8 @@ const _oldLoadTrendChart = loadTrendChart;
 loadTrendChart = async function(){ await _oldLoadTrendChart(); wireExportLinks(); }
 const _oldLoadClassCompare = loadClassCompare;
 loadClassCompare = async function(){ await _oldLoadClassCompare(); wireExportLinks(); }
+  const exportOnlyMeetsEl = document.getElementById('exportOnlyMeets'); if (exportOnlyMeetsEl) exportOnlyMeetsEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, export_only_meets: exportOnlyMeetsEl.checked }})}); }catch(e){}; };
+
 
 window.addEventListener('DOMContentLoaded', wireExportLinks);
 

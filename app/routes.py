@@ -1233,6 +1233,10 @@ def api_summary_prefs():
                 data['class_compare']['only_meets'] = False
             if data['class_compare'].get('sort_by') not in ('avg','count'):
                 data['class_compare']['sort_by'] = 'avg'
+            if 'min_count' not in data['class_compare']:
+                data['class_compare']['min_count'] = 0
+            if 'export_only_meets' not in data['class_compare']:
+                data['class_compare']['export_only_meets'] = False
         pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
         if not pref:
             pref = UserPreference(user_id=current_user.id, key=key, value='{}')
@@ -1249,7 +1253,7 @@ def api_summary_prefs():
             'letter': True, 'class_rank': True, 'grade_rank': True,
             'trend_chrono': False,
             'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True},
-            'class_compare': {'only_meets': False, 'sort_by': 'avg', 'min_count': 0}
+            'class_compare': {'only_meets': False, 'sort_by': 'avg', 'min_count': 0, 'export_only_meets': False}
         }
         if legacy:
             try:
@@ -1276,8 +1280,12 @@ def api_summary_prefs():
                 if k not in val['trend_toggles']:
                     val['trend_toggles'][k] = True
         if 'class_compare' not in val or not isinstance(val.get('class_compare'), dict):
-            val['class_compare'] = {'only_meets': False, 'sort_by': 'avg', 'min_count': 0}
+            val['class_compare'] = {'only_meets': False, 'sort_by': 'avg', 'min_count': 0, 'export_only_meets': False}
         else:
+            if 'min_count' not in val['class_compare']:
+                val['class_compare']['min_count'] = 0
+            if 'export_only_meets' not in val['class_compare']:
+                val['class_compare']['export_only_meets'] = False
             if 'only_meets' not in val['class_compare']:
                 val['class_compare']['only_meets'] = False
             if val['class_compare'].get('sort_by') not in ('avg','count'):
@@ -1288,7 +1296,7 @@ def api_summary_prefs():
             'letter': True, 'class_rank': True, 'grade_rank': True,
             'trend_chrono': False,
             'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True},
-            'class_compare': {'only_meets': False, 'sort_by': 'avg', 'min_count': 0}
+            'class_compare': {'only_meets': False, 'sort_by': 'avg', 'min_count': 0, 'export_only_meets': False}
         })
 
 
