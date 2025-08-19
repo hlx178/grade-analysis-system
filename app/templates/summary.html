@@ -215,6 +215,8 @@
         </div>
 
 
+        <div class="form-text small text-warning" id="exportAllHint"></div>
+
       <div class="px-2 text-muted small" id="distRange"></div>
 
     <div class="card">
@@ -933,6 +935,20 @@ function buildExportAllUrl(){
   const oldWire = wireExportLinks;
   window.wireExportLinks = function(){
     oldWire && oldWire();
+  // export-all 提示：仅导出达标开启时提示使用偏好阈值
+  (async ()=>{
+    const expOnly = document.getElementById('exportOnlyMeets')?.checked || false;
+    const hint = document.getElementById('exportAllHint'); if (!hint) return;
+    hint.textContent = '';
+    if (!expOnly) return;
+    try{
+      const r = await fetch('/api/summary/prefs'); if (!r.ok) return;
+      const j = await r.json();
+      const prefMin = Number(j?.class_compare?.min_count||0);
+      if (prefMin>0){ hint.textContent = `打包导出：班级对比将按偏好阈值(${prefMin})筛选达标班级导出`; }
+    }catch(e){}
+  })();
+
     const a = document.getElementById('exportAllBtn'); if (a) a.href = buildExportAllUrl();
   }
 })();
