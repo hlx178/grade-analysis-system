@@ -717,7 +717,20 @@ def api_analysis_trends_export():
             row.get('min'), row.get('std'), row.get('median'), row.get('p25'), row.get('p75')
         ])
     output.seek(0)
-    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=trends.csv'})
+    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('trends.csv')})
+
+
+def _brand_prefix_filename(name: str) -> str:
+    try:
+        school = current_app.config.get('BRAND_SCHOOL_NAME')
+        if school:
+            import re
+            safe = re.sub(r'[^\w\-\u4e00-\u9fa5]+', '_', school)[:30]
+            return f"{safe}_{name}"
+    except Exception:
+        pass
+    return name
+
 
 
 @api_bp.route('/analysis/class-compare', methods=['GET'])
@@ -876,7 +889,7 @@ def api_analysis_distribution_export():
     s = data.get('summary') or {}
     writer.writerow(['summary', 'count', s.get('count'), 'avg', s.get('avg'), 'max', s.get('max'), 'min', s.get('min'), 'std', s.get('std'), 'bin_width', s.get('bin_width')])
     output.seek(0)
-    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=distribution.csv'})
+    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('distribution.csv')})
 
 @api_bp.route('/analysis/class-compare/export', methods=['GET'])
 @login_required
@@ -892,7 +905,7 @@ def api_analysis_class_compare_export():
     for row in data.get('compare', []):
         writer.writerow([row.get('class_name'), row.get('avg'), row.get('count'), row.get('std'), row.get('meets_threshold')])
     output.seek(0)
-    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=class_compare.csv'})
+    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('class_compare.csv')})
 
 
 @api_bp.route('/analysis/export-all', methods=['GET'])
@@ -966,7 +979,7 @@ def api_analysis_export_all():
         zf.writestr('class_compare.csv', class_csv)
         zf.writestr('distribution.csv', dist_csv)
     buf.seek(0)
-    return current_app.response_class(buf.read(), mimetype='application/zip', headers={'Content-Disposition': 'attachment; filename=analysis_exports.zip'})
+    return current_app.response_class(buf.read(), mimetype='application/zip', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('analysis_exports.zip')})
 
 
 @api_bp.route('/analysis/student-trend', methods=['GET'])
@@ -1116,7 +1129,7 @@ def api_analysis_student_trend_export():
     if fmt != 'csv':
         fmt = 'csv'
     csv_text = render_template('student_analysis_export.csv.j2', series=payload['series'], ranks=payload['ranks'])
-    return Response(csv_text, mimetype='text/csv', headers={'Content-Disposition': f'attachment; filename=student-detail-{payload["student"]["student_id"]}-{payload["subject_code"]}.csv'})
+    return Response(csv_text, mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename(f'student-detail-{payload["student"]["student_id"]}-{payload["subject_code"]}.csv')})
 
     # 生成简单报告
     scores = [s['score'] for s in series_sorted if s['score'] is not None]
@@ -1198,14 +1211,14 @@ def api_analysis_student_trend_export():
         zf.writestr('class_compare.csv', class_csv)
         zf.writestr('distribution.csv', dist_csv)
     buf.seek(0)
-    return current_app.response_class(buf.read(), mimetype='application/zip', headers={'Content-Disposition': 'attachment; filename=analysis_exports.zip'})
+    return current_app.response_class(buf.read(), mimetype='application/zip', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('analysis_exports.zip')})
 
     writer = csv.writer(output)
     writer.writerow(['class_name','avg','count','std'])
     for row in data.get('compare', []):
         writer.writerow([row.get('class_name'), row.get('avg'), row.get('count'), row.get('std')])
     output.seek(0)
-    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=class_compare.csv'})
+    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('class_compare.csv')})
 
 
 # 等级规则：查询
@@ -1749,13 +1762,13 @@ def api_summary_export():
             buf = io.BytesIO()
             wb.save(buf)
             buf.seek(0)
-            return send_file(buf, as_attachment=True, download_name=f'{base_name}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            return send_file(buf, as_attachment=True, download_name=_brand_prefix_filename(f'{base_name}.xlsx'), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         except Exception:
             import pandas as pd
             buf = io.BytesIO()
             pd.DataFrame([{header_map[c]: r.get(c, '') for c in use_cols} for r in data_rows]).to_excel(buf, index=False)
             buf.seek(0)
-            return send_file(buf, as_attachment=True, download_name=f'{base_name}.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            return send_file(buf, as_attachment=True, download_name=_brand_prefix_filename(f'{base_name}.xlsx'), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     # 默认csv（流式写出，降低内存占用）
     import csv
     def generate_csv():
@@ -1770,7 +1783,7 @@ def api_summary_export():
             writer.writerow([rec.get(c, '') for c in use_cols])
             yield sio.getvalue()
             sio.seek(0); sio.truncate(0)
-    return Response(stream_with_context(generate_csv()), mimetype='text/csv', headers={'Content-Disposition': f'attachment; filename={base_name}.csv'})
+    return Response(stream_with_context(generate_csv()), mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename(f'{base_name}.csv')})
 
 
 # 导出异步化（轻量线程）
