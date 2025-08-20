@@ -404,6 +404,29 @@ def api_students():
 def api_student_detail(student_id):
     student = Student.query.get_or_404(student_id)
     if request.method == "GET":
+        return jsonify(
+            {
+                "id": student.id,
+                "student_id": student.student_id,
+                "name": student.name,
+                "class_name": student.class_name,
+                "grade_level": student.grade_level,
+                "email": student.email,
+            }
+        )
+    elif request.method == "PUT":
+        data = request.get_json() or request.form
+        student.student_id = data.get("student_id", student.student_id)
+        student.name = data.get("name", student.name)
+        student.class_name = data.get("class_name", student.class_name)
+        student.grade_level = data.get("grade_level", student.grade_level)
+        student.email = data.get("email", student.email)
+        db.session.commit()
+        return jsonify({"message": "Student updated"})
+    else:  # DELETE
+        db.session.delete(student)
+        db.session.commit()
+        return jsonify({"message": "Student deleted"})
 
 @api_bp.route('/students/options', methods=['GET'])
 @login_required
@@ -424,16 +447,17 @@ def api_students_options():
     class_names = sorted({s.class_name for s in q if s.class_name})
     return jsonify({ 'grade_levels': grade_levels, 'class_names': class_names })
 
-        return jsonify(
-            {
-                "id": student.id,
-                "student_id": student.student_id,
-                "name": student.name,
-                "class_name": student.class_name,
-                "email": student.email,
-            }
-        )
-    elif request.method == "PUT":
+    # resume api_student_detail GET branch
+    return jsonify(
+        {
+            "id": student.id,
+            "student_id": student.student_id,
+            "name": student.name,
+            "class_name": student.class_name,
+            "email": student.email,
+        }
+    )
+elif request.method == "PUT":
         data = request.get_json() or request.form
         student.student_id = data.get("student_id", student.student_id)
         student.name = data.get("name", student.name)
