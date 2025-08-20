@@ -139,6 +139,19 @@ def create_app(config_name="default"):
             db.create_all()
         except Exception:
             pass
+        # 启动自检：若无管理员账号则自动创建（密码可由环境变量 ADMIN_INITIAL_PASSWORD 指定，默认 123456）
+        try:
+            from app.models import User
+            from werkzeug.security import generate_password_hash
+            import os as _os
+            if User.query.filter_by(username='admin').first() is None:
+                _pw = _os.environ.get('ADMIN_INITIAL_PASSWORD', '123456')
+                _u = User(username='admin', email='admin@example.com', role='admin')
+                _u.password_hash = generate_password_hash(_pw)
+                db.session.add(_u); db.session.commit()
+        except Exception:
+            pass
+
         except Exception:
             pass
         try:
