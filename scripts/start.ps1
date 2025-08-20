@@ -53,17 +53,20 @@ if ($existing) {
 
 # Run container
 Write-Info "Starting container '$ContainerName' on http://localhost:$Port ..."
+if (-not $Port -or $Port -le 0) { Write-Err "Invalid Port '$Port'"; exit 1 }
+$portMap = ("{0}:{1}" -f $Port, 8000)
 $runArgs = @(
   'run','--name', $ContainerName,
-  '-p', "$Port:8000",
+  '-p', $portMap,
   '-e','FLASK_CONFIG=production',
-  '-e',"ADMIN_INITIAL_PASSWORD=$AdminPassword",
-  '-v',"$($uploads):/app/uploads",
-  '-v',"$($exports):/app/exports",
-  '-v',"$($dbFile):/app/grade_analysis.db",
-  '-v',"$($staticDir):/app/app/static",
+  '-e',("ADMIN_INITIAL_PASSWORD={0}" -f $AdminPassword),
+  '-v',("{0}:/app/uploads" -f $uploads),
+  '-v',("{0}:/app/exports" -f $exports),
+  '-v',("{0}:/app/grade_analysis.db" -f $dbFile),
+  '-v',("{0}:/app/app/static" -f $staticDir),
   '-d', $ImageTag
 )
+Write-Info ("docker " + ($runArgs -join ' '))
 $containerId = & docker @runArgs
 if ($LASTEXITCODE -ne 0) { Write-Err "Failed to start container"; exit 1 }
 
