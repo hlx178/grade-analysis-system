@@ -198,7 +198,7 @@ def import_page():
 # 设置：学号年份推断规则（管理员）
 @main_bp.route('/settings/student_id_rule', methods=['GET','POST'])
 @login_required
-def student_id_rule_page():
+def student_id_rule():
     if current_user.role != 'admin':
         flash('仅管理员可访问', 'danger');
         return redirect(url_for('main.dashboard'))
