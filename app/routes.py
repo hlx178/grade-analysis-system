@@ -627,7 +627,21 @@ def api_grades_aggregated_export():
             # 不导出总分相关列
             ws.append(row)
         buf = io.BytesIO(); wb.save(buf); buf.seek(0)
-        fname = f'aggregated_{exam_name}.xlsx'
+        # 文件名以考试名称为准，并附加学科与时间戳
+        import time, re
+        ts = time.strftime('%Y%m%d_%H%M%S')
+        # 解析学科名（若指定学科）
+        subj_part = 'ALL'
+        if subject_code:
+            try:
+                subj_map = {code: name for (_c, code, name) in subjects}
+                subj_part = subject_code if subject_code not in subj_map else subj_map.get(subject_code) or subject_code
+            except Exception:
+                subj_part = subject_code
+        # 清理文件名非法字符
+        def clean(s):
+            return re.sub(r'[\\/:*?"<>|]+', '_', s)
+        fname = f"{clean(exam_name)}_{clean(str(subj_part))}_{ts}.xlsx"
         return send_file(buf, as_attachment=True, download_name=fname, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     except Exception as e:
         return jsonify({'error': f'export failed: {e}'}), 500
