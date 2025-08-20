@@ -17,12 +17,12 @@
       {% endfor %}
     </select>
     <select id="examNameSelect" class="form-select">
-      <option value="">默认规则</option>
+      <option value="">全部考试</option>
       {% for en in exam_names %}
-      <option value="{{ en }}">{{ en }}</option>
+      <option value="{{ en }}" {% if cur_exam_name==en %}selected{% endif %}>{{ en }}</option>
       {% endfor %}
     </select>
-    <button class="btn btn-primary" onclick="loadAnalysis()">分析</button>
+    <button class="btn btn-primary" onclick="applyExamFilter()">分析</button>
   </div>
 </div>
 
@@ -80,6 +80,15 @@
 </table>
 {% endblock %}
 {% block scripts %}
+<script>
+function applyExamFilter(){
+  const en = document.getElementById('examNameSelect').value;
+  const url = new URL(window.location.href);
+  if (en) url.searchParams.set('exam_name', en); else url.searchParams.delete('exam_name');
+  window.location = url.toString();
+}
+</script>
+
 <script>
 let chart;
 async function loadAnalysis(){

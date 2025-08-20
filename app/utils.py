@@ -233,11 +233,11 @@ def get_student_ranking(course_id=None, class_name=None, grade_level=None, exam_
     return result
 
 
-def get_course_statistics():
-    """获取课程统计信息"""
+def get_course_statistics(exam_name: str | None = None):
+    """获取课程统计信息，可选按考试名称筛选"""
     from app import db
 
-    stats = (
+    q = (
         db.session.query(
             Course.id,
             Course.code,
@@ -248,9 +248,10 @@ def get_course_statistics():
             func.min(Grade.score).label("min_score"),
         )
         .join(Grade)
-        .group_by(Course.id)
-        .all()
     )
+    if exam_name:
+        q = q.filter(Grade.exam_name == exam_name)
+    stats = q.group_by(Course.id).all()
 
     result = []
     for stat in stats:
@@ -260,9 +261,9 @@ def get_course_statistics():
                 "course_code": stat.code,
                 "course_name": stat.name,
                 "total_students": stat.total_grades,
-                "avg_score": round(float(stat.avg_score), 2),
-                "max_score": round(float(stat.max_score), 2),
-                "min_score": round(float(stat.min_score), 2),
+                "avg_score": round(float(stat.avg_score), 2) if stat.avg_score is not None else None,
+                "max_score": round(float(stat.max_score), 2) if stat.max_score is not None else None,
+                "min_score": round(float(stat.min_score), 2) if stat.min_score is not None else None,
             }
         )
 

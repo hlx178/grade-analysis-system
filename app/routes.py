@@ -109,11 +109,12 @@ except Exception:
 @main_bp.route("/")
 @login_required
 def dashboard():
-    course_stats = get_course_statistics()
+    exam_name = (request.args.get('exam_name') or '').strip() or None
+    course_stats = get_course_statistics(exam_name)
     courses = Course.query.order_by(Course.code).all()
     classes = get_class_list()
-    # 可选：提供已存在的考试名称列表
-    exam_names = [row[0] for row in db.session.query(GradeBandRule.exam_name).distinct().all()]
+    # 提供已存在的考试名称列表（从成绩中distinct）
+    exam_names = [row[0] for row in db.session.query(Grade.exam_name).distinct().all() if row[0]] or ['default']
     grade_levels = [row[0] for row in db.session.query(Student.grade_level).distinct().all() if row[0]]
     return render_template(
         "dashboard.html",
@@ -122,6 +123,7 @@ def dashboard():
         classes=classes,
         exam_names=exam_names,
         grade_levels=grade_levels,
+        cur_exam_name=exam_name or ''
     )
 
 
