@@ -2185,6 +2185,8 @@ def api_summary_list():
             'name': g.student.name,
             'class_name': g.student.class_name,
             'grade_level': g.student.grade_level,
+            'exam_name': g.exam_name,
+            'subject_code': g.course.code,
             'score': g.score,
             'percentage': perc,
             'letter': letter,

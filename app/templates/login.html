@@ -1,16 +1,16 @@
 {% extends 'base.html' %}
 {% block title %}登录 - 成绩分析系统{% endblock %}
 {% block content %}
-<div class="row justify-content-center align-items-center">
-  <div class="col-md-10">
+<div class="row justify-content-center">
+  <div class="col-lg-8 col-xl-7">
     <div class="card shadow-sm p-4">
       <div class="d-flex align-items-center">
-        <div class="flex-shrink-0 me-4 text-center" style="width:260px">
+        <div class="flex-shrink-0 text-center" style="width:300px; margin-left:-20px;">
           <img id="loginLogo" alt="Logo" style="max-width:320px; max-height:320px; display:none"/>
           <div id="loginSchool" class="mt-2 fs-5 fw-semibold" style="display:none"></div>
         </div>
-        <div class="flex-grow-1">
-          <h3 class="mb-3">登录</h3>
+        <div style="flex:1; max-width:420px; margin-left:auto; margin-right:auto;">
+          <h3 class="mb-3 text-center">登录</h3>
           <form method="post">
       <div class="mb-3">
 {% block head_extra %}{% endblock %}

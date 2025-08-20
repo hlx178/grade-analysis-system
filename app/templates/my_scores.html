@@ -22,6 +22,11 @@
   </div>
   <div class="col-auto">
     <label class="form-label">排序</label>
+  <div class="col-auto">
+    <label class="form-label">趋势</label>
+    <button class="btn btn-outline-secondary" onclick="loadTrend()">学科 vs 总分</button>
+  </div>
+
     <select id="orderBy" class="form-select">
       <option value="score_desc">分数(高->低)</option>
       <option value="score_asc">分数(低->高)</option>
@@ -38,7 +43,7 @@
   <thead>
     <tr>
       <th>考试名称</th>
-      <th>学科/总分</th>
+      <th>数据类型</th>
       <th>分数</th>
       <th>百分比</th>
       <th>等第</th>
@@ -53,6 +58,13 @@
 <script>
 async function loadSummaryOptions(){
   const res = await fetch('/api/summary/options');
+<div class="card mt-3">
+  <div class="card-header">学科 vs 总分 趋势</div>
+  <div class="card-body">
+    <canvas id="trendChart" height="140"></canvas>
+  </div>
+</div>
+
   const data = await res.json();
   const sel = document.getElementById('examName');
   sel.innerHTML = '';
@@ -70,11 +82,51 @@ async function loadMySummary(){
   const res = await fetch('/api/summary?' + new URLSearchParams({ subject_code, order_by, exam_name }));
   const data = await res.json();
   const tb = document.querySelector('#mySummaryTable tbody'); tb.innerHTML='';
+  const subjName = (code)=>({TOTAL:'总分',CN:'语文',MA:'数学',EN:'英语',SC:'科学',SOC:'社会',MOR:'道法'})[code]||code;
   data.items.forEach(it=>{
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${it.exam_name||''}</td><td>${subject_code==='TOTAL'?'总分':'学科'}</td><td>${it.score}</td><td>${it.percentage??''}</td><td>${it.letter??''}</td><td>${it.class_rank??''}</td><td>${it.grade_rank??''}</td>`;
+    tr.innerHTML = `<td>${it.exam_name||''}</td><td>${subjName(it.subject_code||subject_code)}</td><td>${it.score}</td><td>${it.percentage??''}</td><td>${it.letter??''}</td><td>${it.class_rank??''}</td><td>${it.grade_rank??''}</td>`;
     tb.appendChild(tr);
   });
+
+async function loadTrend(){
+  const exams = selectedExams();
+  if (!exams){ alert('请先选择至少一个考试'); return; }
+  // 拉取学科与总分两组数据
+  const subj = document.getElementById('subjectCode').value;
+  if (subj==='TOTAL'){ alert('请选择一个具体学科'); return; }
+  const params = (code)=> new URLSearchParams({ subject_code: code, order_by: 'score_desc', exam_name: exams });
+  const [subjRes, totalRes] = await Promise.all([
+    fetch('/api/summary?'+params(subj)),
+    fetch('/api/summary?'+params('TOTAL'))
+  ]);
+  const subjData = await subjRes.json();
+  const totalData = await totalRes.json();
+  // 以考试名称为横轴对齐
+  const labelSet = new Set();
+  subjData.items.forEach(it=>labelSet.add(it.exam_name));
+  totalData.items.forEach(it=>labelSet.add(it.exam_name));
+  const labels = Array.from(labelSet);
+  const map = (arr)=>{ const m=new Map(); arr.forEach(it=>m.set(it.exam_name, it.score)); return m; };
+  const subjMap = map(subjData.items);
+  const totalMap = map(totalData.items);
+  const subjScores = labels.map(l=> subjMap.get(l) ?? null);
+  const totalScores = labels.map(l=> totalMap.get(l) ?? null);
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  if (window._myChart) window._myChart.destroy();
+  window._myChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: '学科', data: subjScores, borderColor:'#0d6efd', backgroundColor:'rgba(13,110,253,0.1)' },
+        { label: '总分', data: totalScores, borderColor:'#20c997', backgroundColor:'rgba(32,201,151,0.1)' }
+      ]
+    },
+    options: { responsive: true, interaction: { mode:'index', intersect:false }, scales: { y: { beginAtZero: true } } }
+  });
+}
+
 }
 
 window.addEventListener('DOMContentLoaded', async ()=>{ await loadSummaryOptions(); await loadMySummary(); });
