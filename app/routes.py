@@ -2699,9 +2699,8 @@ def _cleanup_exports_once():
 
 
 @api_bp.route('/config/branding', methods=['GET'])
-@login_required
 def api_config_branding():
-    # 简单返回可选品牌信息；未来可改为从数据库/配置文件读取
+    # 从 DB 与 config 合并返回品牌信息；logo 从 /static/logo.png 读取
     base = {
         'school_name': current_app.config.get('BRAND_SCHOOL_NAME', '某某学校'),
         'school_name_full': current_app.config.get('BRAND_SCHOOL_NAME_FULL', None),
@@ -2711,8 +2710,34 @@ def api_config_branding():
         'footer_text': current_app.config.get('BRAND_FOOTER_TEXT', None),
         'show_header': current_app.config.get('BRAND_SHOW_HEADER', True),
         'show_footer': current_app.config.get('BRAND_SHOW_FOOTER', True),
-        'logo_url': url_for('static', filename='logo.png', _external=False),
     }
+    try:
+        from app.models import BrandSetting
+        m = BrandSetting.get_map()
+        # DB 优先覆盖 config 值
+        mapping = [
+            ('school_name','BRAND_SCHOOL_NAME'),
+            ('school_name_full','BRAND_SCHOOL_NAME_FULL'),
+            ('subtitle','BRAND_REPORT_SUBTITLE'),
+            ('cover_color','BRAND_REPORT_COVER_COLOR'),
+            ('header_text','BRAND_HEADER_TEXT'),
+            ('footer_text','BRAND_FOOTER_TEXT'),
+            ('show_header','BRAND_SHOW_HEADER'),
+            ('show_footer','BRAND_SHOW_FOOTER'),
+        ]
+        for k, cfgk in mapping:
+            if k in m and m[k] is not None and m[k] != '':
+                base[k] = m[k]
+    except Exception:
+        pass
+    # logo 文件存在则提供 URL
+    import os
+    static_dir = os.path.join(current_app.root_path, 'static')
+    logo_path = os.path.join(static_dir, 'logo.png')
+    if os.path.exists(logo_path):
+        base['logo_url'] = url_for('static', filename='logo.png', _external=False)
+    else:
+        base['logo_url'] = None
     return jsonify(base)
 
     global _last_cleanup
