@@ -2,94 +2,136 @@
 {% block title %}成绩管理 - 成绩分析系统{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h3>成绩列表</h3>
-  <a href="#" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addGradeModal">新增成绩</a>
-</div>
-<table class="table table-hover">
-  <thead>
-    <tr>
-      <th>学号</th>
-      <th>姓名</th>
-      <th>课程</th>
-      <th>成绩</th>
-      <th>等级</th>
-      <th>考试类型</th>
-      <th>日期</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for g in grades %}
-    <tr>
-      <td>{{ g.student.student_id }}</td>
-      <td>{{ g.student.name }}</td>
-      <td>{{ g.course.name }}</td>
-      <td>{{ g.score }}</td>
-      <td>{{ g.letter_grade }}</td>
-      <td>{{ g.exam_type }}</td>
-      <td>{{ g.exam_date }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-
-<!-- 新增成绩模态框 -->
-<div class="modal fade" id="addGradeModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">新增成绩</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <form id="gradeForm">
-          <div class="mb-3">
-            <label class="form-label">学生ID</label>
-            <input type="number" class="form-control" name="student_id" required>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">课程ID</label>
-            <input type="number" class="form-control" name="course_id" required>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">成绩</label>
-            <input type="number" class="form-control" name="score" step="0.1" min="0" max="100" required>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">考试类型</label>
-            <select class="form-select" name="exam_type">
-              <option value="final">期末</option>
-              <option value="midterm">期中</option>
-              <option value="quiz">小测</option>
-              <option value="assignment">作业</option>
-            </select>
-          </div>
-        </form>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-        <button type="button" class="btn btn-primary" onclick="submitGrade()">保存</button>
-      </div>
+  <h3>成绩列表（按学号一行）</h3>
+  <div class="d-flex align-items-end gap-2">
+    <div>
+      <label class="form-label">考试名称</label>
+      <select id="examName" class="form-select">
+        {% for n in exam_names %}
+          <option value="{{ n }}">{{ n }}</option>
+        {% endfor %}
+      </select>
     </div>
+    <button class="btn btn-primary" onclick="loadAggregated()">查询</button>
   </div>
+</div>
+<div class="table-responsive">
+  <div class="d-flex gap-3 mb-2 align-items-end">
+    <div class="form-check form-check-inline">
+      <input class="form-check-input" type="checkbox" id="showLetters" checked>
+      <label class="form-check-label" for="showLetters">显示等第</label>
+    </div>
+    <div class="form-check form-check-inline">
+      <input class="form-check-input" type="checkbox" id="showSubRanks" checked>
+      <label class="form-check-label" for="showSubRanks">显示学科班/年排</label>
+    </div>
+    <div class="form-check form-check-inline">
+      <input class="form-check-input" type="checkbox" id="showTotalRanks" checked>
+      <label class="form-check-label" for="showTotalRanks">显示总分班/年排</label>
+    </div>
+    <button class="btn btn-outline-secondary" onclick="exportVisible()">导出当前显示</button>
+  </div>
+  <table class="table table-hover align-middle" id="aggTable">
+    <thead>
+      <tr>
+        <th>学号</th>
+        <th>姓名</th>
+        <th>班级</th>
+        <th>年级</th>
+        {% for s in subjects %}
+          <th>{{ s.name }}（分/等第/班排/年排）</th>
+        {% endfor %}
+        <th>总分（分/等第/班排/年排）</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
-async function submitGrade() {
-  const form = document.getElementById('gradeForm');
-  const formData = new FormData(form);
-  const payload = Object.fromEntries(formData.entries());
-  const res = await fetch('/api/grades', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  if (res.ok) {
-    location.reload();
-  } else {
-    const err = await res.json();
-    alert('保存失败: ' + (err.error || '未知错误'));
+function cellSpan(list, opts){
+  const { showLetters, showSubRanks } = opts;
+  const val = v => (v === undefined || v === null) ? '' : v;
+  const [score, letter, classRank, gradeRank] = list;
+  const parts = [val(score)];
+  if (showLetters) parts.push(val(letter));
+  if (showSubRanks) parts.push(val(classRank), val(gradeRank));
+  return parts.join(' / ');
+}
+function totalSpan(list, opts){
+  const { showLetters, showTotalRanks } = opts;
+  const val = v => (v === undefined || v === null) ? '' : v;
+  const [score, letter, classRank, gradeRank] = list;
+  const parts = [val(score)];
+  if (showLetters) parts.push(val(letter));
+  if (showTotalRanks) parts.push(val(classRank), val(gradeRank));
+  return parts.join(' / ');
+}
+function colorize(td){
+  if (!td.textContent) return;
+  if (td.textContent.includes('A')) td.classList.add('text-success');
+  else if (td.textContent.includes('B')) td.classList.add('text-primary');
+  else if (td.textContent.includes('C')) td.classList.add('text-warning');
+  else if (td.textContent.includes('D') || td.textContent.includes('E')) td.classList.add('text-danger');
+}
+async function loadAggregated(){
+  const exam = document.getElementById('examName').value || 'default';
+  const res = await fetch(`/api/grades/aggregated?exam_name=${encodeURIComponent(exam)}`);
+  const data = await res.json();
+  const tb = document.querySelector('#aggTable tbody');
+  tb.innerHTML = '';
+  if (!res.ok) {
+    tb.innerHTML = `<tr><td colspan="20" class="text-danger">加载失败：${data.error || '未知错误'}</td></tr>`;
+    return;
+  }
+  const opts = {
+    showLetters: document.getElementById('showLetters').checked,
+    showSubRanks: document.getElementById('showSubRanks').checked,
+    showTotalRanks: document.getElementById('showTotalRanks').checked,
+  };
+  const items = data.items || [];
+  for (const r of items){
+    const tr = document.createElement('tr');
+    const base = [r['学号'], r['姓名'], r['班级'], r['年级']];
+    base.forEach(v => { const td = document.createElement('td'); td.textContent = (v ?? ''); tr.appendChild(td); });
+    {% for s in subjects %}
+      {
+        const td = document.createElement('td');
+        td.textContent = cellSpan([
+          r['{{ s.name }}分'], r['{{ s.name }}等第'], r['{{ s.name }}班排'], r['{{ s.name }}年排']
+        ], opts);
+        colorize(td);
+        tr.appendChild(td);
+      }
+    {% endfor %}
+    {
+      const td = document.createElement('td');
+      td.textContent = totalSpan([
+        r['总分'], r['总分等第'], r['总分班排'], r['总分年排']
+      ], opts);
+      colorize(td);
+      tr.appendChild(td);
+    }
+    tb.appendChild(tr);
   }
 }
+function exportVisible(){
+  const exam = document.getElementById('examName').value || 'default';
+  const opts = {
+    showLetters: document.getElementById('showLetters').checked,
+    showSubRanks: document.getElementById('showSubRanks').checked,
+    showTotalRanks: document.getElementById('showTotalRanks').checked,
+  };
+  const q = new URLSearchParams({ exam_name: exam, show_letters: String(+opts.showLetters), show_sub_ranks: String(+opts.showSubRanks), show_total_ranks: String(+opts.showTotalRanks) });
+  window.open('/api/grades/aggregated/export?' + q.toString(), '_blank');
+}
+// 初始加载 & 选项切换时刷新
+window.addEventListener('DOMContentLoaded', () => {
+  loadAggregated();
+  document.getElementById('showLetters').addEventListener('change', loadAggregated);
+  document.getElementById('showSubRanks').addEventListener('change', loadAggregated);
+  document.getElementById('showTotalRanks').addEventListener('change', loadAggregated);
+});
 </script>
 {% endblock %}

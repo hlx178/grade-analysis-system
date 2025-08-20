@@ -151,13 +151,12 @@ def courses():
 @main_bp.route("/grades")
 @login_required
 def grades():
-    # 学生角色仅查看本人（通过学号=登录账号绑定）
-    if current_user.role == 'student':
-        u = current_user
-        grades = Grade.query.join(Student).filter(Student.student_id==u.username).order_by(Grade.created_at.desc()).limit(100).all()
-    else:
-        grades = Grade.query.order_by(Grade.created_at.desc()).limit(100).all()
-    return render_template("grades.html", grades=grades)
+    # 页面使用聚合表展示，这里仅准备下拉选项与科目列表
+    from app.utils import SUBJECTS, TOTAL_SUBJECT
+    exam_names = [row[0] for row in db.session.query(Grade.exam_name).distinct().all() if row[0]] or ['default']
+    subjects = [{'code': code, 'name': name} for (_col, code, name) in SUBJECTS]
+    subjects_total = {'code': TOTAL_SUBJECT[1], 'name': TOTAL_SUBJECT[2]}
+    return render_template("grades.html", exam_names=exam_names, subjects=subjects, total_subject=subjects_total)
 
 
 # 登录/登出
@@ -238,6 +237,7 @@ def grade_bands_page():
     courses = Course.query.order_by(Course.code).all()
     # 版本信息初步加载（默认exam_name=default）
     sets = GradeBandSet.query.filter_by(exam_name='default').order_by(GradeBandSet.version.desc()).all()
+    return render_template("grade_bands.html", courses=courses, subjects=SUBJECTS + [TOTAL_SUBJECT], sets=sets)
 
 @main_bp.route('/student-analysis')
 @login_required
@@ -268,6 +268,12 @@ def logout():
     logout_user()
     flash("您已退出登录", "info")
     return redirect(url_for("auth.login"))
+
+@main_bp.route('/account/password')
+@login_required
+def account_password_page():
+    return render_template('account_password.html')
+
 
 
 # API: 学生
@@ -381,7 +387,164 @@ def api_course_detail(course_id):
         return jsonify({"message": "Course deleted"})
 
 
-# API: 成绩
+# 内部：构建聚合数据
+def _build_aggregated_items(exam_name: str):
+    from app.utils import SUBJECTS, TOTAL_SUBJECT, grade_letter_for
+    subjects = SUBJECTS
+    total_code = TOTAL_SUBJECT[1]
+
+    q = Grade.query.join(Student).join(Course).filter(Grade.exam_name == exam_name)
+    if current_user.role != 'admin':
+        if current_user.allowed_grade_levels:
+            allowed = [s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.grade_level.in_(allowed))
+        if current_user.allowed_class_names:
+            allowed = [s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.class_name.in_(allowed))
+
+    rows = q.all()
+    from collections import defaultdict
+    by_class_total = defaultdict(list)
+    by_grade_total = defaultdict(list)
+    by_class_sub = defaultdict(list)   # key: (class_name, code)
+    by_grade_sub = defaultdict(list)   # key: (grade_level, code)
+
+    total_course = Course.query.filter_by(code=total_code).first()
+    for g in rows:
+        s = g.student
+        code = g.course.code
+        if total_course and g.course_id == total_course.id:
+            by_class_total[s.class_name].append((s.student_id, float(g.score)))
+            by_grade_total[s.grade_level].append((s.student_id, float(g.score)))
+        else:
+            # 学科分排名池
+            by_class_sub[(s.class_name, code)].append((s.student_id, float(g.score)))
+            by_grade_sub[(s.grade_level, code)].append((s.student_id, float(g.score)))
+
+    def rank_map(pairs):
+        ps = sorted(pairs, key=lambda x: x[1], reverse=True)
+        return {sid: i for i, (sid, _) in enumerate(ps, 1)}
+
+    class_total_ranks = {k: rank_map(v) for k, v in by_class_total.items()}
+    grade_total_ranks = {k: rank_map(v) for k, v in by_grade_total.items()}
+    class_sub_ranks = {k: rank_map(v) for k, v in by_class_sub.items()}
+    grade_sub_ranks = {k: rank_map(v) for k, v in by_grade_sub.items()}
+
+    # 汇总到学生
+    recs = {}
+    for g in rows:
+        s = g.student
+        key = s.id
+        if key not in recs:
+            recs[key] = {
+                'student_id': s.student_id,
+                'name': s.name,
+                'class_name': s.class_name,
+                'grade_level': s.grade_level,
+                'scores': {},
+                'letters': {},
+                'sub_class_rank': {},
+                'sub_grade_rank': {},
+            }
+        code = g.course.code
+        recs[key]['scores'][code] = float(g.score)
+        recs[key]['letters'][code] = grade_letter_for(g.exam_name or 'default', code, g.score)
+
+    # total 及总分排名（若无 total 科目则由各科累加）
+    for rec in recs.values():
+        total_val = rec['scores'].get(total_code)
+        if total_val is None:
+            total_val = sum(float(v) for v in rec['scores'].values()) if rec['scores'] else 0.0
+            rec['scores'][total_code] = total_val
+            rec['letters'][total_code] = grade_letter_for(exam_name, total_code, total_val)
+        sid_text = rec['student_id']
+        rec['class_rank'] = class_total_ranks.get(rec['class_name'], {}).get(sid_text)
+        rec['grade_rank'] = grade_total_ranks.get(rec['grade_level'], {}).get(sid_text)
+        # 每学科班/年排
+        for (_col, code, _name) in subjects:
+            rec['sub_class_rank'][code] = class_sub_ranks.get((rec['class_name'], code), {}).get(sid_text)
+            rec['sub_grade_rank'][code] = grade_sub_ranks.get((rec['grade_level'], code), {}).get(sid_text)
+
+    # 输出
+    result = []
+    for rec in recs.values():
+        row = {
+            '学号': rec['student_id'],
+            '姓名': rec['name'],
+            '班级': rec['class_name'],
+            '年级': rec['grade_level'],
+        }
+        for (_col, code, name) in subjects:
+            row[f'{name}分'] = rec['scores'].get(code)
+            row[f'{name}等第'] = rec['letters'].get(code)
+            row[f'{name}班排'] = rec['sub_class_rank'].get(code)
+            row[f'{name}年排'] = rec['sub_grade_rank'].get(code)
+        row['总分'] = rec['scores'].get(total_code)
+        row['总分等第'] = rec['letters'].get(total_code)
+        row['总分班排'] = rec.get('class_rank')
+        row['总分年排'] = rec.get('grade_rank')
+        result.append(row)
+    return result, subjects
+
+# API: 成绩聚合（按学号一行）
+@api_bp.route('/grades/aggregated', methods=['GET'])
+@login_required
+def api_grades_aggregated():
+    """返回按学生聚合的一行数据：各学科分数、等第、学科班/年排，以及总分、总分等第、总分班/年排。
+    可选参数：exam_name（默认default）
+    """
+    exam_name = request.args.get('exam_name') or 'default'
+    items, _subjects = _build_aggregated_items(exam_name)
+    return jsonify({'items': items, 'count': len(items), 'exam_name': exam_name})
+# 导出：聚合（尊重显示选项自动分列）
+@api_bp.route('/grades/aggregated/export', methods=['GET'])
+@login_required
+def api_grades_aggregated_export():
+    exam_name = request.args.get('exam_name') or 'default'
+    show_letters = request.args.get('show_letters', '1') == '1'
+    show_sub_ranks = request.args.get('show_sub_ranks', '1') == '1'
+    show_total_ranks = request.args.get('show_total_ranks', '1') == '1'
+    items, subjects = _build_aggregated_items(exam_name)
+    # 组装导出列
+    headers = ['学号','姓名','班级','年级']
+    for (_col, code, name) in subjects:
+      sub = [f'{name}分']
+      if show_letters: sub.append(f'{name}等第')
+      if show_sub_ranks: sub += [f'{name}班排', f'{name}年排']
+      headers += sub
+    total = ['总分']
+    if show_letters: total.append('总分等第')
+    if show_total_ranks: total += ['总分班排','总分年排']
+    headers += total
+
+    # 写 Excel
+    try:
+        from openpyxl import Workbook
+        import io
+        wb = Workbook(write_only=True)
+        ws = wb.create_sheet()
+        ws.append(headers)
+        for r in items:
+            row = []
+            row += [r.get('学号'), r.get('姓名'), r.get('班级'), r.get('年级')]
+            for (_col, code, name) in subjects:
+                row.append(r.get(f'{name}分'))
+                if show_letters: row.append(r.get(f'{name}等第'))
+                if show_sub_ranks: row += [r.get(f'{name}班排'), r.get(f'{name}年排')]
+            row.append(r.get('总分'))
+            if show_letters: row.append(r.get('总分等第'))
+            if show_total_ranks: row += [r.get('总分班排'), r.get('总分年排')]
+            ws.append(row)
+        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        fname = f'aggregated_{exam_name}.xlsx'
+        return send_file(buf, as_attachment=True, download_name=fname, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    except Exception as e:
+        return jsonify({'error': f'export failed: {e}'}), 500
+
+
+# API: 成绩（基础增删改查，保留）
 @api_bp.route("/grades", methods=["GET", "POST"])
 @login_required
 def api_grades():
@@ -404,19 +567,9 @@ def api_grades():
         return jsonify({"message": "Grade created", "id": grade.id}), 201
     # GET
     grades = Grade.query.all()
-    return jsonify(
-        [
-            {
-                "id": g.id,
-                "student_id": g.student_id,
-                "course_id": g.course_id,
-                "score": g.score,
-                "exam_type": g.exam_type,
-                "created_at": g.created_at.isoformat(),
-            }
-            for g in grades
-        ]
-    )
+    return jsonify([
+        {"id": g.id, "student_id": g.student_id, "course_id": g.course_id, "score": g.score, "exam_type": g.exam_type, "created_at": g.created_at.isoformat()} for g in grades
+    ])
 
 
 @api_bp.route("/grades/<int:grade_id>", methods=["GET", "PUT", "DELETE"])
@@ -523,9 +676,9 @@ def api_import_grades():
     except Exception as e:
         return jsonify({"error": f"Failed to read sheet: {e}"}), 400
 
-    # 期望列（模板方式）：学号、姓名、班级、语文、数学、英语、科学、社会、道法，可选：考试类型
+    # 期望列（模板方式）：学号、姓名、班级、语文、数学、英语、科学、社会、道法（其他信息在导入时选择）
     # 兼容旧方式（含 课程代码/课程名称/成绩）
-    template_cols = ["学号", "姓名", "班级", "年级", "语文", "数学", "英语", "科学", "社会", "道法"]
+    template_cols = ["学号", "姓名", "班级", "语文", "数学", "英语", "科学", "社会", "道法"]
     legacy_required_cols = ["学号", "姓名", "班级", "课程代码", "课程名称", "成绩"]
 
     # 判断模板方式或旧方式
@@ -538,10 +691,12 @@ def api_import_grades():
 
     created = 0
     updated = 0
+    errors = []
+
     if is_template:
-        # 处理考试类型与考试方案
-        exam_type = normalize_exam_type(df.get("考试类型").iloc[0] if "考试类型" in df.columns else "regular")
-        exam_name = str(df.get("考试名称").iloc[0] if "考试名称" in df.columns else "default").strip() or "default"
+        # 处理考试类型与考试方案（从接口参数接收）
+        exam_type = normalize_exam_type((data.get("exam_type") or "regular").strip())
+        exam_name = (data.get("exam_name") or "default").strip() or "default"
         ensure_default_exam_scheme(exam_type)
 
         # 为模板中的各学科准备/获取Course
@@ -554,25 +709,71 @@ def api_import_grades():
                 db.session.flush()
             subject_courses[col_name] = course
 
-        # 逐行导入
-        for _, row in df.iterrows():
-            sid = str(row["学号"]).strip()
-            student = Student.query.filter_by(student_id=sid).first()
+        # 工具：生成唯一学号（8位数字）
+        def _gen_sid():
+            import random
+            for _ in range(1000):
+                s = ''.join(random.choice('0123456789') for _ in range(8))
+                if not Student.query.filter_by(student_id=s).first():
+                    return s
+            raise RuntimeError('cannot generate unique student id')
+
+        # 逐行导入（新增校验：姓名/班级/至少一门学科成绩；若同名学生>1，需提供学号）
+        idx0 = 1
+        for i, row in df.iterrows():
+            idx = idx0 + i + 1
+            name = str(row.get("姓名") or "").strip()
+            cls = str(row.get("班级") or "").strip()
+            if not name:
+                errors.append(f"第{idx}行：缺少姓名")
+                continue
+            if not cls:
+                errors.append(f"第{idx}行：缺少班级")
+                continue
+            # 至少一科成绩
+            has_any_score = False
+            for col_name, _code, _ in SUBJECTS:
+                val = row.get(col_name)
+                try:
+                    _tmp = float(val) if pd.notna(val) else None
+                    if pd.notna(val):
+                        has_any_score = True
+                except Exception:
+                    pass
+            if not has_any_score:
+                errors.append(f"第{idx}行：至少填写一门学科成绩")
+                continue
+
+            sid_raw = (str(row.get("学号")).strip() if pd.notna(row.get("学号")) else "")
+            student = None
+            if sid_raw:
+                student = Student.query.filter_by(student_id=sid_raw).first()
+            else:
+                same_name = Student.query.filter_by(name=name).all()
+                if len(same_name) > 1:
+                    errors.append(f"第{idx}行：存在同名学生，请填写唯一学号")
+                    continue
+                elif len(same_name) == 1:
+                    student = same_name[0]
+                else:
+                    sid_raw = _gen_sid()
+
             if not student:
                 student = Student(
-                    student_id=sid,
-                    name=str(row.get("姓名") or "").strip(),
-                    class_name=str(row.get("班级") or "").strip(),
+                    student_id=sid_raw,
+                    name=name,
+                    class_name=cls,
                     grade_level=str(row.get("年级") or "").strip() or None,
                     email=None,
                 )
                 db.session.add(student)
                 db.session.flush()
             else:
-                # 更新年级信息（若存在）
                 gl = str(row.get("年级") or "").strip()
                 if gl:
                     student.grade_level = gl
+                if cls:
+                    student.class_name = cls
 
             total_score = 0.0
             for col_name, code, _ in SUBJECTS:
@@ -584,7 +785,7 @@ def api_import_grades():
                 if score_val is None:
                     continue
                 course = subject_courses[col_name]
-                grade = Grade.query.filter_by(student_id=student.id, course_id=course.id).first()
+                grade = Grade.query.filter_by(student_id=student.id, course_id=course.id, exam_name=exam_name).first()
                 if not grade:
                     grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type, exam_name=exam_name)
                     db.session.add(grade)
@@ -595,14 +796,14 @@ def api_import_grades():
                     updated += 1
                 total_score += score_val
 
-            # 总分作为一个虚拟课程TOTAL写入（可选）
+            # 总分（TOTAL）
             total_code = TOTAL_SUBJECT[1]
             total_course = Course.query.filter_by(code=total_code).first()
             if not total_course:
                 total_course = Course(code=total_code, name=TOTAL_SUBJECT[2])
                 db.session.add(total_course)
                 db.session.flush()
-            grade_total = Grade.query.filter_by(student_id=student.id, course_id=total_course.id).first()
+            grade_total = Grade.query.filter_by(student_id=student.id, course_id=total_course.id, exam_name=exam_name).first()
             if not grade_total:
                 grade_total = Grade(student=student, course=total_course, score=total_score, exam_type=exam_type, exam_name=exam_name)
                 db.session.add(grade_total)
@@ -611,6 +812,11 @@ def api_import_grades():
                 grade_total.score = total_score
                 grade_total.exam_type = exam_type
                 updated += 1
+
+        # 校验错误处理
+        if errors:
+            db.session.rollback()
+            return jsonify({"error": "导入校验失败", "details": errors}), 400
     else:
         # 兼容旧方式
         for _, row in df.iterrows():
@@ -2408,6 +2614,7 @@ def api_config_branding_logo_delete():
 def admin_branding_page():
     if current_user.role != 'admin':
         abort(403)
+    return render_template('admin_branding.html')
 
 # 角色权限与模块设置（管理员）
 @api_bp.route('/admin/role-permissions', methods=['GET','PUT'])
@@ -3046,9 +3253,15 @@ def api_download_import_template(kind):
     from openpyxl import Workbook
     wb = Workbook(); ws = wb.active; ws.title = 'Sheet1'
     if kind == 'grades':
-        ws.append(['学号','姓名','班级','课程代码','课程名称','成绩','考试类型','考试日期'])
-        ws.append(['20240001','张三','高一(1)班','MATH','数学','95','期中','2024-05-01'])
-        ws.append(['20240002','李四','高一(1)班','CHN','语文','88','期中','2024-05-01'])
+        # 新模板：一行一个学生，姓名/班级/至少一门学科成绩必填；同名需填写学号
+        ws.append(['学号','姓名','班级','年级','考试名称','考试类型','语文','数学','英语','科学','社会','道法'])
+        ws.append(['','张三','高一(1)班','高一','2024期中','期中','95','88','92','85','90','80'])
+        ws.append(['20240002','李四','高一(1)班','高一','2024期中','期中','88','82','76','91','85',''])
+        ws2 = wb.create_sheet('说明')
+        ws2.append(['填写说明'])
+        ws2.append(['1）姓名、班级、至少一门学科成绩必填；年级、考试名称/类型可选。'])
+        ws2.append(['2）如果存在同名学生，必须填写唯一学号以区分。学号建议为8位数字。'])
+        ws2.append(['3）留空的学科成绩视为本次不录入，不会覆盖已有成绩。'])
     elif kind == 'students':
         ws.append(['学号','姓名','班级','年级','邮箱'])
         ws.append(['20240001','张三','高一(1)班','高一','20240001@example.com'])

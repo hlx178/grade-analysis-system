@@ -25,6 +25,12 @@
       <button class="btn btn-outline-secondary" onclick="document.getElementById('importUsersFile').click()">导入CSV</button>
     </div>
   </div>
+      <div class="ms-2 input-group input-group-sm" style="width: 340px;">
+        <span class="input-group-text">批量重置密码</span>
+        <input id="batchPwd" class="form-control" placeholder="输入新密码">
+        <button class="btn btn-outline-danger" onclick="batchResetPasswords()">执行</button>
+      </div>
+
 </div>
 
 <!-- 批量创建学生账号 -->
@@ -58,6 +64,7 @@
       <th>可见年级</th>
       <th>可见班级</th>
       <th>操作</th>
+      <th>密码</th>
     </tr>
   </thead>
   <tbody></tbody>
@@ -142,7 +149,13 @@ async function loadUsers(page=1){
       </td>
       <td><input class="form-control form-control-sm gl" value="${u.allowed_grade_levels||''}" placeholder="逗号分隔"></td>
       <td><input class="form-control form-control-sm cl" value="${u.allowed_class_names||''}" placeholder="逗号分隔"></td>
-      <td><button class="btn btn-sm btn-primary" onclick="saveUser(${u.id}, this)">保存</button></td>`;
+      <td><button class="btn btn-sm btn-primary" onclick="saveUser(${u.id}, this)">保存</button></td>
+      <td>
+        <div class="input-group input-group-sm">
+          <input class="form-control newpwd" type="password" placeholder="新密码">
+          <button class="btn btn-outline-danger" onclick="resetPassword(${u.id}, this)">重置</button>
+        </div>
+      </td>`;
     tbody.appendChild(tr);
   });
   renderPager(data.total, data.page, data.page_size);
@@ -326,6 +339,27 @@ async function saveUser(id, btn){
   };
   const res = await fetch(`/api/users/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
   if (res.ok){ alert('已保存'); } else { alert('保存失败'); }
+}
+
+async function resetPassword(id, btn){
+  const tr = btn.closest('tr');
+  const pwd = tr.querySelector('.newpwd').value.trim();
+  if (!pwd){ alert('请输入新密码'); return; }
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/admin/users/passwords', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ items: [{ id, new_password: pwd }] }) });
+    if (res.ok){ alert('已重置'); tr.querySelector('.newpwd').value=''; }
+    else { const j = await res.json().catch(()=>({})); alert('失败: ' + (j.error||res.status)); }
+  }finally{ btn.disabled = false; }
+}
+async function batchResetPasswords(){
+  const pwd = (document.getElementById('batchPwd')?.value || '').trim();
+  if (!pwd){ alert('请在输入框填写批量重置的新密码'); return; }
+  const ids = selectedIds();
+  if (!ids.length){ alert('请选择行'); return; }
+  const res = await fetch('/api/admin/users/passwords', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ items: ids.map(id=>({ id, new_password: pwd })) }) });
+  if (res.ok){ alert('批量重置完成'); document.getElementById('batchPwd').value=''; }
+  else { const j = await res.json().catch(()=>({})); alert('失败: ' + (j.error||res.status)); }
 }
 
 window.addEventListener('DOMContentLoaded', ()=>loadUsers(1));
