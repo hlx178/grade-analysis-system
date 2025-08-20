@@ -58,10 +58,10 @@ $runArgs = @(
   '-p', "$Port:8000",
   '-e','FLASK_CONFIG=production',
   '-e',"ADMIN_INITIAL_PASSWORD=$AdminPassword",
-  '-v',"$uploads:/app/uploads",
-  '-v',"$exports:/app/exports",
-  '-v',"$dbFile:/app/grade_analysis.db",
-  '-v',"$staticDir:/app/app/static",
+  '-v',"$($uploads):/app/uploads",
+  '-v',"$($exports):/app/exports",
+  '-v',"$($dbFile):/app/grade_analysis.db",
+  '-v',"$($staticDir):/app/app/static",
   '-d', $ImageTag
 )
 $containerId = & docker @runArgs
