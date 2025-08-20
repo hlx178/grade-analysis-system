@@ -25,9 +25,9 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     env:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      GHCR_ADMIN_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME || vars.DOCKERHUB_USERNAME || '' }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN || vars.DOCKERHUB_TOKEN || '' }}
+      GHCR_ADMIN_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN || '' }}
 
     steps:
       - name: Checkout repository
@@ -52,6 +52,11 @@ jobs:
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Debug Docker Hub secrets presence (safe)
+        run: |
+          echo "Has DOCKERHUB_USERNAME? ${{ env.DOCKERHUB_USERNAME != '' }}"
+          echo "Has DOCKERHUB_TOKEN? ${{ env.DOCKERHUB_TOKEN != '' }}"
 
       - name: Set image tag by UTC date
         run: echo "IMAGE_TAG=$(date -u +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
