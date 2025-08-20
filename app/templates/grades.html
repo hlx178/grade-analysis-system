@@ -16,20 +16,55 @@
   </div>
 </div>
 <div class="table-responsive">
-  <div class="d-flex gap-3 mb-2 align-items-end">
-    <div class="form-check form-check-inline">
-      <input class="form-check-input" type="checkbox" id="showLetters" checked>
-      <label class="form-check-label" for="showLetters">显示等第</label>
+  <div class="card mb-3">
+    <div class="card-header bg-light">
+      <h6 class="mb-0">显示选项</h6>
     </div>
-    <div class="form-check form-check-inline">
-      <input class="form-check-input" type="checkbox" id="showSubRanks" checked>
-      <label class="form-check-label" for="showSubRanks">显示学科班/年排</label>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-3">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="showScores" checked>
+            <label class="form-check-label" for="showScores">显示成绩</label>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="showLetters" checked>
+            <label class="form-check-label" for="showLetters">显示等第</label>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="showSubRanks" checked>
+            <label class="form-check-label" for="showSubRanks">显示学科班/年排</label>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="showTotalRanks" checked>
+            <label class="form-check-label" for="showTotalRanks">显示总分班/年排</label>
+          </div>
+        </div>
+      </div>
+      <div class="row g-2 mt-2">
+        <div class="col-auto">
+          <button class="btn btn-outline-primary btn-sm" onclick="sortBy('total')">按总分排序</button>
+        </div>
+        <div class="col-auto">
+          <button class="btn btn-outline-primary btn-sm" onclick="sortBy('chinese')">按语文排序</button>
+        </div>
+        <div class="col-auto">
+          <button class="btn btn-outline-primary btn-sm" onclick="sortBy('math')">按数学排序</button>
+        </div>
+        <div class="col-auto">
+          <button class="btn btn-outline-primary btn-sm" onclick="sortBy('english')">按英语排序</button>
+        </div>
+        <div class="col-auto">
+          <button class="btn btn-outline-secondary btn-sm" onclick="exportVisible()">导出当前显示</button>
+        </div>
+      </div>
     </div>
-    <div class="form-check form-check-inline">
-      <input class="form-check-input" type="checkbox" id="showTotalRanks" checked>
-      <label class="form-check-label" for="showTotalRanks">显示总分班/年排</label>
-    </div>
-    <button class="btn btn-outline-secondary" onclick="exportVisible()">导出当前显示</button>
   </div>
   <table class="table table-hover align-middle" id="aggTable">
     <thead>
@@ -51,19 +86,21 @@
 {% block scripts %}
 <script>
 function cellSpan(list, opts){
-  const { showLetters, showSubRanks } = opts;
+  const { showScores, showLetters, showSubRanks } = opts;
   const val = v => (v === undefined || v === null) ? '' : v;
   const [score, letter, classRank, gradeRank] = list;
-  const parts = [val(score)];
+  const parts = [];
+  if (showScores) parts.push(val(score));
   if (showLetters) parts.push(val(letter));
   if (showSubRanks) parts.push(val(classRank), val(gradeRank));
   return parts.join(' / ');
 }
 function totalSpan(list, opts){
-  const { showLetters, showTotalRanks } = opts;
+  const { showScores, showLetters, showTotalRanks } = opts;
   const val = v => (v === undefined || v === null) ? '' : v;
   const [score, letter, classRank, gradeRank] = list;
-  const parts = [val(score)];
+  const parts = [];
+  if (showScores) parts.push(val(score));
   if (showLetters) parts.push(val(letter));
   if (showTotalRanks) parts.push(val(classRank), val(gradeRank));
   return parts.join(' / ');

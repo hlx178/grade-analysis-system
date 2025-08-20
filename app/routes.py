@@ -389,7 +389,7 @@ def api_course_detail(course_id):
 
 # 内部：构建聚合数据
 def _build_aggregated_items(exam_name: str):
-    from app.utils import SUBJECTS, TOTAL_SUBJECT, grade_letter_for
+    from app.utils import SUBJECTS, TOTAL_SUBJECT, grade_letter_for, RANK_TIE_PRIORITY
     subjects = SUBJECTS
     total_code = TOTAL_SUBJECT[1]
 
@@ -455,6 +455,33 @@ def _build_aggregated_items(exam_name: str):
     # total 及总分排名（若无 total 科目则由各科累加）
     for rec in recs.values():
         total_val = rec['scores'].get(total_code)
+    # 自定义排序：按总分并应用同分细则
+    def sort_key(rec):
+        s = rec['scores']
+        total = float(s.get(total_code) or 0)
+        # tie-breakers
+        cn = float(s.get('CN') or 0); ma = float(s.get('MA') or 0)
+        cnma = cn + ma
+        cnma_max = max(cn, ma)
+        en = float(s.get('EN') or 0)
+        soc = float(s.get('SOC') or 0)
+        mor = float(s.get('MOR') or 0)
+        return (total, cnma, cnma_max, en, soc, mor)
+
+    # 用总分排序（降序）并生成并列排名（竞赛排名法）
+    ordered = sorted(recs.values(), key=sort_key, reverse=True)
+    rank_by_student_id = {}
+    last_key = None; last_rank = 0; idx = 0
+    for row in ordered:
+        idx += 1
+        k = sort_key(row)
+        if k != last_key:
+            last_rank = idx
+            last_key = k
+        rank_by_student_id[row['student_id']] = last_rank
+
+    # 填充 total 与排名、以及学科等第汇总
+
         if total_val is None:
             total_val = sum(float(v) for v in rec['scores'].values()) if rec['scores'] else 0.0
             rec['scores'][total_code] = total_val
@@ -709,14 +736,42 @@ def api_import_grades():
                 db.session.flush()
             subject_courses[col_name] = course
 
-        # 工具：生成唯一学号（8位数字）
-        def _gen_sid():
-            import random
-            for _ in range(1000):
-                s = ''.join(random.choice('0123456789') for _ in range(8))
-                if not Student.query.filter_by(student_id=s).first():
-                    return s
-            raise RuntimeError('cannot generate unique student id')
+        # 工具：生成唯一学号（按年份+四位流水号）。根据班级推断入学年份：
+        # 规则示例（按你的要求，可按需要扩展/调整）：
+        # - 班级名称包含“81” -> 入学年份 = 当前年份 - 1（例：2025年导入，81班 => 2024）
+        # - 班级名称包含“91” -> 入学年份 = 当前年份 - 2（例：2025年导入，91班 => 2023）
+        # - 班级名称包含“71” -> 入学年份 = 当前年份（例：2025年导入，71班 => 2025）
+        # - 否则：使用当前年份
+        def _infer_entry_year(class_name: str) -> int:
+            import re, datetime
+            year = datetime.datetime.now().year
+            m = re.search(r'(\d{2})', class_name or '')
+            if m:
+                code = m.group(1)
+                if code == '81':
+                    return year - 1
+                if code == '91':
+                    return year - 2
+                if code == '71':
+                    return year
+            return year
+
+        def _gen_sid(class_name: str) -> str:
+            import re
+            entry = _infer_entry_year(class_name)
+            # 查询该年份目前最大流水号
+            prefix = str(entry)
+            like = f"{prefix}%"
+            last = (
+                Student.query.filter(Student.student_id.like(like))
+                .order_by(Student.student_id.desc())
+                .first()
+            )
+            if last and len(last.student_id) >= 8 and last.student_id.startswith(prefix):
+                seq = int(last.student_id[-4:]) + 1
+            else:
+                seq = 1
+            return f"{prefix}{seq:04d}"
 
         # 逐行导入（新增校验：姓名/班级/至少一门学科成绩；若同名学生>1，需提供学号）
         idx0 = 1
@@ -756,7 +811,7 @@ def api_import_grades():
                 elif len(same_name) == 1:
                     student = same_name[0]
                 else:
-                    sid_raw = _gen_sid()
+                    sid_raw = _gen_sid(cls)
 
             if not student:
                 student = Student(

@@ -18,6 +18,9 @@ SUBJECTS = [
     ("道法", "MOR", "道法"),
 ]
 TOTAL_SUBJECT = ("总分", "TOTAL", "总分")
+# 排名同分规则使用学科优先级（语文+数学总分、其和相同则比较两科最高分、再比英语、再比社会、再比道法）
+RANK_TIE_PRIORITY = ['CN','MA','EN','SOC','MOR']
+
 
 EXAM_TYPE_MAP = {
     "常规考试": "regular",
