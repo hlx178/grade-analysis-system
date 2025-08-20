@@ -22,7 +22,13 @@
 (async function(){
   try{
     const r = await fetch('/api/config/branding'); if (!r.ok) return; const b = await r.json();
-    if (b.logo_url){ const img = document.getElementById('loginLogo'); img.src = b.logo_url; img.style.display='block'; }
+    if (b.logo_url){
+      const img = document.getElementById('loginLogo');
+      const url = b.logo_url + (b.logo_url.indexOf('?')>=0?'&':'?') + 't=' + Date.now();
+      img.onload = ()=>{ img.style.display='block'; };
+      img.onerror = ()=>{ img.style.display='none'; };
+      img.src = url;
+    }
     if (b.school_name){ const t = document.getElementById('loginSchool'); t.textContent = b.school_name; }
     document.title = (b.school_name||'成绩分析系统') + ' - 登录';
   }catch(e){}
