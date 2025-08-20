@@ -2731,11 +2731,15 @@ def api_config_branding():
     except Exception:
         pass
     # logo 文件存在则提供 URL
-    import os
+    import os, time
     static_dir = os.path.join(current_app.root_path, 'static')
     logo_path = os.path.join(static_dir, 'logo.png')
     if os.path.exists(logo_path):
-        base['logo_url'] = url_for('static', filename='logo.png', _external=False)
+        try:
+            v = int(os.path.getmtime(logo_path))
+        except Exception:
+            v = int(time.time())
+        base['logo_url'] = url_for('static', filename='logo.png', _external=False) + f'?v={v}'
     else:
         base['logo_url'] = None
     return jsonify(base)
@@ -2807,7 +2811,12 @@ def api_config_branding_logo():
     os.makedirs(static_dir, exist_ok=True)
     path = os.path.join(static_dir, 'logo.png')
     f.save(path)
-    return jsonify({'logo_url': url_for('static', filename='logo.png', _external=False)})
+    import os, time
+    try:
+        v = int(os.path.getmtime(path))
+    except Exception:
+        v = int(time.time())
+    return jsonify({'logo_url': url_for('static', filename='logo.png', _external=False) + f'?v={v}'})
 
 @api_bp.route('/config/branding/logo', methods=['DELETE'])
 @login_required

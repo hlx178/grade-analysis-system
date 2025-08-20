@@ -24,10 +24,9 @@
     const r = await fetch('/api/config/branding'); if (!r.ok) return; const b = await r.json();
     if (b.logo_url){
       const img = document.getElementById('loginLogo');
-      const url = b.logo_url + (b.logo_url.indexOf('?')>=0?'&':'?') + 't=' + Date.now();
       img.onload = ()=>{ img.style.display='block'; };
       img.onerror = ()=>{ img.style.display='none'; };
-      img.src = url;
+      img.src = b.logo_url; // 已由后端添加 ?v=mtime 防缓存
     }
     if (b.school_name){ const t = document.getElementById('loginSchool'); t.textContent = b.school_name; }
     document.title = (b.school_name||'成绩分析系统') + ' - 登录';
