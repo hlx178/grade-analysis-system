@@ -123,6 +123,7 @@ async function loadAggregated(){
     return;
   }
   const opts = {
+    showScores: document.getElementById('showScores').checked,
     showLetters: document.getElementById('showLetters').checked,
     showSubRanks: document.getElementById('showSubRanks').checked,
     showTotalRanks: document.getElementById('showTotalRanks').checked,
@@ -156,11 +157,12 @@ async function loadAggregated(){
 function exportVisible(){
   const exam = document.getElementById('examName').value || 'default';
   const opts = {
+    showScores: document.getElementById('showScores').checked,
     showLetters: document.getElementById('showLetters').checked,
     showSubRanks: document.getElementById('showSubRanks').checked,
     showTotalRanks: document.getElementById('showTotalRanks').checked,
   };
-  const q = new URLSearchParams({ exam_name: exam, show_letters: String(+opts.showLetters), show_sub_ranks: String(+opts.showSubRanks), show_total_ranks: String(+opts.showTotalRanks) });
+  const q = new URLSearchParams({ exam_name: exam, show_scores: String(+opts.showScores), show_letters: String(+opts.showLetters), show_sub_ranks: String(+opts.showSubRanks), show_total_ranks: String(+opts.showTotalRanks) });
   window.open('/api/grades/aggregated/export?' + q.toString(), '_blank');
 }
 // 初始加载 & 选项切换时刷新

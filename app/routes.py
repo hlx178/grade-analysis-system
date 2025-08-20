@@ -475,14 +475,18 @@ def _build_aggregated_items(exam_name: str):
         recs[key]['scores'][code] = float(g.score)
         recs[key]['letters'][code] = grade_letter_for(g.exam_name or 'default', code, g.score)
 
-    # total 及总分排名（若无 total 科目则由各科累加）
+    # total 及等第补全（若无 total 科目则由各科累加）
     for rec in recs.values():
         total_val = rec['scores'].get(total_code)
-    # 自定义排序：按总分并应用同分细则
+        if total_val is None:
+            total_val = sum(float(v) for v in rec['scores'].values()) if rec['scores'] else 0.0
+            rec['scores'][total_code] = total_val
+            rec['letters'][total_code] = grade_letter_for(exam_name, total_code, total_val)
+
+    # 同分细则排序键
     def sort_key(rec):
         s = rec['scores']
         total = float(s.get(total_code) or 0)
-        # tie-breakers
         cn = float(s.get('CN') or 0); ma = float(s.get('MA') or 0)
         cnma = cn + ma
         cnma_max = max(cn, ma)
@@ -491,28 +495,32 @@ def _build_aggregated_items(exam_name: str):
         mor = float(s.get('MOR') or 0)
         return (total, cnma, cnma_max, en, soc, mor)
 
-    # 用总分排序（降序）并生成并列排名（竞赛排名法）
-    ordered = sorted(recs.values(), key=sort_key, reverse=True)
-    rank_by_student_id = {}
-    last_key = None; last_rank = 0; idx = 0
-    for row in ordered:
-        idx += 1
-        k = sort_key(row)
-        if k != last_key:
-            last_rank = idx
-            last_key = k
-        rank_by_student_id[row['student_id']] = last_rank
+    # 计算班内/年级内排名（并列跳号）
+    from collections import defaultdict as _dd
+    group_class = _dd(list)
+    group_grade = _dd(list)
+    for rec in recs.values():
+        group_class[rec['class_name']].append(rec)
+        group_grade[rec['grade_level']].append(rec)
 
-    # 填充 total 与排名、以及学科等第汇总
+    def assign_rank(group_lists, field):
+        for _, lst in group_lists.items():
+            ordered = sorted(lst, key=sort_key, reverse=True)
+            last_key = None; last_rank = 0; idx = 0
+            for r in ordered:
+                idx += 1
+                k = sort_key(r)
+                if k != last_key:
+                    last_rank = idx
+                    last_key = k
+                r[field] = last_rank
 
-        if total_val is None:
-            total_val = sum(float(v) for v in rec['scores'].values()) if rec['scores'] else 0.0
-            rec['scores'][total_code] = total_val
-            rec['letters'][total_code] = grade_letter_for(exam_name, total_code, total_val)
+    assign_rank(group_class, 'class_rank')
+    assign_rank(group_grade, 'grade_rank')
+
+    # 每学科班/年排（仍按单科分数降序计算，不使用同分细则）
+    for rec in recs.values():
         sid_text = rec['student_id']
-        rec['class_rank'] = class_total_ranks.get(rec['class_name'], {}).get(sid_text)
-        rec['grade_rank'] = grade_total_ranks.get(rec['grade_level'], {}).get(sid_text)
-        # 每学科班/年排
         for (_col, code, _name) in subjects:
             rec['sub_class_rank'][code] = class_sub_ranks.get((rec['class_name'], code), {}).get(sid_text)
             rec['sub_grade_rank'][code] = grade_sub_ranks.get((rec['grade_level'], code), {}).get(sid_text)
@@ -553,6 +561,7 @@ def api_grades_aggregated():
 @login_required
 def api_grades_aggregated_export():
     exam_name = request.args.get('exam_name') or 'default'
+    show_scores = request.args.get('show_scores', '1') == '1'
     show_letters = request.args.get('show_letters', '1') == '1'
     show_sub_ranks = request.args.get('show_sub_ranks', '1') == '1'
     show_total_ranks = request.args.get('show_total_ranks', '1') == '1'
@@ -560,11 +569,13 @@ def api_grades_aggregated_export():
     # 组装导出列
     headers = ['学号','姓名','班级','年级']
     for (_col, code, name) in subjects:
-      sub = [f'{name}分']
+      sub = []
+      if show_scores: sub.append(f'{name}分')
       if show_letters: sub.append(f'{name}等第')
       if show_sub_ranks: sub += [f'{name}班排', f'{name}年排']
       headers += sub
-    total = ['总分']
+    total = []
+    if show_scores: total.append('总分')
     if show_letters: total.append('总分等第')
     if show_total_ranks: total += ['总分班排','总分年排']
     headers += total
@@ -580,10 +591,10 @@ def api_grades_aggregated_export():
             row = []
             row += [r.get('学号'), r.get('姓名'), r.get('班级'), r.get('年级')]
             for (_col, code, name) in subjects:
-                row.append(r.get(f'{name}分'))
+                if show_scores: row.append(r.get(f'{name}分'))
                 if show_letters: row.append(r.get(f'{name}等第'))
                 if show_sub_ranks: row += [r.get(f'{name}班排'), r.get(f'{name}年排')]
-            row.append(r.get('总分'))
+            if show_scores: row.append(r.get('总分'))
             if show_letters: row.append(r.get('总分等第'))
             if show_total_ranks: row += [r.get('总分班排'), r.get('总分年排')]
             ws.append(row)
