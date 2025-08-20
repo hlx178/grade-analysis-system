@@ -201,15 +201,17 @@ def login():
                     user = User(username=username, email=f"{username}@example.com", role='student')
                     user.set_password('123456')
                     db.session.add(user); db.session.commit()
-            # 方案A：学生登录一致性校验（当用户名为8位学号时要求姓名一致）
-            name_input = (request.form.get('name') or '').strip()
-            if user and user.role == 'student':
-                import re as _re
-                if _re.fullmatch(r"\d{8}", username):
-                    stu = Student.query.filter_by(student_id=username).first()
-                    if stu and name_input and (stu.name.strip() != name_input):
-                        flash("姓名与学号不一致，请核对后再试", "danger")
-                        return render_template("login.html"), 400
+        # 方案A：学生登录一致性（当输入是8位学号时，必须提供姓名且一致）
+        import re as _re
+        if _re.fullmatch(r"\d{8}", username):
+            stu = Student.query.filter_by(student_id=username).first()
+            # 仅当存在学生记录时才执行姓名校验；否则走用户口令校验
+            if stu:
+                name_input = (request.form.get('name') or '').strip()
+                if not name_input or (stu.name.strip() != name_input):
+                    flash("学生登录需填写姓名，且与学号对应姓名一致", "danger")
+                    return render_template("login.html"), 400
+
 
         if user and user.check_password(password):
             login_user(user)
