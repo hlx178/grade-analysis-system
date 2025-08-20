@@ -1,20 +1,20 @@
 {% extends 'base.html' %}
 {% block title %}登录 - 成绩分析系统{% endblock %}
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-4">
-    <h3 class="mb-3">登录</h3>
-    <div class="login-brand"><img id="loginLogo" alt="Logo"/><div id="loginSchool">{{ brand_school_name }}</div></div>
-
-{% block head_extra %}
-<style>
-.login-brand{ display:flex; align-items:center; gap:10px; margin-top:30px; margin-bottom:10px; }
-.login-brand img{ height:40px; }
-</style>
-{% endblock %}
-
-    <form method="post">
+<div class="row justify-content-center align-items-center">
+  <div class="col-md-10">
+    <div class="card shadow-sm p-4">
+      <div class="d-flex align-items-center">
+        <div class="flex-shrink-0 me-4 text-center" style="width:260px">
+          <img id="loginLogo" alt="Logo" style="max-width:240px; max-height:240px; display:none"/>
+          <div id="loginSchool" class="mt-2 fs-5 fw-semibold">{{ brand_school_name }}</div>
+        </div>
+        <div class="flex-grow-1">
+          <h3 class="mb-3">登录</h3>
+          <form method="post">
       <div class="mb-3">
+{% block head_extra %}{% endblock %}
+
         <label class="form-label">用户名</label>
         <input type="text" name="username" class="form-control" required>
 {% block scripts %}

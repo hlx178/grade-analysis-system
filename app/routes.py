@@ -166,7 +166,9 @@ def grades():
 @login_required
 def api_grade_filters():
     q = Student.query
-    if current_user.role != 'admin':
+    if current_user.role == 'student':
+        q = q.filter(Student.student_id == current_user.username)
+    elif current_user.role != 'admin':
         if current_user.allowed_grade_levels:
             allowed = [s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]
             if allowed:
@@ -877,7 +879,20 @@ def api_import_files():
             p = os.path.join(upload_dir, fn)
             try:
                 st = os.stat(p)
-                items.append({'file_id': fn.replace('.xlsx',''), 'size': st.st_size, 'mtime': int(st.st_mtime)})
+                meta = {}
+                try:
+                    import json
+                    with open(p + '.json', 'r', encoding='utf-8') as mf:
+                        meta = json.load(mf) or {}
+                except Exception:
+                    meta = {}
+                items.append({
+                    'file_id': fn.replace('.xlsx',''),
+                    'filename': meta.get('original_filename') or fn,
+                    'exam_name': meta.get('exam_name') or None,
+                    'size': st.st_size,
+                    'mtime': int(st.st_mtime)
+                })
             except Exception:
                 pass
     items.sort(key=lambda x: x['mtime'], reverse=True)

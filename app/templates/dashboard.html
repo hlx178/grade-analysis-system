@@ -29,6 +29,8 @@
 <div class="row">
   <div class="col-md-6 mb-4">
     <div class="card">
+      <small class="text-muted">若未选择具体课程，则统计“总分”或“全部学科汇总”</small>
+
       <div class="card-header">统计摘要</div>
       <div class="card-body">
         <ul class="list-unstyled mb-0" id="statsList">
@@ -103,8 +105,10 @@ async function loadAnalysis(){
   const data = await res.json();
   const s = data.stats || {};
   const d = data.distribution || {};
+  const subject = document.getElementById('courseSelect').value ? '学科' : '总分/全部学科';
   document.getElementById('statsList').innerHTML = `
-    <li>数量: ${s.count ?? '-'}</li>
+    <li><strong>对象：</strong>${subject}</li>
+    <li>样本数: ${s.count ?? '-'}</li>
     <li>平均分: ${s.average ?? '-'}</li>
     <li>中位数: ${s.median ?? '-'}</li>
     <li>最高分: ${s.max ?? '-'}</li>
