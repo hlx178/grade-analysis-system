@@ -901,12 +901,9 @@ def api_import_grades():
             with open(file_path + '.json', 'r', encoding='utf-8') as mf:
         # 若表内提供考试名称/类型列且为单一值，优先使用
         try:
+            # 根据你的需求，不再从表内读取考试名称/类型，统一以页面输入为准；若名称未填，用文件名
             _exam_name_col = None
-            for k in ['考试名称','考试名','考试']:
-                if k in df.columns: _exam_name_col = k; break
             _exam_type_col = None
-            for k in ['考试类型','类型']:
-                if k in df.columns: _exam_type_col = k; break
             _exam_name_in_sheet = None
             if _exam_name_col:
                 vals = [str(v).strip() for v in df[_exam_name_col].dropna().unique().tolist() if str(v).strip()]
@@ -923,11 +920,6 @@ def api_import_grades():
                 exam_name = (meta.get('exam_name') or '').strip() or (data.get("exam_name") or "default").strip() or "default"
         except Exception:
             exam_name = (data.get("exam_name") or "default").strip() or "default"
-        # 表内单值优先覆盖
-        if _exam_name_in_sheet:
-            exam_name = _exam_name_in_sheet
-        if _exam_type_in_sheet:
-            exam_type = normalize_exam_type(_exam_type_in_sheet)
         ensure_default_exam_scheme(exam_type)
 
         # 为模板中的各学科准备/获取Course
@@ -3556,14 +3548,15 @@ def api_download_import_template(kind):
     wb = Workbook(); ws = wb.active; ws.title = 'Sheet1'
     if kind == 'grades':
         # 新模板：一行一个学生，姓名/班级/至少一门学科成绩必填；同名需填写学号
-        ws.append(['学号','姓名','班级','年级','考试名称','考试类型','语文','数学','英语','科学','社会','道法'])
-        ws.append(['','张三','高一(1)班','高一','2024期中','期中','95','88','92','85','90','80'])
-        ws.append(['20240002','李四','高一(1)班','高一','2024期中','期中','88','82','76','91','85',''])
+        ws.append(['学号','姓名','班级','年级','语文','数学','英语','科学','社会','道法'])
+        ws.append(['','张三','高一(1)班','高一','95','88','92','85','90','80'])
+        ws.append(['20240002','李四','高一(1)班','高一','88','82','76','91','85',''])
         ws2 = wb.create_sheet('说明')
         ws2.append(['填写说明'])
-        ws2.append(['1）姓名、班级、至少一门学科成绩必填；年级、考试名称/类型可选。'])
-        ws2.append(['2）如果存在同名学生，必须填写唯一学号以区分。学号建议为8位数字。'])
-        ws2.append(['3）留空的学科成绩视为本次不录入，不会覆盖已有成绩。'])
+        ws2.append(['1）姓名、班级、至少一门学科成绩必填；年级可选。'])
+        ws2.append(['2）考试名称/类型在导入页面填写或选择；若不填写考试名称，将默认使用文件名。'])
+        ws2.append(['3）如果存在同名学生，必须填写唯一学号以区分。学号建议为8位数字。'])
+        ws2.append(['4）留空的学科成绩视为本次不录入，不会覆盖已有成绩。'])
     elif kind == 'students':
         ws.append(['学号','姓名','班级','年级','邮箱'])
         ws.append(['20240001','张三','高一(1)班','高一','20240001@example.com'])
