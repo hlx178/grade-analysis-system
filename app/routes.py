@@ -845,7 +845,7 @@ def api_import_grades():
         # 清洗列名（去空格/全角空格/括号内“分/成绩”等）并映射常见别名
         def _norm_col(c: str) -> str:
             c = str(c or '').strip()
-            c = c.replace('\u3000','').replace(' ','')
+            c = c.replace('\u3000','').replace(' ','').replace('\t','')
             c = c.replace('（','(').replace('）',')')
             return c
         alias = {
@@ -899,10 +899,35 @@ def api_import_grades():
         try:
             import json
             with open(file_path + '.json', 'r', encoding='utf-8') as mf:
+        # 若表内提供考试名称/类型列且为单一值，优先使用
+        try:
+            _exam_name_col = None
+            for k in ['考试名称','考试名','考试']:
+                if k in df.columns: _exam_name_col = k; break
+            _exam_type_col = None
+            for k in ['考试类型','类型']:
+                if k in df.columns: _exam_type_col = k; break
+            _exam_name_in_sheet = None
+            if _exam_name_col:
+                vals = [str(v).strip() for v in df[_exam_name_col].dropna().unique().tolist() if str(v).strip()]
+                if len(vals)==1: _exam_name_in_sheet = vals[0]
+            _exam_type_in_sheet = None
+            if _exam_type_col:
+                vals = [str(v).strip() for v in df[_exam_type_col].dropna().unique().tolist() if str(v).strip()]
+                if len(vals)==1: _exam_type_in_sheet = vals[0]
+        except Exception:
+            _exam_name_in_sheet = None
+            _exam_type_in_sheet = None
+
                 meta = json.load(mf)
                 exam_name = (meta.get('exam_name') or '').strip() or (data.get("exam_name") or "default").strip() or "default"
         except Exception:
             exam_name = (data.get("exam_name") or "default").strip() or "default"
+        # 表内单值优先覆盖
+        if _exam_name_in_sheet:
+            exam_name = _exam_name_in_sheet
+        if _exam_type_in_sheet:
+            exam_type = normalize_exam_type(_exam_type_in_sheet)
         ensure_default_exam_scheme(exam_type)
 
         # 为模板中的各学科准备/获取Course
