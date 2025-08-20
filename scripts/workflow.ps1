@@ -106,8 +106,8 @@ if ($PushGHCR) {
   if (-not $GhcrUser -or -not $GhcrToken) { Err 'GhcrUser/GhcrToken required for GHCR'; exit 1 }
   Info "Login GHCR as $GhcrUser"
   docker login ghcr.io -u $GhcrUser -p $GhcrToken | Out-Null
-  $ver = "$GhcrImage:$sha"
-  $latest = "$GhcrImage:latest"
+  $ver = "$(($GhcrImage)):$sha"
+  $latest = "$(($GhcrImage)):latest"
   Info "Tagging $LocalImageTag -> $ver, $latest"
   docker tag $LocalImageTag $ver
   docker tag $LocalImageTag $latest
@@ -127,8 +127,8 @@ if ($PushDockerHub) {
   if (-not $DockerHubUser -or -not $DockerHubPassword) { Err 'DockerHubUser/Password required for Docker Hub'; exit 1 }
   Info "Login Docker Hub as $DockerHubUser"
   docker login -u $DockerHubUser -p $DockerHubPassword | Out-Null
-  $ver = "$DockerHubImage:$sha"
-  $latest = "$DockerHubImage:latest"
+  $ver = "$(($DockerHubImage)):$sha"
+  $latest = "$(($DockerHubImage)):latest"
   Info "Tagging $LocalImageTag -> $ver, $latest"
   docker tag $LocalImageTag $ver
   docker tag $LocalImageTag $latest
