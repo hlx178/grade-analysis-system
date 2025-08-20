@@ -194,6 +194,8 @@ def import_page():
 
 @main_bp.route("/summary")
 @login_required
+def summary_page():
+    return render_template("summary.html")
 
 # 设置：学号年份推断规则（管理员）
 @main_bp.route('/settings/student_id_rule', methods=['GET','POST'])
@@ -216,9 +218,6 @@ def student_id_rule():
         flash('规则已保存', 'success')
     cur = ModuleSetting.get_json(key, default={'map': {'7':0, '8':-1, '9':-2}})
     return render_template('student_id_rule.html', rule_json=json.dumps(cur, ensure_ascii=False, indent=2))
-
-def summary_page():
-    return render_template("summary.html")
 
 
 @main_bp.route("/users")
