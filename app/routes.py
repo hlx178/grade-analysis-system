@@ -362,20 +362,41 @@ def api_students():
         db.session.add(student)
         db.session.commit()
         return jsonify({"message": "Student created", "id": student.id}), 201
-    # GET
-    students = Student.query.all()
-    return jsonify(
-        [
+    # GET with filters and visibility
+    q = Student.query
+    if current_user.role == 'student':
+        q = q.filter(Student.student_id == current_user.username)
+    elif current_user.role != 'admin':
+        if current_user.allowed_grade_levels:
+            allowed = [s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.grade_level.in_(allowed))
+        if current_user.allowed_class_names:
+            allowed = [s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.class_name.in_(allowed))
+    grades = [x.strip() for x in (request.args.get('grade') or '').split(',') if x.strip()]
+    classes = [x.strip() for x in (request.args.get('class') or '').split(',') if x.strip()]
+    if grades:
+        q = q.filter(Student.grade_level.in_(grades))
+    if classes:
+        q = q.filter(Student.class_name.in_(classes))
+    q = q.order_by(Student.class_name, Student.student_id)
+    students = q.all()
+    return jsonify({
+        "items": [
             {
                 "id": s.id,
                 "student_id": s.student_id,
                 "name": s.name,
                 "class_name": s.class_name,
+                "grade_level": s.grade_level,
                 "email": s.email,
             }
             for s in students
-        ]
-    )
+        ],
+        "total": len(students)
+    })
 
 
 @api_bp.route("/students/<int:student_id>", methods=["GET", "PUT", "DELETE"])
@@ -383,6 +404,26 @@ def api_students():
 def api_student_detail(student_id):
     student = Student.query.get_or_404(student_id)
     if request.method == "GET":
+
+@api_bp.route('/students/options', methods=['GET'])
+@login_required
+def api_students_options():
+    q = Student.query
+    if current_user.role == 'student':
+        q = q.filter(Student.student_id == current_user.username)
+    elif current_user.role != 'admin':
+        if current_user.allowed_grade_levels:
+            allowed = [s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.grade_level.in_(allowed))
+        if current_user.allowed_class_names:
+            allowed = [s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.class_name.in_(allowed))
+    grade_levels = sorted({s.grade_level for s in q if s.grade_level})
+    class_names = sorted({s.class_name for s in q if s.class_name})
+    return jsonify({ 'grade_levels': grade_levels, 'class_names': class_names })
+
         return jsonify(
             {
                 "id": student.id,

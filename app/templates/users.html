@@ -123,6 +123,17 @@
 {% endblock %}
 {% block scripts %}
 <script>
+let _optsCache = null;
+async function loadOptions(){
+  const r = await fetch('/api/summary/options'); if (!r.ok) return {grade_levels:[], class_names:[]};
+  const d = await r.json(); _optsCache = { grades: d.grade_levels||[], classes: d.class_names||[] };
+}
+function fillMultiSelect(sel, items, selectedCsv){
+  sel.innerHTML='';
+  const set = new Set((selectedCsv||'').split(',').map(s=>s.trim()).filter(Boolean));
+  items.forEach(x=>{ const o=document.createElement('option'); o.value=o.textContent=x; if (set.has(x)) o.selected = true; sel.appendChild(o); });
+}
+
 async function loadUsers(page=1){
   const q = document.getElementById('userSearch').value.trim();
   const page_size = Number(document.getElementById('userPageSize').value) || 20;
@@ -146,8 +157,12 @@ async function loadUsers(page=1){
           <option value="student" ${u.role==='student'?'selected':''}>student</option>
         </select>
       </td>
-      <td><input class="form-control form-control-sm gl" value="${u.allowed_grade_levels||''}" placeholder="逗号分隔"></td>
-      <td><input class="form-control form-control-sm cl" value="${u.allowed_class_names||''}" placeholder="逗号分隔"></td>
+      <td>
+        <select class="form-select form-select-sm gl" ${u.role==='student'?'disabled':''} multiple></select>
+      </td>
+      <td>
+        <select class="form-select form-select-sm cl" ${u.role==='student'?'disabled':''} multiple></select>
+      </td>
       <td><button class="btn btn-sm btn-primary" onclick="saveUser(${u.id}, this)">保存</button></td>
       <td>
         <div class="input-group input-group-sm">
@@ -156,6 +171,13 @@ async function loadUsers(page=1){
         </div>
       </td>`;
     tbody.appendChild(tr);
+    // 填充下拉
+    const glSel = tr.querySelector('.gl');
+    const clSel = tr.querySelector('.cl');
+    if (_optsCache){
+      fillMultiSelect(glSel, _optsCache.grades, u.allowed_grade_levels||'');
+      fillMultiSelect(clSel, _optsCache.classes, u.allowed_class_names||'');
+    }
   });
   renderPager(data.total, data.page, data.page_size);
 }
@@ -331,10 +353,12 @@ async function batchCreateStudentUsers(){
 
 async function saveUser(id, btn){
   const tr = btn.closest('tr');
+  const role = tr.querySelector('.role').value;
+  const valCsv = (sel)=> Array.from(sel.selectedOptions).map(o=>o.value).join(',');
   const payload = {
-    role: tr.querySelector('.role').value,
-    allowed_grade_levels: tr.querySelector('.gl').value,
-    allowed_class_names: tr.querySelector('.cl').value,
+    role,
+    allowed_grade_levels: role==='student' ? '' : valCsv(tr.querySelector('.gl')),
+    allowed_class_names: role==='student' ? '' : valCsv(tr.querySelector('.cl')),
   };
   const res = await fetch(`/api/users/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
   if (res.ok){ alert('已保存'); } else { alert('保存失败'); }

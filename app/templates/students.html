@@ -5,27 +5,30 @@
   <h3>学生列表</h3>
   <a href="#" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStudentModal">新增学生</a>
 </div>
-<table class="table table-hover">
+<div class="row g-2 align-items-end mb-2">
+  <div class="col-auto">
+    <label class="form-label">年级</label>
+    <select id="gradeFilter" class="form-select" multiple style="min-width:200px"></select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label">班级</label>
+    <select id="classFilter" class="form-select" multiple style="min-width:200px"></select>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-primary" onclick="loadStudents()">筛选</button>
+  </div>
+</div>
+<table class="table table-hover" id="studentTable">
   <thead>
     <tr>
       <th>学号</th>
       <th>姓名</th>
       <th>班级</th>
-      <th>邮箱</th>
+      <th>年级</th>
       <th>分析</th>
     </tr>
   </thead>
-  <tbody>
-  {% for s in students %}
-    <tr>
-      <td>{{ s.student_id }}</td>
-      <td>{{ s.name }}</td>
-      <td>{{ s.class_name }}</td>
-      <td>{{ s.email }}</td>
-        <td><a class="btn btn-sm btn-outline-primary" href="/student-analysis?id={{ s.id }}">分析</a></td>
-    </tr>
-  {% endfor %}
-  </tbody>
+  <tbody></tbody>
 </table>
 
 <!-- 新增学生模态框 -->
@@ -78,6 +81,36 @@ async function submitStudent() {
   if (res.ok) {
     location.reload();
   } else {
+
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadOptions(){
+  const r = await fetch('/api/students/options'); if (!r.ok) return;
+  const d = await r.json();
+  const gf = document.getElementById('gradeFilter');
+  const cf = document.getElementById('classFilter');
+  gf.innerHTML = ''; cf.innerHTML = '';
+  (d.grade_levels||[]).forEach(x=>{ const o=document.createElement('option'); o.value=o.textContent=x; gf.appendChild(o); });
+  (d.class_names||[]).forEach(x=>{ const o=document.createElement('option'); o.value=o.textContent=x; cf.appendChild(o); });
+}
+function selVals(id){ return Array.from(document.getElementById(id).selectedOptions).map(o=>o.value).join(','); }
+async function loadStudents(){
+  const grade = selVals('gradeFilter');
+  const clazz = selVals('classFilter');
+  const q = new URLSearchParams(); if (grade) q.set('grade', grade); if (clazz) q.set('class', clazz);
+  const r = await fetch('/api/students?'+q.toString()); const d = await r.json();
+  const tb = document.querySelector('#studentTable tbody'); tb.innerHTML='';
+  (d.items||[]).forEach(s=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${s.student_id}</td><td>${s.name}</td><td>${s.class_name||''}</td><td>${s.grade_level||''}</td><td><a class="btn btn-sm btn-outline-primary" href="/student-analysis?id=${s.id}">分析</a></td>`;
+    tb.appendChild(tr);
+  });
+}
+window.addEventListener('DOMContentLoaded', async ()=>{ await loadOptions(); await loadStudents(); });
+</script>
+{% endblock %}
+
     alert('保存失败');
   }
 }
