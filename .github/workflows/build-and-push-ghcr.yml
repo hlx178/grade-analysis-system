@@ -51,7 +51,7 @@ jobs:
       - name: Set image tag by UTC date
         run: echo "IMAGE_TAG=$(date -u +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
 
-      - name: Build and push
+      - name: Build and push to GHCR
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -60,6 +60,17 @@ jobs:
           tags: |
             ghcr.io/hlx178/grade-analysis:${{ env.IMAGE_TAG }}
             ghcr.io/hlx178/grade-analysis:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push to Docker Hub
+        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
             docker.io/hlx178/grade-analysis:${{ env.IMAGE_TAG }}
             docker.io/hlx178/grade-analysis:latest
           cache-from: type=gha
@@ -67,6 +78,7 @@ jobs:
 
       - name: Make GHCR package public (if token provided)
         if: ${{ secrets.GHCR_ADMIN_TOKEN != '' }}
+        continue-on-error: true
         run: |
           curl -L -X PATCH \
             -H "Accept: application/vnd.github+json" \
