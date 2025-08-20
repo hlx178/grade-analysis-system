@@ -218,6 +218,14 @@ def import_page():
 
 
 @main_bp.route("/summary")
+
+# 学生视图：我的成绩
+@main_bp.route('/my-scores')
+@login_required
+def my_scores_page():
+    # 学生只能访问本人；教师/管理员也可查看（仍受可见范围限制）
+    return render_template('my_scores.html')
+
 @login_required
 def summary_page():
     return render_template("summary.html")

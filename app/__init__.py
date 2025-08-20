@@ -114,10 +114,10 @@ def create_app(config_name="default"):
                 from app.models import RolePermission as _RP
                 import json as _json
                 def _default_modules(role: str):
-                    all_mods = ['students','courses','grades','summary','import','exam_schemes','grade_bands','users','diagnostics','branding','student_analysis']
+                    all_mods = ['students','courses','grades','summary','import','exam_schemes','grade_bands','users','diagnostics','branding','student_analysis','my_scores']
                     if role == 'admin': return set(all_mods)
-                    if role == 'teacher': return set(['students','courses','grades','summary','import'])
-                    if role == 'student': return set(['students','grades','summary','student_analysis'])
+                    if role == 'teacher': return set(['students','courses','grades','summary','import','my_scores'])
+                    if role == 'student': return set(['my_scores','student_analysis'])
                     return set()
                 mods = set()
                 if _cu.is_authenticated:

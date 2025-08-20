@@ -28,6 +28,8 @@
         {% if 'exam_schemes' in allowed_modules %}<li class="nav-item"><a class="nav-link" href="/exam-schemes">考试方案</a></li>{% endif %}
         {% if 'grade_bands' in allowed_modules %}<li class="nav-item"><a class="nav-link" href="/grade-bands">等级规则</a></li>{% endif %}
         {% if 'users' in allowed_modules %}<li class="nav-item"><a class="nav-link" href="/users">用户管理</a></li>{% endif %}
+        {% if 'my_scores' in allowed_modules %}<li class="nav-item"><a class="nav-link" href="/my-scores">我的成绩</a></li>{% endif %}
+
         {% if 'diagnostics' in allowed_modules %}<li class="nav-item"><a class="nav-link" href="/diagnostics">诊断</a></li>{% endif %}
         {% if 'branding' in allowed_modules %}<li class="nav-item"><a class="nav-link" href="/admin/branding">品牌配置</a></li>{% endif %}
         {% if current_user.is_authenticated and current_user.role == 'admin' %}<li class="nav-item"><a class="nav-link" href="/settings/student_id_rule">学号规则</a></li>{% endif %}

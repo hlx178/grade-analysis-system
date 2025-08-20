@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% block title %}我的成绩 - 成绩分析系统{% endblock %}
+{% block content %}
+<h3>我的成绩</h3>
+<div class="row g-2 align-items-end mb-3">
+  <div class="col-auto">
+    <label class="form-label">考试名称</label>
+    <input id="examFilter" class="form-control form-control-sm mb-1" placeholder="搜索...">
+    <select id="examName" class="form-select" multiple style="min-width:220px"></select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label">学科</label>
+    <select id="subjectCode" class="form-select">
+      <option value="TOTAL">总分</option>
+      <option value="CN">语文</option>
+      <option value="MA">数学</option>
+      <option value="EN">英语</option>
+      <option value="SC">科学</option>
+      <option value="SOC">社会</option>
+      <option value="MOR">道法</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label">排序</label>
+    <select id="orderBy" class="form-select">
+      <option value="score_desc">分数(高->低)</option>
+      <option value="score_asc">分数(低->高)</option>
+      <option value="class_rank">班级排名</option>
+      <option value="grade_rank">年级排名</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-primary" onclick="loadMySummary()">查询</button>
+  </div>
+</div>
+
+<table class="table table-striped" id="mySummaryTable">
+  <thead>
+    <tr>
+      <th>考试名称</th>
+      <th>学科/总分</th>
+      <th>分数</th>
+      <th>百分比</th>
+      <th>等第</th>
+      <th>班级排名</th>
+      <th>年级排名</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadSummaryOptions(){
+  const res = await fetch('/api/summary/options');
+  const data = await res.json();
+  const sel = document.getElementById('examName');
+  sel.innerHTML = '';
+  (data.exam_names||[]).forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+}
+
+function selectedExams(){
+  return Array.from(document.getElementById('examName').selectedOptions).map(o=>o.value).join(',');
+}
+
+async function loadMySummary(){
+  const subject_code = document.getElementById('subjectCode').value;
+  const order_by = document.getElementById('orderBy').value;
+  const exam_name = selectedExams();
+  const res = await fetch('/api/summary?' + new URLSearchParams({ subject_code, order_by, exam_name }));
+  const data = await res.json();
+  const tb = document.querySelector('#mySummaryTable tbody'); tb.innerHTML='';
+  data.items.forEach(it=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${it.exam_name||''}</td><td>${subject_code==='TOTAL'?'总分':'学科'}</td><td>${it.score}</td><td>${it.percentage??''}</td><td>${it.letter??''}</td><td>${it.class_rank??''}</td><td>${it.grade_rank??''}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+window.addEventListener('DOMContentLoaded', async ()=>{ await loadSummaryOptions(); await loadMySummary(); });
+</script>
+{% endblock %}
+

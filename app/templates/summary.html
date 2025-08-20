@@ -311,6 +311,7 @@
       <th>姓名</th>
       <th>班级</th>
       <th>年级</th>
+      <th>数据类型</th>
       <th>分数</th>
       <th class="col-percentage">百分比</th>
       <th class="col-letter">等第</th>
@@ -408,6 +409,7 @@ async function loadSummary(){
       <td>${it.name}</td>
       <td>${it.class_name||''}</td>
       <td>${it.grade_level||''}</td>
+      <td>${(document.getElementById('subjectCode').value==='TOTAL')?'总分':'学科'}</td>
       <td>${it.score}</td>
       <td class="col-percentage">${it.percentage ?? ''}</td>
       <td class="col-letter">${it.letter||''}</td>
@@ -466,6 +468,7 @@ function gotoPage(p){
         <td>${it.name}</td>
         <td>${it.class_name||''}</td>
         <td>${it.grade_level||''}</td>
+        <td>${(document.getElementById('subjectCode').value==='TOTAL')?'总分':'学科'}</td>
         <td>${it.score}</td>
         <td class="col-letter">${it.letter||''}</td>
         <td class="col-class-rank">${it.class_rank ?? ''}</td>
