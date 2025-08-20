@@ -3,12 +3,33 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3>成绩列表（按学号一行）</h3>
-  <div class="d-flex align-items-end gap-2">
+  <div class="d-flex align-items-end gap-3 flex-wrap">
     <div>
       <label class="form-label">考试名称</label>
       <select id="examName" class="form-select">
         {% for n in exam_names %}
           <option value="{{ n }}">{{ n }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">年级</label>
+      <select id="gradeFilter" class="form-select">
+        <option value="">全部</option>
+      </select>
+    </div>
+    <div>
+      <label class="form-label">班级</label>
+      <select id="classFilter" class="form-select">
+        <option value="">全部</option>
+      </select>
+    </div>
+    <div>
+      <label class="form-label">学科</label>
+      <select id="subjectFilter" class="form-select">
+        <option value="">全部</option>
+        {% for s in subjects %}
+          <option value="{{ s.code }}">{{ s.name }}</option>
         {% endfor %}
       </select>
     </div>
@@ -68,16 +89,7 @@
   </div>
   <table class="table table-hover align-middle" id="aggTable">
     <thead>
-      <tr>
-        <th>学号</th>
-        <th>姓名</th>
-        <th>班级</th>
-        <th>年级</th>
-        {% for s in subjects %}
-          <th>{{ s.name }}（分/等第/班排/年排）</th>
-        {% endfor %}
-        <th>总分（分/等第/班排/年排）</th>
-      </tr>
+      <tr id="aggHead"></tr>
     </thead>
     <tbody></tbody>
   </table>
@@ -100,6 +112,32 @@ function totalSpan(list, opts){
   const val = v => (v === undefined || v === null) ? '' : v;
   const [score, letter, classRank, gradeRank] = list;
   const parts = [];
+function buildHeader(opts){
+  const head = document.getElementById('aggHead');
+  head.innerHTML = '';
+  const add = (t)=>{ const th=document.createElement('th'); th.textContent=t; head.appendChild(th); };
+  add('学号'); add('姓名'); add('班级'); add('年级');
+  const filterCode = document.getElementById('subjectFilter').value;
+  {% for s in subjects %}
+    if (!filterCode || filterCode === '{{ s.code }}') {
+      add('{{ s.name }}（' + [
+        ...(opts.showScores?['分']:[]),
+        ...(opts.showLetters?['等第']:[]),
+        ...(opts.showSubRanks?['班排','年排']:[])
+      ].join('/') + '）');
+    }
+  {% endfor %}
+  // 总分列：若未选择学科（显示全部学科）时显示；选择了具体学科时隐藏
+  const filterCode2 = document.getElementById('subjectFilter').value;
+  if (!filterCode2) {
+    add('总分（' + [
+      ...(opts.showScores?['分']:[]),
+      ...(opts.showLetters?['等第']:[]),
+      ...(opts.showTotalRanks?['班排','年排']:[])
+    ].join('/') + '）');
+  }
+}
+
   if (showScores) parts.push(val(score));
   if (showLetters) parts.push(val(letter));
   if (showTotalRanks) parts.push(val(classRank), val(gradeRank));
@@ -114,7 +152,11 @@ function colorize(td){
 }
 async function loadAggregated(){
   const exam = document.getElementById('examName').value || 'default';
-  const res = await fetch(`/api/grades/aggregated?exam_name=${encodeURIComponent(exam)}`);
+  const params = new URLSearchParams({ exam_name: exam });
+  const g = document.getElementById('gradeFilter').value; if (g) params.set('grade', g);
+  const c = document.getElementById('classFilter').value; if (c) params.set('class_name', c);
+  const s = document.getElementById('subjectFilter').value; if (s) params.set('subject_code', s);
+  const res = await fetch(`/api/grades/aggregated?${params.toString()}`);
   const data = await res.json();
   const tb = document.querySelector('#aggTable tbody');
   tb.innerHTML = '';
@@ -128,6 +170,7 @@ async function loadAggregated(){
     showSubRanks: document.getElementById('showSubRanks').checked,
     showTotalRanks: document.getElementById('showTotalRanks').checked,
   };
+  buildHeader(opts);
   const items = data.items || [];
   for (const r of items){
     const tr = document.createElement('tr');
@@ -135,21 +178,27 @@ async function loadAggregated(){
     base.forEach(v => { const td = document.createElement('td'); td.textContent = (v ?? ''); tr.appendChild(td); });
     {% for s in subjects %}
       {
+        const filterCode = document.getElementById('subjectFilter').value;
+        if (!filterCode || filterCode === '{{ s.code }}') {
+          const td = document.createElement('td');
+          td.textContent = cellSpan([
+            r['{{ s.name }}分'], r['{{ s.name }}等第'], r['{{ s.name }}班排'], r['{{ s.name }}年排']
+          ], opts);
+          colorize(td);
+          tr.appendChild(td);
+        }
+      }
+    {% endfor %}
+    {
+      const filterCode3 = document.getElementById('subjectFilter').value;
+      if (!filterCode3) {
         const td = document.createElement('td');
-        td.textContent = cellSpan([
-          r['{{ s.name }}分'], r['{{ s.name }}等第'], r['{{ s.name }}班排'], r['{{ s.name }}年排']
+        td.textContent = totalSpan([
+          r['总分'], r['总分等第'], r['总分班排'], r['总分年排']
         ], opts);
         colorize(td);
         tr.appendChild(td);
       }
-    {% endfor %}
-    {
-      const td = document.createElement('td');
-      td.textContent = totalSpan([
-        r['总分'], r['总分等第'], r['总分班排'], r['总分年排']
-      ], opts);
-      colorize(td);
-      tr.appendChild(td);
     }
     tb.appendChild(tr);
   }
@@ -162,7 +211,8 @@ function exportVisible(){
     showSubRanks: document.getElementById('showSubRanks').checked,
     showTotalRanks: document.getElementById('showTotalRanks').checked,
   };
-  const q = new URLSearchParams({ exam_name: exam, show_scores: String(+opts.showScores), show_letters: String(+opts.showLetters), show_sub_ranks: String(+opts.showSubRanks), show_total_ranks: String(+opts.showTotalRanks) });
+  const s = document.getElementById('subjectFilter').value;
+  const q = new URLSearchParams({ exam_name: exam, subject_code: s || '', show_scores: String(+opts.showScores), show_letters: String(+opts.showLetters), show_sub_ranks: String(+opts.showSubRanks), show_total_ranks: String(+opts.showTotalRanks) });
   window.open('/api/grades/aggregated/export?' + q.toString(), '_blank');
 }
 // 初始加载 & 选项切换时刷新

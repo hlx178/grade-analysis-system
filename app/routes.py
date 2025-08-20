@@ -159,6 +159,27 @@ def grades():
     return render_template("grades.html", exam_names=exam_names, subjects=subjects, total_subject=subjects_total)
 
 
+# 筛选：年级、班级、学科
+@api_bp.route('/grades/filters', methods=['GET'])
+@login_required
+def api_grade_filters():
+    q = Student.query
+    if current_user.role != 'admin':
+        if current_user.allowed_grade_levels:
+            allowed = [s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.grade_level.in_(allowed))
+        if current_user.allowed_class_names:
+            allowed = [s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]
+            if allowed:
+                q = q.filter(Student.class_name.in_(allowed))
+    grades = [row[0] for row in q.with_entities(Student.grade_level).distinct().all() if row[0]]
+    classes = [row[0] for row in q.with_entities(Student.class_name).distinct().all() if row[0]]
+    from app.utils import SUBJECTS
+    subjects = [{'code': code, 'name': name} for (_col, code, name) in SUBJECTS]
+    return jsonify({'grades': grades, 'classes': classes, 'subjects': subjects})
+
+
 # 登录/登出
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
@@ -550,10 +571,19 @@ def _build_aggregated_items(exam_name: str):
 @login_required
 def api_grades_aggregated():
     """返回按学生聚合的一行数据：各学科分数、等第、学科班/年排，以及总分、总分等第、总分班/年排。
-    可选参数：exam_name（默认default）
+    可选参数：exam_name（默认default）、grade、class_name、subject_code（用于前端过滤显示）。
     """
     exam_name = request.args.get('exam_name') or 'default'
+    grade = (request.args.get('grade') or '').strip()
+    class_name = (request.args.get('class_name') or '').strip()
+    subject_code = (request.args.get('subject_code') or '').strip()
     items, _subjects = _build_aggregated_items(exam_name)
+    # 过滤
+    if grade:
+        items = [r for r in items if (r.get('年级') or '') == grade]
+    if class_name:
+        items = [r for r in items if (r.get('班级') or '') == class_name]
+    # subject_code 只影响前端渲染的列，后端这里不剔除字段，保留完整数据
     return jsonify({'items': items, 'count': len(items), 'exam_name': exam_name})
 # 导出：聚合（尊重显示选项自动分列）
 @api_bp.route('/grades/aggregated/export', methods=['GET'])
@@ -564,20 +594,19 @@ def api_grades_aggregated_export():
     show_letters = request.args.get('show_letters', '1') == '1'
     show_sub_ranks = request.args.get('show_sub_ranks', '1') == '1'
     show_total_ranks = request.args.get('show_total_ranks', '1') == '1'
+    subject_code = (request.args.get('subject_code') or '').strip()
     items, subjects = _build_aggregated_items(exam_name)
     # 组装导出列
     headers = ['学号','姓名','班级','年级']
     for (_col, code, name) in subjects:
+      if subject_code and code != subject_code:
+        continue
       sub = []
       if show_scores: sub.append(f'{name}分')
       if show_letters: sub.append(f'{name}等第')
       if show_sub_ranks: sub += [f'{name}班排', f'{name}年排']
       headers += sub
-    total = []
-    if show_scores: total.append('总分')
-    if show_letters: total.append('总分等第')
-    if show_total_ranks: total += ['总分班排','总分年排']
-    headers += total
+    # 若按学科导出，不再附加总分相关列
 
     # 写 Excel
     try:
@@ -590,12 +619,12 @@ def api_grades_aggregated_export():
             row = []
             row += [r.get('学号'), r.get('姓名'), r.get('班级'), r.get('年级')]
             for (_col, code, name) in subjects:
+                if subject_code and code != subject_code:
+                    continue
                 if show_scores: row.append(r.get(f'{name}分'))
                 if show_letters: row.append(r.get(f'{name}等第'))
                 if show_sub_ranks: row += [r.get(f'{name}班排'), r.get(f'{name}年排')]
-            if show_scores: row.append(r.get('总分'))
-            if show_letters: row.append(r.get('总分等第'))
-            if show_total_ranks: row += [r.get('总分班排'), r.get('总分年排')]
+            # 不导出总分相关列
             ws.append(row)
         buf = io.BytesIO(); wb.save(buf); buf.seek(0)
         fname = f'aggregated_{exam_name}.xlsx'
@@ -700,6 +729,16 @@ def api_import_preview():
     # 统一使用 .xlsx 扩展名
     file_path = os.path.join(upload_dir, f"{file_id}.xlsx")
     f.save(file_path)
+    # 保存元数据（用于确定考试名称）
+    try:
+        import json, time, os as _os
+        orig = (f.filename or '').rsplit('/',1)[-1].rsplit('\\',1)[-1]
+        base = _os.path.splitext(orig)[0] or 'default'
+        meta = { 'original_filename': orig, 'exam_name': base, 'uploaded_by': current_user.username, 'upload_time': int(time.time()) }
+        with open(file_path + '.json', 'w', encoding='utf-8') as mf:
+            json.dump(meta, mf, ensure_ascii=False)
+    except Exception:
+        pass
 
     try:
         # 读取工作表列表
@@ -709,11 +748,51 @@ def api_import_preview():
         # 清理坏文件
         try:
             os.remove(file_path)
+            try:
+                os.remove(file_path + '.json')
+            except Exception:
+                pass
         except Exception:
             pass
         return jsonify({"error": f"Failed to read excel: {e}"}), 400
 
     return jsonify({"file_id": file_id, "sheets": sheets})
+
+# 导入文件管理：列表/删除
+@api_bp.route('/import/files', methods=['GET'])
+@login_required
+def api_import_files():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    os.makedirs(upload_dir, exist_ok=True)
+    items = []
+    for fn in os.listdir(upload_dir):
+        if fn.endswith('.xlsx'):
+            p = os.path.join(upload_dir, fn)
+            try:
+                st = os.stat(p)
+                items.append({'file_id': fn.replace('.xlsx',''), 'size': st.st_size, 'mtime': int(st.st_mtime)})
+            except Exception:
+                pass
+    items.sort(key=lambda x: x['mtime'], reverse=True)
+    return jsonify({'items': items})
+
+@api_bp.route('/import/files/<file_id>', methods=['DELETE'])
+@login_required
+def api_import_file_delete(file_id):
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    p = os.path.join(upload_dir, f"{file_id}.xlsx")
+    if os.path.exists(p):
+        try:
+            os.remove(p)
+            return jsonify({'deleted': True})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    return jsonify({'deleted': False, 'error': 'not found'}), 404
+
 
 
 # 导入: 根据选择的工作表执行导入
@@ -756,7 +835,14 @@ def api_import_grades():
     if is_template:
         # 处理考试类型与考试方案（从接口参数接收）
         exam_type = normalize_exam_type((data.get("exam_type") or "regular").strip())
-        exam_name = (data.get("exam_name") or "default").strip() or "default"
+        # 优先使用预览文件的文件名作为考试名称
+        try:
+            import json
+            with open(file_path + '.json', 'r', encoding='utf-8') as mf:
+                meta = json.load(mf)
+                exam_name = (meta.get('exam_name') or '').strip() or (data.get("exam_name") or "default").strip() or "default"
+        except Exception:
+            exam_name = (data.get("exam_name") or "default").strip() or "default"
         ensure_default_exam_scheme(exam_type)
 
         # 为模板中的各学科准备/获取Course

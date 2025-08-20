@@ -63,6 +63,22 @@
 
 <div class="mt-4">
   <p>成绩导入新模板：一行一个学生。表头固定为“学号、姓名、班级、语文、数学、英语、科学、社会、道法”。姓名、班级、至少一门学科成绩必填；如存在同名学生，必须填写唯一学号（建议8位数字）。考试名称/类型在导入时选择。</p>
+<h3 class="mt-4">已上传文件管理</h3>
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <span class="text-muted">仅管理员可见</span>
+      <button class="btn btn-outline-secondary btn-sm" onclick="loadUploadList()">刷新</button>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm" id="uploadTable">
+        <thead><tr><th>文件ID</th><th>大小</th><th>上传时间</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
   <p>学生导入模板：学号（8位：入学年份4位+流水号4位）、姓名、班级必填；可选：年级、邮箱。</p>
 </div>
 {% endblock %}
@@ -115,6 +131,32 @@ async function importStudents(){
   const autoCreate = document.getElementById('autoCreateUsers').checked;
   const defaultPwd = document.getElementById('defaultPassword').value || '123456';
   const res = await fetch('/api/import/students', {
+async function loadUploadList(){
+  try {
+    const res = await fetch('/api/import/files');
+    const data = await res.json();
+    const tb = document.querySelector('#uploadTable tbody');
+    tb.innerHTML = '';
+    (data.items||[]).forEach(it => {
+      const tr = document.createElement('tr');
+      const dt = new Date(it.mtime*1000);
+      tr.innerHTML = `<td>${it.file_id}</td><td>${(it.size/1024).toFixed(1)} KB</td><td>${dt.toLocaleString()}</td>`;
+      const tdOp = document.createElement('td');
+      const delBtn = document.createElement('button'); delBtn.className='btn btn-sm btn-outline-danger'; delBtn.textContent='删除';
+      delBtn.onclick = async ()=>{
+        if (!confirm('确认删除该文件？')) return;
+        const r = await fetch('/api/import/files/'+it.file_id, { method: 'DELETE' });
+        const d = await r.json();
+        if (r.ok) { loadUploadList(); }
+        else { alert(d.error||'删除失败'); }
+      };
+      tdOp.appendChild(delBtn); tr.appendChild(tdOp); tb.appendChild(tr);
+    });
+  } catch(e) { console.warn('load uploads failed', e); }
+}
+// 页面加载尝试拉取一次列表
+loadUploadList();
+
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ file_id: fileId, sheet_name: sheet, auto_create_users: autoCreate, default_password: defaultPwd })
@@ -123,6 +165,7 @@ async function importStudents(){
   const result = document.getElementById('resultStudents');
   if (res.ok) {
     result.innerHTML = `<div class="alert alert-success">导入完成：新增学生 ${data.students_created} 条，更新 ${data.students_updated} 条；新增用户 ${data.users_created} 个。</div>`;
+    loadUploadList();
   } else {
     result.innerHTML = `<div class="alert alert-danger">导入失败：${data.error || '未知错误'}</div>`;
   }
