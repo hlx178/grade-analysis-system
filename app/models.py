@@ -286,6 +286,24 @@ class ModuleSetting(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     key = db.Column(db.String(64), unique=True, nullable=False)
     value = db.Column(db.Text, nullable=True)  # JSON 字符串
+    @staticmethod
+    def get_json(key: str, default=None):
+        import json
+        row = ModuleSetting.query.filter_by(key=key).first()
+        if not row or not row.value:
+            return default
+        try:
+            return json.loads(row.value)
+        except Exception:
+            return default
+
+    @staticmethod
+    def set_json(key: str, value) -> None:
+        import json
+        row = ModuleSetting.query.filter_by(key=key).first() or ModuleSetting(key=key)
+        row.value = json.dumps(value, ensure_ascii=False)
+        db.session.add(row); db.session.commit()
+
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class RolePermission(db.Model):

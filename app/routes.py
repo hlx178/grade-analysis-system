@@ -194,6 +194,29 @@ def import_page():
 
 @main_bp.route("/summary")
 @login_required
+
+# 设置：学号年份推断规则（管理员）
+@main_bp.route('/settings/student_id_rule', methods=['GET','POST'])
+@login_required
+def student_id_rule_page():
+    if current_user.role != 'admin':
+        flash('仅管理员可访问', 'danger');
+        return redirect(url_for('main.dashboard'))
+    from app.models import ModuleSetting
+    import json
+    key = 'student_id_year_rule'
+    if request.method == 'POST':
+        text = request.form.get('rule_json') or ''
+        try:
+            val = json.loads(text)
+        except Exception as e:
+            flash(f'JSON 解析失败: {e}', 'danger')
+            return render_template('student_id_rule.html', rule_json=text)
+        ModuleSetting.set_json(key, val)
+        flash('规则已保存', 'success')
+    cur = ModuleSetting.get_json(key, default={'map': {'7':0, '8':-1, '9':-2}})
+    return render_template('student_id_rule.html', rule_json=json.dumps(cur, ensure_ascii=False, indent=2))
+
 def summary_page():
     return render_template("summary.html")
 
@@ -745,15 +768,20 @@ def api_import_grades():
         def _infer_entry_year(class_name: str) -> int:
             import re, datetime
             year = datetime.datetime.now().year
-            m = re.search(r'(\d{2})', class_name or '')
+            # 先读取配置：首位数字到偏移的映射（默认 {'7':0,'8':-1,'9':-2}）
+            try:
+                from app.models import ModuleSetting
+                cfg = ModuleSetting.get_json('student_id_year_rule', default={'map': {'7':0,'8':-1,'9':-2}})
+                mapping = (cfg or {}).get('map', {})
+            except Exception:
+                mapping = {'7':0,'8':-1,'9':-2}
+            # 从班级名中取首个数字字符
+            m = re.search(r'([0-9])', class_name or '')
             if m:
-                code = m.group(1)
-                if code == '81':
-                    return year - 1
-                if code == '91':
-                    return year - 2
-                if code == '71':
-                    return year
+                d = m.group(1)
+                offset = mapping.get(d)
+                if isinstance(offset, int):
+                    return year + int(offset)
             return year
 
         def _gen_sid(class_name: str) -> str:

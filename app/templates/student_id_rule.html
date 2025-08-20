@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}学号年份推断规则{% endblock %}
+{% block content %}
+<h3>学号年份推断规则</h3>
+<p class="text-muted">配置规则：根据“班级名称中的首位数字”映射到“入学年份与当前年的偏移”。示例：{"map": {"7": 0, "8": -1, "9": -2}}</p>
+<form method="post">
+  <div class="mb-3">
+    <label class="form-label">规则 JSON</label>
+    <textarea class="form-control" name="rule_json" rows="10">{{ rule_json }}</textarea>
+  </div>
+  <button class="btn btn-primary" type="submit">保存</button>
+</form>
+{% endblock %}
+
