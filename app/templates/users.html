@@ -57,9 +57,9 @@
 <table class="table table-bordered" id="userTable">
   <thead>
     <tr>
+      <th><input type="checkbox" onclick="toggleAll(this)"></th>
       <th>ID</th>
       <th>用户名</th>
-      <th>邮箱</th>
       <th>角色</th>
       <th>可见年级</th>
       <th>可见班级</th>
@@ -139,7 +139,6 @@ async function loadUsers(page=1){
       <td><input type="checkbox" class="rowcb"></td>
       <td>${u.id}</td>
       <td>${u.username}</td>
-      <td>${u.email}</td>
       <td>
         <select class="form-select form-select-sm role">
           <option value="admin" ${u.role==='admin'?'selected':''}>admin</option>

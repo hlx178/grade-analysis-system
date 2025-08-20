@@ -72,9 +72,14 @@
       <span class="text-muted">仅管理员可见</span>
       <button class="btn btn-outline-secondary btn-sm" onclick="loadUploadList()">刷新</button>
     </div>
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div>
+        <button class="btn btn-outline-danger btn-sm" onclick="batchDeleteSelected()">批量删除所选</button>
+      </div>
+    </div>
     <div class="table-responsive">
       <table class="table table-sm" id="uploadTable">
-        <thead><tr><th>文件ID</th><th>大小</th><th>上传时间</th><th>操作</th></tr></thead>
+        <thead><tr><th><input type=\"checkbox\" onclick=\"toggleAllUploads(this)\"></th><th>文件ID</th><th>大小</th><th>上传时间</th><th>操作</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -185,7 +190,7 @@ async function loadUploadList(){
     (data.items||[]).forEach(it => {
       const tr = document.createElement('tr');
       const dt = new Date(it.mtime*1000);
-      tr.innerHTML = `<td>${it.file_id}</td><td>${(it.size/1024).toFixed(1)} KB</td><td>${dt.toLocaleString()}</td>`;
+      tr.innerHTML = `<td><input type=\"checkbox\" class=\"upload-cb\" value=\"${it.file_id}\"></td><td>${it.file_id}</td><td>${(it.size/1024).toFixed(1)} KB</td><td>${dt.toLocaleString()}</td>`;
       const tdOp = document.createElement('td');
       const delBtn = document.createElement('button'); delBtn.className='btn btn-sm btn-outline-danger'; delBtn.textContent='删除';
       delBtn.onclick = async ()=>{
@@ -198,6 +203,19 @@ async function loadUploadList(){
       tdOp.appendChild(delBtn); tr.appendChild(tdOp); tb.appendChild(tr);
     });
   } catch(e) { console.warn('load uploads failed', e); }
+}
+
+function toggleAllUploads(cb){
+  document.querySelectorAll('#uploadTable .upload-cb').forEach(x=> x.checked = cb.checked);
+}
+async function batchDeleteSelected(){
+  const ids = Array.from(document.querySelectorAll('#uploadTable .upload-cb:checked')).map(x=>x.value);
+  if (!ids.length){ alert('请选择文件'); return; }
+  if (!confirm('确认删除选中的 ' + ids.length + ' 个文件？')) return;
+  const r = await fetch('/api/import/files/batch-delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ file_ids: ids }) });
+  const d = await r.json();
+  if (r.ok){ loadUploadList(); }
+  else { alert(d.error||'批量删除失败'); }
 }
 // 页面加载尝试拉取一次列表
 loadUploadList();

@@ -883,6 +883,27 @@ def api_import_files():
     items.sort(key=lambda x: x['mtime'], reverse=True)
     return jsonify({'items': items})
 
+@api_bp.route('/import/files/batch-delete', methods=['POST'])
+@login_required
+def api_import_files_batch_delete():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True) or {}
+    ids = data.get('file_ids') or []
+    if not isinstance(ids, list):
+        return jsonify({'error': 'file_ids must be list'}), 400
+    upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    deleted = 0; not_found = []
+    for fid in ids:
+        p = os.path.join(upload_dir, f"{fid}.xlsx")
+        if os.path.exists(p):
+            try: os.remove(p); deleted += 1
+            except Exception: pass
+        else:
+            not_found.append(fid)
+    return jsonify({'deleted': deleted, 'not_found': not_found})
+
+
 @api_bp.route('/import/files/<file_id>', methods=['DELETE'])
 @login_required
 def api_import_file_delete(file_id):
@@ -1191,11 +1212,7 @@ def api_import_grades():
     db.session.commit()
 
     # 导入完成后可清理临时文件
-    try:
-        os.remove(file_path)
-    except Exception:
-            pass
-
+    # 保留上传文件，便于在“已上传文件管理”中查看/二次导入/批量删除
     return jsonify({"message": "Import finished", "created": created, "updated": updated})
 
 # 导入: 学生主数据（可选自动创建用户账号）
@@ -1264,10 +1281,7 @@ def api_import_students():
                 users_created += 1
 
     db.session.commit()
-    try:
-        os.remove(file_path)
-    except Exception:
-        pass
+    # 保留上传文件，便于在“已上传文件管理”中查看/二次导入/批量删除
     return jsonify({"message": "Import finished", "students_created": created, "students_updated": updated, "users_created": users_created})
 
 
