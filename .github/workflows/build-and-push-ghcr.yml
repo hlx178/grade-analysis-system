@@ -24,6 +24,11 @@ concurrency:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      GHCR_ADMIN_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,11 +47,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: Set image tag by UTC date
         run: echo "IMAGE_TAG=$(date -u +'%Y%m%d%H%M%S')" >> $GITHUB_ENV
@@ -64,7 +69,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push to Docker Hub
-        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -77,12 +82,12 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Make GHCR package public (if token provided)
-        if: ${{ secrets.GHCR_ADMIN_TOKEN != '' }}
+        if: ${{ env.GHCR_ADMIN_TOKEN != '' }}
         continue-on-error: true
         run: |
           curl -L -X PATCH \
             -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.GHCR_ADMIN_TOKEN }}" \
+            -H "Authorization: Bearer $GHCR_ADMIN_TOKEN" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             https://api.github.com/user/packages/container/grade-analysis/visibility \
             -d '{"visibility":"public"}'
