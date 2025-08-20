@@ -849,9 +849,10 @@ def api_import_grades():
             c = c.replace('（','(').replace('）',')')
             return c
         alias = {
-            '学生姓名':'姓名', '名字':'姓名', '名称':'姓名',
+            '学生姓名':'姓名', '名字':'姓名', '名称':'姓名', '学生名称':'姓名',
             '班级名称':'班级', '班级名':'班级', '班级(名称)':'班级',
             '课程代号':'课程代码', '科目代码':'课程代码', '科目名称':'课程名称',
+            '学籍号':'学号','学生编号':'学号','学生号':'学号','编号':'学号','考生号':'学号','考号':'学号','准考证号':'学号',
             '语文成绩':'语文','数学成绩':'数学','英语成绩':'英语','科学成绩':'科学','社会成绩':'社会','道法成绩':'道法',
             '语文分':'语文','数学分':'数学','英语分':'英语','科学分':'科学','社会分':'社会','道法分':'道法',
         }
@@ -869,15 +870,20 @@ def api_import_grades():
     except Exception:
         pass
 
-    # 期望列（模板方式）：学号、姓名、班级、语文、数学、英语、科学、社会、道法（其他信息在导入时选择）
+    # 期望列（模板方式）：支持没有“学号”，其余列齐全时自动生成学号
+    template_base_cols = ["姓名", "班级", "语文", "数学", "英语", "科学", "社会", "道法"]
     # 兼容旧方式（含 课程代码/课程名称/成绩）
-    template_cols = ["学号", "姓名", "班级", "语文", "数学", "英语", "科学", "社会", "道法"]
     legacy_required_cols = ["学号", "姓名", "班级", "课程代码", "课程名称", "成绩"]
 
     # 判断模板方式或旧方式（自动识别后重试）
-    is_template = all(col in df.columns for col in template_cols)
+    has_sid = ("学号" in df.columns)
+    is_template = all(col in df.columns for col in template_base_cols)
+    if is_template and not has_sid:
+        # 自动补充 学号 列，后续导入逻辑会在需要时生成
+        df["学号"] = None
+
     if not is_template:
-        # 非模板方式则要求旧字段存在
+        # 非模板方式则要求旧字段存在（严格检查）
         for col in legacy_required_cols:
             if col not in df.columns:
                 return jsonify({"error": f"Missing required column: {col}"}), 400
