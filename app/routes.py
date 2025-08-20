@@ -870,14 +870,16 @@ def api_import_grades():
     except Exception:
         pass
 
-    # 期望列（模板方式）：支持没有“学号”，其余列齐全时自动生成学号
-    template_base_cols = ["姓名", "班级", "语文", "数学", "英语", "科学", "社会", "道法"]
+    # 期望列（模板方式）：姓名、班级 必须 + 至少一门学科列；学号可缺省
+    subjects_all = ["语文","数学","英语","科学","社会","道法"]
+    must_cols = ["姓名", "班级"]
     # 兼容旧方式（含 课程代码/课程名称/成绩）
     legacy_required_cols = ["学号", "姓名", "班级", "课程代码", "课程名称", "成绩"]
 
     # 判断模板方式或旧方式（自动识别后重试）
     has_sid = ("学号" in df.columns)
-    is_template = all(col in df.columns for col in template_base_cols)
+    has_subject = any(col in df.columns for col in subjects_all)
+    is_template = all(col in df.columns for col in must_cols) and has_subject
     if is_template and not has_sid:
         # 自动补充 学号 列，后续导入逻辑会在需要时生成
         df["学号"] = None
