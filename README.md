@@ -189,7 +189,7 @@ GitHub Actions 会在每次推送时自动运行 lint 和测试。你可以在�
 # echo $GH_PAT | docker login ghcr.io -u <your_github_username> --password-stdin
 
 # 拉取
-docker pull ghcr.io/hlx178/grade-analysis-system:latest
+docker pull ghcr.io/hlx178/grade-analysis:latest
 ```
 
 - 运行容器：
@@ -200,17 +200,17 @@ docker run --name gas \
   -e FLASK_CONFIG=production \
   -v $(pwd)/uploads:/app/uploads \
   -v $(pwd)/exports:/app/exports \
-  ghcr.io/hlx178/grade-analysis-system:latest
+  ghcr.io/hlx178/grade-analysis:latest
 ```
 
-- 初始化数据库与管理员（可进入容器执行）：
+- 初始化数据库与管理员（脚本法，容器内执行 Python 脚本）：
 
 ```bash
 # 初始化数据库
-docker exec -it gas flask init-db
+# 若镜像未包含 Flask CLI，可使用我们提供的脚本法（见下文）；或在容器内运行 Python 脚本进行初始化
 
 # 创建管理员
-docker exec -it gas flask create-admin
+# 参见下面“初始化脚本法”示例
 ```
 
 - 常用环境变量：
@@ -226,18 +226,18 @@ docker exec -it gas flask create-admin
 version: '3.9'
 services:
   app:
-    image: ghcr.io/hlx178/grade-analysis-system:latest
+    image: ghcr.io/hlx178/grade-analysis:latest
     container_name: gas
     ports:
       - "8000:8000"
     environment:
-      - FLASK_CONFIG=production
+      - FLASK_CONFIG=production\n      - DATABASE_URL=sqlite:////app/data/grade_analysis.db
       - EXPORT_RETENTION_DAYS=7
       - EXPORT_MAX_CONCURRENT_PER_USER=2
       - DOWNLOAD_LINK_TTL_SECONDS=3600
     volumes:
       - ./uploads:/app/uploads
-      - ./exports:/app/exports
+      - ./exports:/app/exports\n      - ./data:/app/data
     restart: unless-stopped
 - 健康检查
   - /health：应用进程存活探针（200 ok）
@@ -247,7 +247,7 @@ services:
 
 - 访问 http://localhost:8000
 
-说明：镜像由 GitHub Actions 在 push 到 main 时自动构建并推送到 GHCR（ghcr.io/hlx178/grade-analysis-system:latest）。首次出现于 Packages 页面时，可将可见性设为 Public 以便公开拉取。
+说明：镜像由 GitHub Actions 在 push 到 main 时自动构建并推送到 GHCR（ghcr.io/hlx178/grade-analysis:latest）。首次出现于 Packages 页面时，可将可见性设为 Public 以便公开拉取。
 
 ## 发布版本指南（打 tag）
 
