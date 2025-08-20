@@ -112,6 +112,11 @@ function totalSpan(list, opts){
   const val = v => (v === undefined || v === null) ? '' : v;
   const [score, letter, classRank, gradeRank] = list;
   const parts = [];
+  if (showScores) parts.push(val(score));
+  if (showLetters) parts.push(val(letter));
+  if (showTotalRanks) parts.push(val(classRank), val(gradeRank));
+  return parts.join(' / ');
+}
 function buildHeader(opts){
   const head = document.getElementById('aggHead');
   head.innerHTML = '';
@@ -136,12 +141,6 @@ function buildHeader(opts){
       ...(opts.showTotalRanks?['班排','年排']:[])
     ].join('/') + '）');
   }
-}
-
-  if (showScores) parts.push(val(score));
-  if (showLetters) parts.push(val(letter));
-  if (showTotalRanks) parts.push(val(classRank), val(gradeRank));
-  return parts.join(' / ');
 }
 function colorize(td){
   if (!td.textContent) return;

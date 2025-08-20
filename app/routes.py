@@ -829,12 +829,50 @@ def api_import_grades():
     except Exception as e:
         return jsonify({"error": f"Failed to read sheet: {e}"}), 400
 
+    # 标准化与自动识别表头/别名
+    try:
+        import re
+        # 若第一行看起来是表头（包含“学号/姓名/班级”等），则将其作为列名
+        if len(df) > 0:
+            first_row = [str(x).strip() for x in list(df.iloc[0].values)]
+            if any(x in first_row for x in ["学号","姓名","班级","课程代码","课程名称","成绩"]):
+                df.columns = first_row
+                df = df.iloc[1:].reset_index(drop=True)
+        # 去除全空列与全空行
+        df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
+        # 清洗列名（去空格/全角空格/括号内“分/成绩”等）并映射常见别名
+        def _norm_col(c: str) -> str:
+            c = str(c or '').strip()
+            c = c.replace('\u3000','').replace(' ','')
+            c = c.replace('（','(').replace('）',')')
+            return c
+        alias = {
+            '学生姓名':'姓名', '名字':'姓名', '名称':'姓名',
+            '班级名称':'班级', '班级名':'班级', '班级(名称)':'班级',
+            '课程代号':'课程代码', '科目代码':'课程代码', '科目名称':'课程名称',
+            '语文成绩':'语文','数学成绩':'数学','英语成绩':'英语','科学成绩':'科学','社会成绩':'社会','道法成绩':'道法',
+            '语文分':'语文','数学分':'数学','英语分':'英语','科学分':'科学','社会分':'社会','道法分':'道法',
+        }
+        # 映射列名
+        new_cols = []
+        for col in list(df.columns):
+            raw = _norm_col(col)
+            # 去掉如 “xxx(原始)” 后缀
+            raw = re.sub(r'^(.*?)(\(|（).*(\)|）)$', r'\1', raw)
+            raw = alias.get(raw, raw)
+            # 将如 “语文(分)” -> 语文
+            raw = re.sub(r'^(语文|数学|英语|科学|社会|道法).*(分|成绩)?$', r'\1', raw)
+            new_cols.append(raw)
+        df.columns = new_cols
+    except Exception:
+        pass
+
     # 期望列（模板方式）：学号、姓名、班级、语文、数学、英语、科学、社会、道法（其他信息在导入时选择）
     # 兼容旧方式（含 课程代码/课程名称/成绩）
     template_cols = ["学号", "姓名", "班级", "语文", "数学", "英语", "科学", "社会", "道法"]
     legacy_required_cols = ["学号", "姓名", "班级", "课程代码", "课程名称", "成绩"]
 
-    # 判断模板方式或旧方式
+    # 判断模板方式或旧方式（自动识别后重试）
     is_template = all(col in df.columns for col in template_cols)
     if not is_template:
         # 非模板方式则要求旧字段存在
