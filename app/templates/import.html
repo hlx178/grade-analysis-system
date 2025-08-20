@@ -131,6 +131,20 @@ async function importStudents(){
   const autoCreate = document.getElementById('autoCreateUsers').checked;
   const defaultPwd = document.getElementById('defaultPassword').value || '123456';
   const res = await fetch('/api/import/students', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_id: fileId, sheet_name: sheet, auto_create_users: autoCreate, default_password: defaultPwd })
+  });
+  const data = await res.json();
+  const result = document.getElementById('resultStudents');
+  if (res.ok) {
+    result.innerHTML = `<div class=\"alert alert-success\">导入完成：新增学生 ${data.students_created} 条，更新 ${data.students_updated} 条；新增用户 ${data.users_created} 个。</div>`;
+    loadUploadList();
+  } else {
+    result.innerHTML = `<div class=\"alert alert-danger\">导入失败：${data.error || '未知错误'}</div>`;
+  }
+}
+
 async function loadUploadList(){
   try {
     const res = await fetch('/api/import/files');
@@ -156,20 +170,6 @@ async function loadUploadList(){
 }
 // 页面加载尝试拉取一次列表
 loadUploadList();
-
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ file_id: fileId, sheet_name: sheet, auto_create_users: autoCreate, default_password: defaultPwd })
-  });
-  const data = await res.json();
-  const result = document.getElementById('resultStudents');
-  if (res.ok) {
-    result.innerHTML = `<div class="alert alert-success">导入完成：新增学生 ${data.students_created} 条，更新 ${data.students_updated} 条；新增用户 ${data.users_created} 个。</div>`;
-    loadUploadList();
-  } else {
-    result.innerHTML = `<div class="alert alert-danger">导入失败：${data.error || '未知错误'}</div>`;
-  }
-}
 
 </script>
 {% endblock %}
