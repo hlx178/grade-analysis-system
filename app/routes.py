@@ -895,27 +895,10 @@ def api_import_grades():
     if is_template:
         # 处理考试类型与考试方案（从接口参数接收）
         exam_type = normalize_exam_type((data.get("exam_type") or "regular").strip())
-        # 优先使用预览文件的文件名作为考试名称
+        # 优先使用预览文件的文件名作为考试名称（页面可覆盖；未填用文件名；不从表内读取）
         try:
             import json
             with open(file_path + '.json', 'r', encoding='utf-8') as mf:
-        # 若表内提供考试名称/类型列且为单一值，优先使用
-        try:
-            # 根据你的需求，不再从表内读取考试名称/类型，统一以页面输入为准；若名称未填，用文件名
-            _exam_name_col = None
-            _exam_type_col = None
-            _exam_name_in_sheet = None
-            if _exam_name_col:
-                vals = [str(v).strip() for v in df[_exam_name_col].dropna().unique().tolist() if str(v).strip()]
-                if len(vals)==1: _exam_name_in_sheet = vals[0]
-            _exam_type_in_sheet = None
-            if _exam_type_col:
-                vals = [str(v).strip() for v in df[_exam_type_col].dropna().unique().tolist() if str(v).strip()]
-                if len(vals)==1: _exam_type_in_sheet = vals[0]
-        except Exception:
-            _exam_name_in_sheet = None
-            _exam_type_in_sheet = None
-
                 meta = json.load(mf)
                 exam_name = (meta.get('exam_name') or '').strip() or (data.get("exam_name") or "default").strip() or "default"
         except Exception:
