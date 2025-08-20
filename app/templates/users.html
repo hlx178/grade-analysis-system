@@ -25,11 +25,11 @@
       <button class="btn btn-outline-secondary" onclick="document.getElementById('importUsersFile').click()">导入CSV</button>
     </div>
   </div>
-      <div class="ms-2 input-group input-group-sm" style="width: 340px;">
-        <span class="input-group-text">批量重置密码</span>
-        <input id="batchPwd" class="form-control" placeholder="输入新密码">
-        <button class="btn btn-outline-danger" onclick="batchResetPasswords()">执行</button>
-      </div>
+  <div class="ms-2 input-group input-group-sm" style="width: 340px;">
+    <span class="input-group-text">批量重置密码</span>
+    <input id="batchPwdInput" class="form-control" placeholder="输入新密码">
+    <button class="btn btn-outline-danger" onclick="batchResetPasswords()">执行</button>
+  </div>
 
 </div>
 
@@ -352,7 +352,7 @@ async function resetPassword(id, btn){
   }finally{ btn.disabled = false; }
 }
 async function batchResetPasswords(){
-  const pwd = (document.getElementById('batchPwd')?.value || '').trim();
+  const pwd = (document.getElementById('batchPwdInput')?.value || '').trim();
   if (!pwd){ alert('请在输入框填写批量重置的新密码'); return; }
   const ids = selectedIds();
   if (!ids.length){ alert('请选择行'); return; }

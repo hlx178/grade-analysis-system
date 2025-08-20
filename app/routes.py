@@ -201,6 +201,16 @@ def login():
                     user = User(username=username, email=f"{username}@example.com", role='student')
                     user.set_password('123456')
                     db.session.add(user); db.session.commit()
+            # 方案A：学生登录一致性校验（当用户名为8位学号时要求姓名一致）
+            name_input = (request.form.get('name') or '').strip()
+            if user and user.role == 'student':
+                import re as _re
+                if _re.fullmatch(r"\d{8}", username):
+                    stu = Student.query.filter_by(student_id=username).first()
+                    if stu and name_input and (stu.name.strip() != name_input):
+                        flash("姓名与学号不一致，请核对后再试", "danger")
+                        return render_template("login.html"), 400
+
         if user and user.check_password(password):
             login_user(user)
             flash("登录成功", "success")
@@ -1118,7 +1128,14 @@ def api_import_grades():
                 errors.append(f"第{idx}行：至少填写一门学科成绩")
                 continue
 
-            sid_raw = (str(row.get("学号")).strip() if pd.notna(row.get("学号")) else "")
+            # 规范化学号（防止 Excel 将学号当数字导致 202580040.0）
+            sid_raw = row.get("学号")
+            if pd.notna(sid_raw):
+                sid_raw = str(sid_raw).strip()
+                if sid_raw.endswith('.0'):
+                    sid_raw = sid_raw[:-2]
+            else:
+                sid_raw = ""
             student = None
             if sid_raw:
                 student = Student.query.filter_by(student_id=sid_raw).first()
@@ -1273,7 +1290,10 @@ def api_import_students():
     updated = 0
     users_created = 0
     for _, row in df.iterrows():
-        sid = str(row["学号"]).strip()
+        # 规范化学号，避免 202580040.0
+        sid_raw = row["学号"]
+        sid = str(sid_raw).strip()
+        if sid.endswith('.0'): sid = sid[:-2]
         if not re.fullmatch(r"\d{8}", sid):
             # 跳过非法学号
             continue
