@@ -34,6 +34,8 @@
         </div>
       </div>
     </div>
+    <div id="inspect" class="alert alert-info" style="display:none"></div>
+
     <div id="result" class="mt-3"></div>
   </div>
 </div>
@@ -102,9 +104,38 @@ async function previewSheets(){
     sel.appendChild(opt);
   });
   document.getElementById('sheetSelectWrap').style.display = 'block';
-  document.getElementById('importBtn').disabled = false;
-  document.getElementById('importStudentsBtn').disabled = false;
+  // 预览后进行一次检查
+  await inspectSelectedSheet();
 }
+
+async function inspectSelectedSheet(){
+  const sel = document.getElementById('sheetSelect');
+  const sheet = sel.value;
+  const box = document.getElementById('inspect');
+  box.style.display = 'none'; box.className='alert alert-info'; box.innerHTML='';
+  if (!fileId || !sheet) return;
+  const res = await fetch('/api/import/preview/inspect', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ file_id: fileId, sheet_name: sheet })
+  });
+  const data = await res.json();
+  if (!res.ok) { box.style.display='block'; box.className='alert alert-danger'; box.textContent = data.error || '检查失败'; return; }
+  const cols = (data.columns_normalized||[]).join('、') || '(空)';
+  const subjects = (data.subjects_present||[]).join('、') || '(无)';
+  const mode = data.mode;
+  const sample = (data.sample_rows||[]).map((r,i)=> `${i+1}) ` + JSON.stringify(r)).join('<br/>');
+  let html = `<div><strong>识别列：</strong>${cols}</div>` +
+             `<div><strong>识别模式：</strong>${mode==='template'?'新模板':(mode==='legacy'?'旧模式':'未知')}</div>` +
+             `<div><strong>检测到的学科列：</strong>${subjects}</div>` +
+             (sample?`<div class=\"mt-2\"><strong>样例(最多3行)：</strong><br/>${sample}</div>`:'');
+  box.innerHTML = html; box.style.display='block';
+  const ok = !!data.can_import;
+  document.getElementById('importBtn').disabled = !ok;
+  document.getElementById('importStudentsBtn').disabled = !ok;
+}
+
+// 当用户切换工作表时，自动重检
+ document.getElementById('sheetSelect').addEventListener('change', inspectSelectedSheet);
 
 async function importGrades(){
   const sheet = document.getElementById('sheetSelect').value;

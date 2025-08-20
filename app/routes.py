@@ -774,6 +774,95 @@ def api_import_preview():
 
     return jsonify({"file_id": file_id, "sheets": sheets})
 
+# 导入: 预览检查（列识别与可导入性判断）
+@api_bp.route('/import/preview/inspect', methods=['POST'])
+@login_required
+def api_import_preview_inspect():
+    data = request.get_json(force=True)
+    file_id = data.get('file_id')
+    sheet_name = data.get('sheet_name')
+    if not file_id or not sheet_name:
+        return jsonify({"error": "file_id and sheet_name are required"}), 400
+    upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    file_path = os.path.join(upload_dir, f"{file_id}.xlsx")
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Uploaded file not found or expired"}), 400
+
+    try:
+        df = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl')
+    except Exception as e:
+        return jsonify({"error": f"Failed to read sheet: {e}"}), 400
+
+    header_row_used = False
+    cols_original = [str(c) for c in list(df.columns)]
+    try:
+        import re
+        # 若第一行看起来是表头
+        if len(df) > 0:
+            first_row = [str(x).strip() for x in list(df.iloc[0].values)]
+            if any(x in first_row for x in ["学号","姓名","班级","课程代码","课程名称","成绩"]):
+                df.columns = first_row
+                df = df.iloc[1:].reset_index(drop=True)
+                header_row_used = True
+        df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
+        def _norm_col(c: str) -> str:
+            c = str(c or '').strip()
+            c = c.replace('\u3000','').replace(' ','').replace('\t','')
+            c = c.replace('（','(').replace('）',')')
+            return c
+        alias = {
+            '学生姓名':'姓名','学生名称':'姓名','名字':'姓名','名称':'姓名',
+            '班级名称':'班级','班级名':'班级','班级(名称)':'班级',
+            '课程代号':'课程代码','科目代码':'课程代码','科目名称':'课程名称',
+            '学籍号':'学号','学生编号':'学号','学生号':'学号','编号':'学号','考生号':'学号','考号':'学号','准考证号':'学号',
+            '语文成绩':'语文','数学成绩':'数学','英语成绩':'英语','科学成绩':'科学','社会成绩':'社会','道法成绩':'道法',
+            '语文分':'语文','数学分':'数学','英语分':'英语','科学分':'科学','社会分':'社会','道法分':'道法',
+        }
+        cols_norm = []
+        for col in list(df.columns):
+            raw = _norm_col(col)
+            raw = re.sub(r'^(.*?)(\(|（).*(\)|）)$', r'\1', raw)
+            raw = alias.get(raw, raw)
+            raw = re.sub(r'^(语文|数学|英语|科学|社会|道法).*(分|成绩)?$', r'\1', raw)
+            cols_norm.append(raw)
+        df.columns = cols_norm
+    except Exception:
+        cols_norm = [str(c) for c in list(df.columns)]
+
+    subjects_all = ["语文","数学","英语","科学","社会","道法"]
+    subjects_present = [c for c in subjects_all if c in df.columns]
+    is_template = ("姓名" in df.columns and "班级" in df.columns and len(subjects_present) > 0)
+    legacy_required = ["学号","姓名","班级","课程代码","课程名称","成绩"]
+    legacy_missing = [c for c in legacy_required if c not in df.columns]
+    is_legacy = len(legacy_missing) == 0
+    mode = 'template' if is_template else ('legacy' if is_legacy else 'unknown')
+    can_import = is_template or is_legacy
+
+    # 样例行
+    sample = []
+    try:
+        sample = df.head(3).fillna('').astype(str).to_dict(orient='records')
+    except Exception:
+        sample = []
+
+    report = {
+        'sheet': sheet_name,
+        'columns_original': cols_original,
+        'columns_normalized': df.columns.tolist(),
+        'header_row_used': header_row_used,
+        'mode': mode,
+        'subjects_present': subjects_present,
+        'legacy_missing': legacy_missing,
+        'can_import': can_import,
+        'sample_rows': sample,
+        'notes': [
+            '新模板：姓名+班级+至少一门学科列；学号可缺省，将自动生成',
+            '旧模式：学号/姓名/班级/课程代码/课程名称/成绩 必须齐全'
+        ]
+    }
+    return jsonify(report)
+
+
 # 导入文件管理：列表/删除
 @api_bp.route('/import/files', methods=['GET'])
 @login_required
