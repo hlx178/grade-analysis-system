@@ -96,6 +96,10 @@ try:
     _EXPORT_STARTED = Counter('gas_export_started_total', 'Export tasks started', ['mode'])
     _EXPORT_COMPLETED = Counter('gas_export_completed_total', 'Export tasks completed', ['mode'])
     _EXPORT_FAILED = Counter('gas_export_failed_total', 'Export tasks failed', ['mode'])
+    from prometheus_client import Gauge
+    _EXPORT_TASKS = Gauge('gas_export_tasks', 'Export tasks by status', ['status'])
+    _EXPORT_OLDEST_SECONDS = Gauge('gas_export_oldest_seconds', 'Oldest export task age (seconds) by status', ['status'])
+
 
     @main_bp.before_app_request
     def _metrics_req_start():
@@ -3151,8 +3155,45 @@ def api_export_task_download_signed():
         return jsonify({'error':'not found'}), 404
     if current_user.role != 'admin' and user_id != current_user.id:
         return jsonify({'error':'forbidden'}), 403
+    # 导出队列指标（简化版）：统计各状态数量与最老任务等待时长
+    try:
+        now = dt.datetime.utcnow()
+        def _emit(status):
+            q = ExportJob.query
+            if current_user.role != 'admin':
+                q = q.filter(ExportJob.user_id == current_user.id)
+            qs = q.filter(ExportJob.status == status)
+            _EXPORT_TASKS.labels(status).set(qs.count())
+            oldest = qs.order_by(ExportJob.created_at.asc()).first()
+            if oldest:
+                age = (now - (oldest.created_at or now)).total_seconds()
+                _EXPORT_OLDEST_SECONDS.labels(status).set(max(age, 0))
+        for st in ['pending','running','completed','failed']:
+            _emit(st)
+    except Exception:
+        pass
+
+        return jsonify({'error':'forbidden'}), 403
     if job.status != 'completed' or not job.file_path or not os.path.isfile(job.file_path):
         return jsonify({'error':'not ready'}), 400
+    # 导出队列指标（简化版）：统计各状态数量与最老任务等待时长
+    try:
+        now = dt.datetime.utcnow()
+        def _emit(status):
+            q = ExportJob.query
+            if current_user.role != 'admin':
+                q = q.filter(ExportJob.user_id == current_user.id)
+            qs = q.filter(ExportJob.status == status)
+            _EXPORT_TASKS.labels(status).set(qs.count())
+            oldest = qs.order_by(ExportJob.created_at.asc()).first()
+            if oldest:
+                age = (now - (oldest.created_at or now)).total_seconds()
+                _EXPORT_OLDEST_SECONDS.labels(status).set(max(age, 0))
+        for st in ['pending','running','completed','failed']:
+            _emit(st)
+    except Exception:
+        pass
+
     return send_file(job.file_path, as_attachment=True)
 
 @api_bp.route('/export/tasks/<task_id>/download', methods=['GET'])

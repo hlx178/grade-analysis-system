@@ -35,5 +35,22 @@ spec:
           annotations:
             summary: "Cache hit ratio is low"
             description: "Cache hit ratio below threshold."
+        - alert: GASExportFailureRateHigh
+          expr: (sum(rate(gas_export_failed_total[5m])) / clamp_min(sum(rate(gas_export_completed_total[5m])) + sum(rate(gas_export_failed_total[5m])), 1e-6)) > {{ .Values.monitoring.alerts.thresholds.export_failure_ratio | default 0.2 }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Export failure ratio is high"
+            description: "High export failure ratio over the last 10m."
+        - alert: GASExportQueueStuck
+          expr: max(gas_export_tasks{status="pending"} or 0) > 0 and max(gas_export_oldest_seconds{status="pending"}) > {{ .Values.monitoring.alerts.thresholds.export_pending_oldest_seconds | default 600 }}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Export queue stuck"
+            description: "Oldest pending export task exceeds threshold duration."
+
 {{- end }}
 

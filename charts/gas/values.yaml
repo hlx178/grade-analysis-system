@@ -33,6 +33,8 @@ monitoring:
       p99_latency_seconds: 1.5
       five_xx_rps: 0.1
       cache_hit_ratio_min: 0.5
+      export_failure_ratio: 0.2
+      export_pending_oldest_seconds: 600
 
 service:
   type: ClusterIP
