@@ -69,22 +69,6 @@
 {% endblock %}
 {% block scripts %}
 <script>
-async function submitStudent() {
-  const form = document.getElementById('studentForm');
-  const formData = new FormData(form);
-  const payload = Object.fromEntries(formData.entries());
-  const res = await fetch('/api/students', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  if (res.ok) {
-    location.reload();
-  } else {
-
-{% endblock %}
-{% block scripts %}
-<script>
 async function loadOptions(){
   const r = await fetch('/api/students/options'); if (!r.ok) return;
   const d = await r.json();
@@ -107,12 +91,23 @@ async function loadStudents(){
     tb.appendChild(tr);
   });
 }
-window.addEventListener('DOMContentLoaded', async ()=>{ await loadOptions(); await loadStudents(); });
-</script>
-{% endblock %}
-
+async function submitStudent() {
+  const form = document.getElementById('studentForm');
+  const formData = new FormData(form);
+  const payload = Object.fromEntries(formData.entries());
+  const res = await fetch('/api/students', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (res.ok) {
+    try{ bootstrap.Modal.getOrCreateInstance(document.getElementById('addStudentModal')).hide(); }catch(e){}
+    await loadStudents();
+    form.reset();
+  } else {
     alert('保存失败');
   }
 }
+window.addEventListener('DOMContentLoaded', async ()=>{ await loadOptions(); await loadStudents(); });
 </script>
 {% endblock %}
