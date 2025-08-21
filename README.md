@@ -212,6 +212,13 @@ docker run --name gas \
 - Prometheus 指标（/metrics）：
   - gas_cache_hits_total{bucket="summary_list|summary_count|analysis_stats"}
   - gas_cache_misses_total{bucket="..."}
+  - 导出复用缓存：
+    - 同步导出 /api/summary/export 在 scope=current_page 时复用 summary 列表缓存
+    - 异步导出 /export/tasks 内部在 scope=current_page 时同样复用缓存
+  - 指标补充：
+    - gas_cache_hits_total{bucket="export_list"}
+    - gas_cache_misses_total{bucket="export_list"}
+
 
 
   -v $(pwd)/uploads:/app/uploads \
