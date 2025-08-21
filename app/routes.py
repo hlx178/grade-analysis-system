@@ -859,7 +859,7 @@ def api_analysis_statistics():
             if rc is None:
                 rc = redis.from_url(rurl, decode_responses=True)
                 current_app._redis_cli = rc
-            ttl = int(current_app.config.get('SUMMARY_COUNT_TTL_SECONDS', 60))
+            ttl = int(current_app.config.get('ANALYSIS_TTL_SECONDS', 60))
             rc.setex(key, ttl, json.dumps(resp, ensure_ascii=False))
     except Exception:
         pass
@@ -2412,7 +2412,7 @@ def api_summary_list():
                 'page_size': page_size,
             }
             key = 'gas:sumlist:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-            ttl = int(current_app.config.get('SUMMARY_COUNT_TTL_SECONDS', 60))
+            ttl = int(current_app.config.get('SUMMARY_LIST_TTL_SECONDS', 60))
             rc.setex(key, ttl, json.dumps(resp, ensure_ascii=False))
     except Exception:
         pass

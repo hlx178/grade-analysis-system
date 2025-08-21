@@ -12,8 +12,10 @@ class Config:
     SLOW_QUERY_MS = int(os.environ.get("SLOW_QUERY_MS") or 500)
     DIAG_SQL_LOG = os.environ.get("DIAG_SQL_LOG", "false").lower() in ["1","true","on"]
 
-    # COUNT 微缓存
+    # COUNT 微缓存与其他缓存 TTL
     SUMMARY_COUNT_TTL_SECONDS = int(os.environ.get("SUMMARY_COUNT_TTL_SECONDS") or 60)
+    SUMMARY_LIST_TTL_SECONDS = int(os.environ.get("SUMMARY_LIST_TTL_SECONDS") or 60)
+    ANALYSIS_TTL_SECONDS = int(os.environ.get("ANALYSIS_TTL_SECONDS") or 60)
 
     # 导出目录
     EXPORT_DIR = os.environ.get("EXPORT_DIR") or "exports"
@@ -27,6 +29,10 @@ class Config:
     # 数据库配置
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL") or "sqlite:///grade_analysis.db"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # 可选：Redis 缓存配置
+    REDIS_URL = os.environ.get("REDIS_URL")  # e.g., redis://redis:6379/0
+
 
     # 会话配置
     PERMANENT_SESSION_LIFETIME = timedelta(hours=2)
