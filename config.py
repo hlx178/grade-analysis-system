@@ -8,9 +8,12 @@ class Config:
     # 基础配置
     SECRET_KEY = os.environ.get("SECRET_KEY") or "your-secret-key-here"
 
-    # 诊断与慢查询
+    # 诊断与慢查询 & 日志
     SLOW_QUERY_MS = int(os.environ.get("SLOW_QUERY_MS") or 500)
     DIAG_SQL_LOG = os.environ.get("DIAG_SQL_LOG", "false").lower() in ["1","true","on"]
+    LOG_FORMAT_JSON = os.environ.get("LOG_FORMAT_JSON", "true").lower() in ["1","true","on"]
+    LOG_LEVEL = os.environ.get("LOG_LEVEL") or "INFO"
+    LOG_ACCESS = os.environ.get("LOG_ACCESS", "true").lower() in ["1","true","on"]
 
     # COUNT 微缓存与其他缓存 TTL
     SUMMARY_COUNT_TTL_SECONDS = int(os.environ.get("SUMMARY_COUNT_TTL_SECONDS") or 60)

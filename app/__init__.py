@@ -35,9 +35,25 @@ def create_app(config_name="default"):
     app.register_blueprint(api_bp, url_prefix="/api")
     app.register_blueprint(health_bp)
 
-    # 慢查询日志（开发/生产均可开启）
-    import logging, time
+    # 结构化日志 & 慢请求
+    import logging, time, json, sys
     from flask import g, request
+
+    # 基础 logging 配置
+    root_level = getattr(logging, app.config.get('LOG_LEVEL','INFO').upper(), logging.INFO)
+    logging.basicConfig(level=root_level, stream=sys.stdout)
+
+    def _json_log(logger_name, level, **fields):
+        try:
+            if app.config.get('LOG_FORMAT_JSON', True):
+                fields.setdefault('ts', int(time.time()*1000))
+                fields.setdefault('app', 'gas')
+                msg = json.dumps(fields, ensure_ascii=False)
+            else:
+                msg = f"{fields}"
+            logging.getLogger(logger_name).log(level, msg)
+        except Exception:
+            pass
 
     @app.before_request
     def _start_timer():
@@ -49,10 +65,22 @@ def create_app(config_name="default"):
             t = (time.time() - getattr(g, '_t0', time.time())) * 1000
             threshold = app.config.get('SLOW_QUERY_MS', 500)
             if t >= threshold:
-                logging.getLogger('slow').warning(f"SLOW {int(t)}ms {request.method} {request.path}")
+                _json_log('slow', logging.WARNING,
+                          kind='slow', latency_ms=int(t), method=request.method, path=request.path, status=response.status_code)
         except Exception:
             pass
         return response
+
+    if app.config.get('LOG_ACCESS', True):
+        @app.after_request
+        def _access_log(response):
+            try:
+                t = (time.time() - getattr(g, '_t0', time.time())) * 1000
+                _json_log('access', logging.INFO,
+                          kind='access', latency_ms=int(t), method=request.method, path=request.path, status=response.status_code)
+            except Exception:
+                pass
+            return response
 
     # 用户加载回调
     @login_manager.user_loader
