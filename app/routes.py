@@ -746,6 +746,13 @@ def api_grades():
         )
         db.session.add(grade)
         db.session.commit()
+        # 成绩新增后 bump 缓存命名空间
+        try:
+            from flask import current_app
+            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+        except Exception:
+            pass
+
         return jsonify({"message": "Grade created", "id": grade.id}), 201
     # GET
     grades = Grade.query.all()
@@ -772,6 +779,21 @@ def api_grade_detail(grade_id):
     elif request.method == "PUT":
         data = request.get_json() or request.form
         if "score" in data and not validate_score(data["score"]):
+    if request.method == "PUT":
+        # 成绩更新后 bump 缓存命名空间
+        try:
+            from flask import current_app
+            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+        except Exception:
+            pass
+    if request.method == "DELETE":
+        # 成绩删除后 bump 缓存命名空间
+        try:
+            from flask import current_app
+            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+        except Exception:
+            pass
+
             return jsonify({"error": "Score must be between 0 and 100"}), 400
         grade.score = data.get("score", grade.score)
         grade.exam_type = data.get("exam_type", grade.exam_type)
@@ -825,7 +847,7 @@ def api_analysis_statistics():
                 current_app._redis_cli = rc
             # 构建 key（不含 grades 列表）
             key_payload = {
-                'ns': 'analysis_stats',
+                'ns': 'analysis_stats:' + (_cache_nsver(current_app,'analysis') or ''),
                 'course_id': course_id,
                 'class_name': class_name,
                 'grade_level': grade_level,
@@ -1337,6 +1359,14 @@ def api_import_grades():
                 student = Student(
                     student_id=str(row["学号"]).strip(),
                     name=str(row.get("姓名") or "").strip(),
+    # 成绩变更后失效 summary/analysis 缓存命名空间
+    try:
+        from flask import current_app
+        _cache_bump(current_app, 'summary')
+        _cache_bump(current_app, 'analysis')
+    except Exception:
+        pass
+
                     class_name=_cls,
                     grade_level=_gl,
                     email=None,
@@ -1360,6 +1390,14 @@ def api_import_grades():
 
             exam_type = normalize_exam_type(row.get("考试类型") or "regular")
             exam_name = str(row.get("考试名称") or "default").strip() or "default"
+
+    # 成绩变更后失效 summary/analysis 缓存命名空间
+    try:
+        from flask import current_app
+        _cache_bump(current_app, 'summary')
+        _cache_bump(current_app, 'analysis')
+    except Exception:
+        pass
 
             grade = Grade.query.filter_by(student_id=student.id, course_id=course.id).first()
             if not grade:
@@ -2146,6 +2184,38 @@ def api_grade_bands_preview():
     payload = request.get_json(force=True)
     items = payload.get("items") or []
     course_id = payload.get("course_id")
+def _cache_bump(current_app, ns: str):
+    try:
+        rurl = current_app.config.get('REDIS_URL')
+        if not rurl:
+            return
+        import redis, time
+        rc = getattr(current_app, '_redis_cli', None)
+        if rc is None:
+            rc = redis.from_url(rurl, decode_responses=True)
+            current_app._redis_cli = rc
+        key = f'gas:nsver:{ns}'
+        # use unix seconds to bump
+        rc.set(key, str(int(time.time())))
+    except Exception:
+        pass
+
+def _cache_nsver(current_app, ns: str) -> str:
+    try:
+        rurl = current_app.config.get('REDIS_URL')
+        if not rurl:
+            return ''
+        import redis
+        rc = getattr(current_app, '_redis_cli', None)
+        if rc is None:
+            rc = redis.from_url(rurl, decode_responses=True)
+            current_app._redis_cli = rc
+        key = f'gas:nsver:{ns}'
+        v = rc.get(key)
+        return v or ''
+    except Exception:
+        return ''
+
     class_name = payload.get("class_name")
     # 构造一个临时的规则索引
     tmp_rules = {}
@@ -2266,7 +2336,7 @@ def api_summary_list():
                 rc = redis.from_url(rurl, decode_responses=True)
                 current_app._redis_cli = rc
             key_payload = {
-                'ns': 'summary_count',
+                'ns': 'summary_count:' + (_cache_nsver(current_app,'summary') or ''),
                 'exam_names': sorted(exam_names),
                 'grade_levels': sorted(grade_levels),
                 'class_names': sorted(class_names),
@@ -2402,7 +2472,7 @@ def api_summary_list():
                 rc = redis.from_url(rurl, decode_responses=True)
                 current_app._redis_cli = rc
             key_payload = {
-                'ns': 'summary_list',
+                'ns': 'summary_list:' + (_cache_nsver(current_app,'summary') or ''),
                 'exam_names': sorted(exam_names),
                 'grade_levels': sorted(grade_levels),
                 'class_names': sorted(class_names),
@@ -4152,6 +4222,14 @@ def api_band_sets():
     # GET
     exam_name = request.args.get('exam_name') or 'default'
     sets = GradeBandSet.query.filter_by(exam_name=exam_name).order_by(GradeBandSet.version.desc()).all()
+    # 缓存命名空间：等级规则变更影响分析与汇总
+    try:
+        from flask import current_app
+        _cache_bump(current_app, 'analysis')
+        _cache_bump(current_app, 'summary')
+    except Exception:
+        pass
+
     return jsonify([
         { 'id': s.id, 'exam_name': s.exam_name, 'version': s.version, 'status': s.status, 'note': s.note, 'created_at': s.created_at.isoformat(), 'published_at': (s.published_at.isoformat() if s.published_at else None) }
         for s in sets
