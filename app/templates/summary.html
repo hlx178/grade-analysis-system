@@ -330,6 +330,13 @@ async function loadOptions(){
   fill('examName', d.exam_names);
   fill('gradeLevel', d.grade_levels);
   fill('className', d.class_names);
+  // 默认选中最近一次考试（最后一个），年级/班级全选
+  try{
+    const examSel = document.getElementById('examName');
+    if (examSel && examSel.options.length){ const last = examSel.options[examSel.options.length-1]; last.selected = true; }
+    const allSel = id => Array.from(document.getElementById(id).options).forEach(o=>o.selected=true);
+    allSel('gradeLevel'); allSel('className');
+  }catch(e){}
 }
 async function loadSummary(){
   const p = new URLSearchParams({
@@ -353,19 +360,6 @@ async function loadSummary(){
 window.addEventListener('DOMContentLoaded', async ()=>{ await loadOptions(); await loadSummary(); });
 </script>
 {% endblock %}
-
-    </tr>
-  </thead>
-  <tbody></tbody>
-</table>
-<div class="d-flex align-items-center gap-2">
-  <label class="form-label">每页</label>
-  <input id="pageSize" type="number" class="form-control" value="50" style="width:100px" onblur="gotoPage(1)">
-  <div id="pager" class="ms-2"></div>
-</div>
-{% endblock %}
-{% block scripts %}
-<script>
 function getPrefs(){
   return {
     letter: document.getElementById('colLetter').checked,
