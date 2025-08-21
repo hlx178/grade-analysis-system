@@ -2620,16 +2620,8 @@ def api_summary_prefs():
             'trend_chrono': False,
             'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True},
             'class_compare': {'only_meets': False, 'sort_by': 'avg', 'min_count': 0, 'export_only_meets': False}
-)
+        })
 
-
-@api_bp.route('/summary/export', methods=['GET'])
-@login_required
-def api_summary_export():
-    try:
-        _EXPORT_STARTED.labels('sync').inc()
-    except Exception:
-        pass
 
 
 @api_bp.route('/summary/export', methods=['GET'])
