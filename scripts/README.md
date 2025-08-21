@@ -1,3 +1,23 @@
+# Scripts
+
+## Dev stack (PG + Redis + App)
+
+- Start: `scripts/dev.ps1 up`
+- Stop: `scripts/dev.ps1 down`
+- Custom port: in PowerShell, set `$env:DEV_PORT='8010'` then run `scripts/dev.ps1 up`
+
+## SQLite -> PostgreSQL migration
+
+1. Ensure dev stack is up (`scripts/dev.ps1 up`)
+2. Put your SQLite file at `data/grade_analysis.db` or set env `SOURCE_SQLITE=...`
+3. Run migration inside app container:
+
+```
+docker compose -f docker-compose.dev.yml exec gas python scripts/migrate_sqlite_to_pg.py
+```
+
+This performs idempotent copy per table, respects FKs order, and adjusts sequences.
+
 # One-click local run for Grade Analysis System (Windows)
 
 PowerShell script to build and run the app in Docker with sensible volumes and an automatic health check.
