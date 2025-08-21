@@ -195,9 +195,29 @@ docker pull ghcr.io/hlx178/grade-analysis:latest
 - 运行容器：
 
 ```bash
+# SQLite 单容器快速跑（不依赖外部 PG/Redis）
 docker run --name gas \
   -p 8000:8000 \
   -e FLASK_CONFIG=production \
+  -e DATABASE_URL=sqlite:////app/data/grade_analysis.db \
+  -e ADMIN_INITIAL_PASSWORD=123456 \
+  -v $(pwd)/uploads:/app/uploads \
+  -v $(pwd)/exports:/app/exports \
+  -v $(pwd)/data:/app/data \
+  ghcr.io/hlx178/grade-analysis-system:latest
+
+# 连接外部 Postgres + Redis（示例）
+# export DATABASE_URL=postgresql+psycopg2://user:pass@host:5432/gas
+# export REDIS_URL=redis://host:6379/0
+# docker run --name gas -p 8000:8000 \
+#   -e FLASK_CONFIG=production \
+#   -e DATABASE_URL="$DATABASE_URL" \
+#   -e REDIS_URL="$REDIS_URL" \
+#   -e ADMIN_INITIAL_PASSWORD=123456 \
+#   -v $(pwd)/uploads:/app/uploads \
+#   -v $(pwd)/exports:/app/exports \
+#   ghcr.io/hlx178/grade-analysis-system:latest
+```
 
 ## 缓存与指标
 
@@ -220,11 +240,99 @@ docker run --name gas \
     - gas_cache_misses_total{bucket="export_list"}
 
 
+### Compose 变体对比与环境变量
 
-  -v $(pwd)/uploads:/app/uploads \
-  -v $(pwd)/exports:/app/exports \
-  ghcr.io/hlx178/grade-analysis:latest
+- dev（docker-compose.dev.yml）
+  - 适合本地开发：内置 PG + Redis + App 构建
+  - 可通过 `$env:DEV_PORT=8010` 或 `scripts/dev.ps1 -Port 8010` 指定端口
+  - 关键环境变量：
+    - DATABASE_URL=postgresql+psycopg2://gas:gas_pass@db:5432/gas
+    - REDIS_URL=redis://redis:6379/0
+    - SUMMARY_COUNT_TTL_SECONDS / SUMMARY_LIST_TTL_SECONDS / ANALYSIS_TTL_SECONDS
+- postgres（docker-compose.postgres.yml）
+  - 拉取已构建镜像，内置 PG + Redis
+  - 与 dev 相同的缓存变量已加入 environment
+- caddy / nginx（反代网关）
+  - 通过内置 Caddy 或 Nginx 反向代理到 App 容器
+  - 同样包含缓存 TTL 环境变量，确保行为一致
+
+> 生产建议：将上述变量配置到你的部署系统（K8s Deployment env 或 Ansible inventory），并明确 SECRET_KEY、ADMIN_INITIAL_PASSWORD、EXPORT_RETENTION_DAYS 等。
+
+### K8s 部署参考（片段）
+
+示例仅展示与缓存/就绪探针相关的关键位；请按需合并完整 Deployment/Service/Ingress。
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gas
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: gas }
+  template:
+    metadata:
+      labels: { app: gas }
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/hlx178/grade-analysis-system:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: FLASK_CONFIG
+              value: production
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: gas-secrets
+                  key: database_url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: gas-secrets
+                  key: redis_url
+            - name: SUMMARY_COUNT_TTL_SECONDS
+              value: "60"
+            - name: SUMMARY_LIST_TTL_SECONDS
+              value: "60"
+            - name: ANALYSIS_TTL_SECONDS
+              value: "60"
+            - name: EXPORT_RETENTION_DAYS
+              value: "7"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 2
 ```
+
+### 性能与调优建议
+
+- 缓存 TTL：
+  - 以 30–120 秒为宜；导入高峰期可适当降低 TTL，避免短期旧值
+  - 命名空间失效已接入（成绩/规则变更自动 bump），一般无需手动清理
+- Redis 连接：
+  - REDIS_URL 建议专用 DB（如 db=0），避免与其他应用冲突
+  - 部署高可用可用 Redis Sentinel/Cluster
+- Gunicorn：
+  - 进程/线程数按 CPU 与场景调优，如 `-w 2 -k gthread --threads 8`
+  - I/O 为主场景可适当增加线程数
+- Postgres：
+  - 对高并发 count 场景，考虑使用近似行数统计或物化统计表；当前我们已做微缓存
+- 指标观测：
+  - 关注 gas_http_requests_total、gas_http_request_duration_seconds
+  - 关注 gas_cache_hits_total / gas_cache_misses_total；命中率长期偏低则考虑延长 TTL 或增加缓存覆盖
 
 - 初始化数据库与管理员（脚本法，容器内执行 Python 脚本）：
 
