@@ -1,0 +1,39 @@
+{{- if .Values.monitoring.alerts.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "gas.fullname" . }}-rules
+  labels:
+    {{- with .Values.monitoring.alerts.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: gas.rules
+      rules:
+        - alert: GASHighP99Latency
+          expr: histogram_quantile(0.99, sum(rate(gas_http_request_duration_seconds_bucket[5m])) by (le, endpoint)) > {{ .Values.monitoring.alerts.thresholds.p99_latency_seconds }}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High p99 latency for GAS endpoints"
+            description: "p99 latency exceeds threshold."
+        - alert: GAS5xxRateHigh
+          expr: sum(rate(gas_http_requests_total{status=~"5.."}[5m])) by (endpoint) > {{ .Values.monitoring.alerts.thresholds.five_xx_rps }}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "5xx rate is high"
+            description: "HTTP 5xx responses per second exceeded threshold."
+        - alert: GASCacheHitRatioLow
+          expr: (sum(rate(gas_cache_hits_total[5m])) / clamp_min(sum(rate(gas_cache_hits_total[5m])) + sum(rate(gas_cache_misses_total[5m])), 1e-6)) < {{ .Values.monitoring.alerts.thresholds.cache_hit_ratio_min }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cache hit ratio is low"
+            description: "Cache hit ratio below threshold."
+{{- end }}
+

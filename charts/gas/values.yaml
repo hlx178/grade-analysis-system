@@ -19,6 +19,21 @@ extraEnv: {}
 extraVolumeMounts: []
 extraVolumes: []
 
+monitoring:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 5s
+    labels: {}
+  alerts:
+    enabled: false
+    labels: {}
+    annotations: {}
+    thresholds:
+      p99_latency_seconds: 1.5
+      five_xx_rps: 0.1
+      cache_hit_ratio_min: 0.5
+
 service:
   type: ClusterIP
   port: 80
