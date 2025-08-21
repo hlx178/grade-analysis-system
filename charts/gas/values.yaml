@@ -4,6 +4,20 @@ image:
   pullPolicy: IfNotPresent
 
 replicaCount: 2
+hpa:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+imagePullSecrets: []
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+extraEnv: {}
+extraVolumeMounts: []
+extraVolumes: []
 
 service:
   type: ClusterIP

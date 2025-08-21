@@ -19,7 +19,27 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "gas.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: app
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -31,6 +51,10 @@ spec:
             - name: {{ $k }}
               value: "{{ $v }}"
             {{- end }}
+            {{- range $k, $v in .Values.extraEnv }}
+            - name: {{ $k }}
+              value: "{{ $v }}"
+            {{- end }}
             {{- range $k, $v in .Values.app.secretEnv }}
             - name: {{ $k }}
               valueFrom:
@@ -38,6 +62,14 @@ spec:
                   name: {{ include "gas.fullname" $ }}-secrets
                   key: {{ $k | lower }}
             {{- end }}
+          volumeMounts:
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
           readinessProbe:
             httpGet:
               path: {{ .Values.readinessProbe.path }}
