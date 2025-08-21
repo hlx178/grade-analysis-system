@@ -30,3 +30,7 @@ scrape_configs:
       - target_label: __address__
         replacement: blackbox-exporter:9115
 
+  - job_name: 'gas_app'
+    static_configs:
+      - targets: ['app:8000']
+

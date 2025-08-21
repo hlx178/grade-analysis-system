@@ -1,0 +1,65 @@
+{
+  "title": "GAS Cache & HTTP",
+  "tags": ["gas", "cache", "http"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "HTTP Requests (rate)",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "sum(rate(gas_http_requests_total[5m])) by (method)", "legendFormat": "{{method}}"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "HTTP Duration (p50/p90/p99)",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "histogram_quantile(0.5, sum(rate(gas_http_request_duration_seconds_bucket[5m])) by (le, endpoint))", "legendFormat": "p50 {{endpoint}}"},
+        {"expr": "histogram_quantile(0.9, sum(rate(gas_http_request_duration_seconds_bucket[5m])) by (le, endpoint))", "legendFormat": "p90 {{endpoint}}"},
+        {"expr": "histogram_quantile(0.99, sum(rate(gas_http_request_duration_seconds_bucket[5m])) by (le, endpoint))", "legendFormat": "p99 {{endpoint}}"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Cache Hits (rate)",
+      "gridPos": {"x": 0, "y": 6, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "sum(rate(gas_cache_hits_total[5m])) by (bucket)", "legendFormat": "hit {{bucket}}"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Cache Misses (rate)",
+      "gridPos": {"x": 12, "y": 6, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "sum(rate(gas_cache_misses_total[5m])) by (bucket)", "legendFormat": "miss {{bucket}}"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Cache Hit Ratio (5m)",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "sum(rate(gas_cache_hits_total[5m])) / clamp_min(sum(rate(gas_cache_hits_total[5m])) + sum(rate(gas_cache_misses_total[5m])), 1e-6)", "legendFormat": "hit_ratio"}
+      ],
+      "yaxes": [
+        {"format": "percent"},
+        {"format": "short"}
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Top Endpoints by Req/s",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 6},
+      "targets": [
+        {"expr": "topk(10, sum(rate(gas_http_requests_total[5m])) by (endpoint))", "legendFormat": "{{endpoint}}"}
+      ]
+    }
+  ]
+}
+
