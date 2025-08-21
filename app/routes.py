@@ -22,6 +22,16 @@ def ready():
         db.session.execute('SELECT 1')
     except Exception:
         return {'status': 'not_ready', 'reason': 'db_unreachable'}, 503
+    # 1.5) Redis 探针（配置了 REDIS_URL 时）
+    try:
+        rurl = current_app.config.get('REDIS_URL')
+        if rurl:
+            import redis
+            rc = redis.from_url(rurl)
+            if rc.ping() is not True:
+                return {'status': 'not_ready', 'reason': 'redis_unreachable'}, 503
+    except Exception:
+        return {'status': 'not_ready', 'reason': 'redis_unreachable'}, 503
     # 2) 目录可写
     upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
     export_dir = current_app.config.get('EXPORT_DIR', 'exports')
@@ -802,6 +812,36 @@ def api_analysis_statistics():
                 allowed = [s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]
                 if allowed:
                     q = q.filter(Student.class_name.in_(allowed))
+    # Redis 短缓存：按参数与可见范围缓存统计结果
+    try:
+        from flask import current_app
+        import json, hashlib
+        rurl = current_app.config.get('REDIS_URL')
+        if rurl:
+            import redis
+            rc = getattr(current_app, '_redis_cli', None)
+            if rc is None:
+                rc = redis.from_url(rurl, decode_responses=True)
+                current_app._redis_cli = rc
+            # 构建 key（不含 grades 列表）
+            key_payload = {
+                'ns': 'analysis_stats',
+                'course_id': course_id,
+                'class_name': class_name,
+                'grade_level': grade_level,
+                'exam_name': exam_name,
+                'user': (current_user.id if (not current_user.is_anonymous) else 0),
+            }
+            key = 'gas:analy:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+            cached = rc.get(key)
+            if cached:
+                try:
+                    return jsonify(json.loads(cached))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     grades = q.all()
     stats = calculate_statistics(grades)
     subject_code = None
@@ -809,7 +849,21 @@ def api_analysis_statistics():
         course = Course.query.get(course_id)
         subject_code = course.code if course else None
     distribution = get_grade_distribution(grades, exam_name=exam_name, subject_code=subject_code)
-    return jsonify({"stats": stats, "distribution": distribution})
+    resp = {"stats": stats, "distribution": distribution}
+    try:
+        from flask import current_app
+        rurl = current_app.config.get('REDIS_URL')
+        if rurl:
+            import redis, json
+            rc = getattr(current_app, '_redis_cli', None)
+            if rc is None:
+                rc = redis.from_url(rurl, decode_responses=True)
+                current_app._redis_cli = rc
+            ttl = int(current_app.config.get('SUMMARY_COUNT_TTL_SECONDS', 60))
+            rc.setex(key, ttl, json.dumps(resp, ensure_ascii=False))
+    except Exception:
+        pass
+    return jsonify(resp)
 
 
 # 导入: 预览工作表列表，保存临时文件并返回 file_id
@@ -2218,6 +2272,20 @@ def api_summary_list():
                 'class_names': sorted(class_names),
                 'subject_code': subject_code,
                 'user': (current_user.id if (not current_user.is_anonymous) else 0),
+                'page': page,
+                'page_size': page_size,
+            }
+            key = 'gas:sumlist:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+            # 列表数据缓存（短 TTL）
+            cached_list = rc.get(key)
+            if cached_list:
+                try:
+                    import json as _json
+                    payload = _json.loads(cached_list)
+                    return jsonify(payload)
+                except Exception:
+                    pass
+
             }
             key = 'gas:sumcnt:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
             cached = rc.get(key)
@@ -2323,7 +2391,32 @@ def api_summary_list():
     elif order_by == 'grade_rank':
         items.sort(key=lambda x: (x['grade_level'] or '', x['grade_rank'] or 1e9))
 
-    return jsonify({'items': items, 'total': total, 'page': page, 'page_size': page_size, 'rule_version': rule_version})
+    resp = {'items': items, 'total': total, 'page': page, 'page_size': page_size, 'rule_version': rule_version}
+    try:
+        from flask import current_app
+        rurl = current_app.config.get('REDIS_URL')
+        if rurl:
+            import redis, json, hashlib
+            rc = getattr(current_app, '_redis_cli', None)
+            if rc is None:
+                rc = redis.from_url(rurl, decode_responses=True)
+                current_app._redis_cli = rc
+            key_payload = {
+                'ns': 'summary_list',
+                'exam_names': sorted(exam_names),
+                'grade_levels': sorted(grade_levels),
+                'class_names': sorted(class_names),
+                'subject_code': subject_code,
+                'user': (current_user.id if (not current_user.is_anonymous) else 0),
+                'page': page,
+                'page_size': page_size,
+            }
+            key = 'gas:sumlist:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+            ttl = int(current_app.config.get('SUMMARY_COUNT_TTL_SECONDS', 60))
+            rc.setex(key, ttl, json.dumps(resp, ensure_ascii=False))
+    except Exception:
+        pass
+    return jsonify(resp)
 
 
 @api_bp.route('/summary/prefs', methods=['GET', 'PUT'])
