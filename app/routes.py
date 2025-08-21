@@ -19,7 +19,8 @@ def ready():
     # 1) DB 探针
     try:
         from app import db
-        db.session.execute('SELECT 1')
+        from sqlalchemy import text as _text
+        db.session.execute(_text('SELECT 1'))
     except Exception:
         return {'status': 'not_ready', 'reason': 'db_unreachable'}, 503
     # 1.5) Redis 探针（配置了 REDIS_URL 时）
@@ -2387,8 +2388,7 @@ def api_summary_list():
                     return jsonify(payload)
                 except Exception:
                     pass
-
-            }
+            # 计数缓存键
             key = 'gas:sumcnt:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
             cached = rc.get(key)
             if cached is not None:
