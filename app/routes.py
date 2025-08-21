@@ -2199,8 +2199,38 @@ def api_summary_list():
     page = request.args.get('page', type=int) or 1
     page_size = min(max(request.args.get('page_size', type=int) or 50, 1), 1000)
 
-    # 简化 COUNT：去除排序，仅对过滤后的结果进行计数
-    total = q.with_entities(db.func.count()).scalar()
+    # 简化 COUNT：去除排序，仅对过滤后的结果进行计数（带 Redis 短缓存）
+    total = None
+    try:
+        from flask import current_app
+        import json, time, hashlib
+        rurl = current_app.config.get('REDIS_URL')
+        if rurl:
+            import redis
+            rc = getattr(current_app, '_redis_cli', None)
+            if rc is None:
+                rc = redis.from_url(rurl, decode_responses=True)
+                current_app._redis_cli = rc
+            key_payload = {
+                'ns': 'summary_count',
+                'exam_names': sorted(exam_names),
+                'grade_levels': sorted(grade_levels),
+                'class_names': sorted(class_names),
+                'subject_code': subject_code,
+                'user': (current_user.id if (not current_user.is_anonymous) else 0),
+            }
+            key = 'gas:sumcnt:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+            cached = rc.get(key)
+            if cached is not None:
+                total = int(cached)
+            else:
+                total = q.with_entities(db.func.count()).scalar()
+                ttl = int(current_app.config.get('SUMMARY_COUNT_TTL_SECONDS', 60))
+                rc.setex(key, ttl, str(total))
+    except Exception:
+        total = None
+    if total is None:
+        total = q.with_entities(db.func.count()).scalar()
     rows = q.offset((page-1)*page_size).limit(page_size).all()
 
     # 慢请求 SQL 摘要（仅在 DEBUG 或 DIAG_SQL_LOG 开启时）
