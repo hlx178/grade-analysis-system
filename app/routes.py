@@ -2663,7 +2663,59 @@ def api_summary_export():
     if scope == 'current_page':
         q = q.offset((page-1)*page_size).limit(page_size)
 
-    rows = q.all()
+    # 先尝试从 summary_list 缓存复用数据（仅 scope=current_page 时有意义）
+    try:
+        from flask import current_app
+        import json as _json, hashlib as _hashlib
+        rurl = current_app.config.get('REDIS_URL')
+        if rurl and scope == 'current_page':
+            import redis as _redis
+            rc = getattr(current_app, '_redis_cli', None)
+            if rc is None:
+                rc = _redis.from_url(rurl, decode_responses=True)
+                current_app._redis_cli = rc
+            key_payload = {
+                'ns': 'summary_list:' + (_cache_nsver(current_app,'summary') or ''),
+                'exam_names': sorted(exam_names),
+                'grade_levels': sorted(grade_levels),
+                'class_names': sorted(class_names),
+                'subject_code': subject_code,
+                'user': (current_user.id if (not current_user.is_anonymous) else 0),
+                'page': page,
+                'page_size': page_size,
+            }
+            key = 'gas:sumlist:' + _hashlib.md5(_json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+            cached = rc.get(key)
+            if cached:
+                try:
+                    payload = _json.loads(cached)
+                    # 直接用缓存数据构建导出内容
+                    items = payload.get('items') or []
+                    # 映射 items -> data_rows
+                    data_rows = []
+                    for it in items:
+                        data_rows.append({
+                            'student_id': it.get('student_id'),
+                            'name': it.get('student_name') or it.get('name'),
+                            'class_name': it.get('class_name'),
+                            'grade_level': it.get('grade_level'),
+                            'score': it.get('score'),
+                            'percentage': it.get('percentage'),
+                            'letter': it.get('letter'),
+                            'class_rank': it.get('class_rank'),
+                            'grade_rank': it.get('grade_rank'),
+                            'rule_version': it.get('rule_version'),
+                        })
+                    # 若缓存命中则直接继续使用 data_rows，跳过 SQL 拉取
+                    rows = None
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 若 rows 已由缓存覆盖，则跳过 DB 拉取
+    if 'rows' not in locals() or rows is not None:
+        rows = q.all()
 
     # 计算班级/年级排名
     from collections import defaultdict
