@@ -185,6 +185,35 @@ def get_grade_distribution(grades_query, exam_name: str | None = None, subject_c
     return dist
 
 
+# 简易年级推断：依据班级名称首字符（数字或汉字数字）
+_CHINESE_NUM = {
+    '一':'一年级','二':'二年级','三':'三年级','四':'四年级','五':'五年级','六':'六年级','七':'七年级','八':'八年级','九':'九年级'
+}
+_DIGIT_MAP = {
+    '1':'一年级','2':'二年级','3':'三年级','4':'四年级','5':'五年级','6':'六年级','7':'七年级','8':'八年级','9':'九年级'
+}
+
+def infer_grade_from_class_name(class_name: str | None) -> str | None:
+    if not class_name:
+        return None
+    s = str(class_name).strip()
+    if not s:
+        return None
+    # 特例：初一/初二/初三
+    if s.startswith('初一'):
+        return '七年级'
+    if s.startswith('初二'):
+        return '八年级'
+    if s.startswith('初三'):
+        return '九年级'
+    c0 = s[0]
+    if c0 in _CHINESE_NUM:
+        return _CHINESE_NUM[c0]
+    if c0 in _DIGIT_MAP:
+        return _DIGIT_MAP[c0]
+    return None
+
+
 def get_student_ranking(course_id=None, class_name=None, grade_level=None, exam_name=None):
     """获取学生排名（支持按班级/年级、按考试名称）"""
     from app import db

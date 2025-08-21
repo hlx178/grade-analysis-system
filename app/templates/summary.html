@@ -318,6 +318,42 @@
       <th class="col-class-rank">班级排名</th>
       <th class="col-grade-rank">年级排名</th>
       <th class="col-rule-version">规则版本</th>
+  <tbody></tbody>
+</table>
+{% endblock %}
+{% block scripts %}
+<script>
+function selectedCsv(id){ return Array.from(document.getElementById(id).selectedOptions).map(o=>o.value).join(','); }
+async function loadOptions(){
+  const r = await fetch('/api/summary/options'); if(!r.ok) return; const d = await r.json();
+  const fill = (id, arr)=>{ const sel=document.getElementById(id); sel.innerHTML=''; (arr||[]).forEach(x=>{ const o=document.createElement('option'); o.value=o.textContent=x; sel.appendChild(o); }); };
+  fill('examName', d.exam_names);
+  fill('gradeLevel', d.grade_levels);
+  fill('className', d.class_names);
+}
+async function loadSummary(){
+  const p = new URLSearchParams({
+    exam_name: selectedCsv('examName'),
+    grade_level: selectedCsv('gradeLevel'),
+    class_name: selectedCsv('className'),
+    subject_code: document.getElementById('subjectCode').value,
+    order_by: document.getElementById('orderBy').value,
+    page: 1,
+    page_size: 100
+  });
+  const r = await fetch('/api/summary?' + p.toString()); const data = await r.json();
+  const tb = document.querySelector('#summaryTable tbody'); tb.innerHTML='';
+  const subjName = (code)=>({TOTAL:'总分',CN:'语文',MA:'数学',EN:'英语',SC:'科学',SOC:'社会',MOR:'道法'})[code]||code;
+  (data.items||[]).forEach(it=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${it.student_id||''}</td><td>${it.name||''}</td><td>${it.class_name||''}</td><td>${it.grade_level||''}</td><td>${subjName(it.subject_code||data.subject_code||'')}</td><td>${it.score}</td><td class="col-percentage">${it.percentage??''}</td><td class="col-letter">${it.letter||''}</td><td class="col-class-rank">${it.class_rank??''}</td><td class="col-grade-rank">${it.grade_rank??''}</td><td class="col-rule-version">${it.rule_version||''}</td>`;
+    tb.appendChild(tr);
+  });
+}
+window.addEventListener('DOMContentLoaded', async ()=>{ await loadOptions(); await loadSummary(); });
+</script>
+{% endblock %}
+
     </tr>
   </thead>
   <tbody></tbody>

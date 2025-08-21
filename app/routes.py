@@ -353,10 +353,13 @@ def api_students():
         import re
         if not re.fullmatch(r"\d{8}", sid):
             return jsonify({"error": "student_id must be 8-digit: 4-digit year + 4-digit sequence"}), 400
+        from app.utils import infer_grade_from_class_name
+        gl = data.get("grade_level") or infer_grade_from_class_name(data.get("class_name"))
         student = Student(
             student_id=sid,
             name=data.get("name"),
             class_name=data.get("class_name"),
+            grade_level=gl,
             email=data.get("email"),
         )
         db.session.add(student)
@@ -777,14 +780,31 @@ def api_grade_detail(grade_id):
 def api_analysis_statistics():
     course_id = request.args.get("course_id", type=int)
     class_name = request.args.get("class_name")
-    query = Grade.query
-    if course_id:
-        query = query.filter_by(course_id=course_id)
-    if class_name:
-        query = query.join(Student).filter(Student.class_name == class_name)
-    grades = query.all()
-    stats = calculate_statistics(grades)
+    grade_level = request.args.get("grade_level")
     exam_name = request.args.get("exam_name")
+    # 构建查询并应用可见性
+    q = Grade.query.join(Student).join(Course)
+    if course_id:
+        q = q.filter(Grade.course_id == course_id)
+    if class_name:
+        q = q.filter(Student.class_name == class_name)
+    if grade_level:
+        q = q.filter(Student.grade_level == grade_level)
+    # 非管理员限制
+    if not current_user.is_anonymous:
+        if current_user.role == 'student':
+            q = q.filter(Student.student_id == current_user.username)
+        elif current_user.role != 'admin':
+            if current_user.allowed_grade_levels:
+                allowed = [s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]
+                if allowed:
+                    q = q.filter(Student.grade_level.in_(allowed))
+            if current_user.allowed_class_names:
+                allowed = [s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]
+                if allowed:
+                    q = q.filter(Student.class_name.in_(allowed))
+    grades = q.all()
+    stats = calculate_statistics(grades)
     subject_code = None
     if course_id:
         course = Course.query.get(course_id)
@@ -1258,10 +1278,14 @@ def api_import_grades():
         for _, row in df.iterrows():
             student = Student.query.filter_by(student_id=str(row["学号"]).strip()).first()
             if not student:
+                from app.utils import infer_grade_from_class_name
+                _cls = str(row.get("班级") or "").strip()
+                _gl = str(row.get("年级") or "").strip() or infer_grade_from_class_name(_cls)
                 student = Student(
                     student_id=str(row["学号"]).strip(),
                     name=str(row.get("姓名") or "").strip(),
-                    class_name=str(row.get("班级") or "").strip(),
+                    class_name=_cls,
+                    grade_level=_gl,
                     email=None,
                 )
                 db.session.add(student)
