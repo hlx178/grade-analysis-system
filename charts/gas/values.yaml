@@ -1,0 +1,48 @@
+image:
+  repository: ghcr.io/hlx178/grade-analysis-system
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 80
+
+app:
+  port: 8000
+  env:
+    FLASK_CONFIG: production
+    SUMMARY_COUNT_TTL_SECONDS: "60"
+    SUMMARY_LIST_TTL_SECONDS: "60"
+    ANALYSIS_TTL_SECONDS: "60"
+    EXPORT_RETENTION_DAYS: "7"
+  secretEnv:
+    DATABASE_URL: ""
+    REDIS_URL: ""
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+readinessProbe:
+  path: /ready
+  port: 8000
+livenessProbe:
+  path: /health
+  port: 8000
+
+ingress:
+  enabled: false
+  className: nginx
+  hosts:
+    - host: gas.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: gas
+version: 0.1.0
+description: Grade Analysis System (GAS) Helm Chart
+appVersion: "latest"
+type: application
+
