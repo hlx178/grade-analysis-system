@@ -90,6 +90,9 @@ try:
     _REQ_COUNT = Counter('gas_http_requests_total', 'Total HTTP requests', ['method','endpoint','status'])
     _REQ_LATENCY = Histogram('gas_http_request_duration_seconds', 'Request latency', ['endpoint'])
 
+    _CACHE_HITS = Counter('gas_cache_hits_total', 'Cache hits', ['bucket'])
+    _CACHE_MISSES = Counter('gas_cache_misses_total', 'Cache misses', ['bucket'])
+
     @main_bp.before_app_request
     def _metrics_req_start():
         from flask import g, request
@@ -858,6 +861,10 @@ def api_analysis_statistics():
             cached = rc.get(key)
             if cached:
                 try:
+                    try:
+                        _CACHE_HITS.labels('analysis_stats').inc()
+                    except Exception:
+                        pass
                     return jsonify(json.loads(cached))
                 except Exception:
                     pass
@@ -883,6 +890,10 @@ def api_analysis_statistics():
                 current_app._redis_cli = rc
             ttl = int(current_app.config.get('ANALYSIS_TTL_SECONDS', 60))
             rc.setex(key, ttl, json.dumps(resp, ensure_ascii=False))
+            try:
+                _CACHE_MISSES.labels('analysis_stats').inc()
+            except Exception:
+                pass
     except Exception:
         pass
     return jsonify(resp)
@@ -2335,6 +2346,11 @@ def api_summary_list():
             if rc is None:
                 rc = redis.from_url(rurl, decode_responses=True)
                 current_app._redis_cli = rc
+            # metrics
+            try:
+                _CACHE_HITS; _CACHE_MISSES
+            except NameError:
+                pass
             key_payload = {
                 'ns': 'summary_count:' + (_cache_nsver(current_app,'summary') or ''),
                 'exam_names': sorted(exam_names),
@@ -2352,6 +2368,10 @@ def api_summary_list():
                 try:
                     import json as _json
                     payload = _json.loads(cached_list)
+                    try:
+                        _CACHE_HITS.labels('summary_list').inc()
+                    except Exception:
+                        pass
                     return jsonify(payload)
                 except Exception:
                     pass
@@ -2361,10 +2381,18 @@ def api_summary_list():
             cached = rc.get(key)
             if cached is not None:
                 total = int(cached)
+                try:
+                    _CACHE_HITS.labels('summary_count').inc()
+                except Exception:
+                    pass
             else:
                 total = q.with_entities(db.func.count()).scalar()
                 ttl = int(current_app.config.get('SUMMARY_COUNT_TTL_SECONDS', 60))
                 rc.setex(key, ttl, str(total))
+                try:
+                    _CACHE_MISSES.labels('summary_count').inc()
+                except Exception:
+                    pass
     except Exception:
         total = None
     if total is None:
@@ -2484,6 +2512,10 @@ def api_summary_list():
             key = 'gas:sumlist:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
             ttl = int(current_app.config.get('SUMMARY_LIST_TTL_SECONDS', 60))
             rc.setex(key, ttl, json.dumps(resp, ensure_ascii=False))
+            try:
+                _CACHE_MISSES.labels('summary_list').inc()
+            except Exception:
+                pass
     except Exception:
         pass
     return jsonify(resp)

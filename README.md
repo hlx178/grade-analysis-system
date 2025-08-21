@@ -198,6 +198,22 @@ docker pull ghcr.io/hlx178/grade-analysis:latest
 docker run --name gas \
   -p 8000:8000 \
   -e FLASK_CONFIG=production \
+
+## 缓存与指标
+
+- Redis 缓存（可选）：设置 REDIS_URL 后启用
+  - /api/summary：
+    - total 计数缓存 TTL：SUMMARY_COUNT_TTL_SECONDS（默认 60）
+    - 列表缓存 TTL：SUMMARY_LIST_TTL_SECONDS（默认 60）
+  - /api/analysis/statistics：ANALYSIS_TTL_SECONDS（默认 60）
+- 自动失效：
+  - 成绩新增/更新/删除、导入完成后，自动 bump 命名空间 version（summary/analysis），老的缓存 key 不再命中
+  - 等级规则发布/回滚/导入后，同样 bump summary/analysis
+- Prometheus 指标（/metrics）：
+  - gas_cache_hits_total{bucket="summary_list|summary_count|analysis_stats"}
+  - gas_cache_misses_total{bucket="..."}
+
+
   -v $(pwd)/uploads:/app/uploads \
   -v $(pwd)/exports:/app/exports \
   ghcr.io/hlx178/grade-analysis:latest
