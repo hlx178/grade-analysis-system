@@ -1,4 +1,15 @@
 param(
+  [switch]$DevCompose,
+  [switch]$Up,
+  [switch]$Down
+)
+
+if ($DevCompose) {
+  if ($Up) { & "$PSScriptRoot/workflow.ps1" -DevCompose -Up; exit $LASTEXITCODE }
+  if ($Down) { & "$PSScriptRoot/workflow.ps1" -DevCompose -Down; exit $LASTEXITCODE }
+}
+
+param(
   [string]$ContainerName = 'gas-local',
   [string]$ImageTag = 'gas-local:dev',
   [int]$Port = 8001,
@@ -81,7 +92,7 @@ for ($i=1; $i -le 30; $i++) {
   } catch { Start-Sleep -Seconds 1 }
 }
 if (-not $ok) {
-  Write-Err "Service did not become healthy in time. Showing last logs:" 
+  Write-Err "Service did not become healthy in time. Showing last logs:"
   docker logs --tail 100 $ContainerName
   exit 1
 }
