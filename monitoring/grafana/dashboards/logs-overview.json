@@ -1,0 +1,67 @@
+{
+  "title": "GAS Logs Overview",
+  "tags": ["gas", "logs"],
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "type": "logs",
+      "title": "Recent App Logs (job=gas)",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 10},
+      "targets": [
+        {"expr": "{job=\"gas\"}"}
+      ],
+      "options": {"showLabels": true, "showTime": true}
+    },
+    {
+      "type": "table",
+      "title": "Errors by Endpoint (last 1h)",
+      "gridPos": {"x": 0, "y": 10, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (path) (count_over_time(({job=\"gas\"} |= \"ERROR\" | json | path != \"\" )[1h]))"}
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Export Failures (last 1h)",
+      "gridPos": {"x": 12, "y": 10, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum(count_over_time(({job=\"gas\"} |= \"export\" |= \"failed\")[1h]))"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "HTTP 5xx (last 5m)",
+      "gridPos": {"x": 0, "y": 18, "w": 6, "h": 4},
+      "targets": [
+        {"expr": "sum(rate(gas_http_requests_total{status=~\"5..\"}[5m]))"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Cache Hit Ratio (5m)",
+      "gridPos": {"x": 6, "y": 18, "w": 6, "h": 4},
+      "targets": [
+        {"expr": "sum(rate(gas_cache_hits_total[5m])) / clamp_min(sum(rate(gas_cache_hits_total[5m])) + sum(rate(gas_cache_misses_total[5m])), 1e-6)"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Pending Export Oldest (s)",
+      "gridPos": {"x": 12, "y": 18, "w": 6, "h": 4},
+      "targets": [
+        {"expr": "max(gas_export_oldest_seconds{status=\"pending\"})"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Export Failures (5m)",
+      "gridPos": {"x": 18, "y": 18, "w": 6, "h": 4},
+      "targets": [
+        {"expr": "sum(rate(gas_export_failed_total[5m]))"}
+      ]
+    }
+  ]
+}
+

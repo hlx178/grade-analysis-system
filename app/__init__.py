@@ -48,6 +48,7 @@ def create_app(config_name="default"):
             if app.config.get('LOG_FORMAT_JSON', True):
                 fields.setdefault('ts', int(time.time()*1000))
                 fields.setdefault('app', 'gas')
+                fields.setdefault('level', logging.getLevelName(level))
                 msg = json.dumps(fields, ensure_ascii=False)
             else:
                 msg = f"{fields}"
@@ -75,9 +76,13 @@ def create_app(config_name="default"):
         @app.after_request
         def _access_log(response):
             try:
+                from flask_login import current_user as _cu
+                uid = _cu.id if getattr(_cu, 'is_authenticated', False) and _cu.is_authenticated else None
+                role = getattr(_cu, 'role', None) if uid else None
                 t = (time.time() - getattr(g, '_t0', time.time())) * 1000
                 _json_log('access', logging.INFO,
-                          kind='access', latency_ms=int(t), method=request.method, path=request.path, status=response.status_code)
+                          kind='access', latency_ms=int(t), method=request.method, path=request.path,
+                          status=response.status_code, user_id=uid, role=role)
             except Exception:
                 pass
             return response
