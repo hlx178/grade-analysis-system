@@ -3538,7 +3538,64 @@ def _build_export_file(params: dict, export_dir: str) -> str:
         page_size = int(params.get('page_size') or 50)
         q = q.offset((page-1)*page_size).limit(page_size)
 
-    rows = q.all()
+    # scope=current_page 时尝试复用 summary_list 缓存
+    if scope == 'current_page':
+        try:
+            from flask import current_app
+            import json as _json, hashlib as _hashlib
+            rurl = current_app.config.get('REDIS_URL')
+            if rurl:
+                import redis as _redis
+                rc = getattr(current_app, '_redis_cli', None)
+                if rc is None:
+                    rc = _redis.from_url(rurl, decode_responses=True)
+                    current_app._redis_cli = rc
+                page = int(params.get('page') or 1)
+                page_size = int(params.get('page_size') or 50)
+                key_payload = {
+                    'ns': 'summary_list:' + (_cache_nsver(current_app,'summary') or ''),
+                    'exam_names': sorted(exam_names),
+                    'grade_levels': sorted(grade_levels),
+                    'class_names': sorted(class_names),
+                    'subject_code': subject_code,
+                    'user': int(params.get('user_id') or 0),
+                    'page': page,
+                    'page_size': page_size,
+                }
+                key = 'gas:sumlist:' + _hashlib.md5(_json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                cached = rc.get(key)
+                if cached:
+                    try:
+                        payload = _json.loads(cached)
+                        items = payload.get('items') or []
+                        data_rows = []
+                        for it in items:
+                            data_rows.append({
+                                'student_id': it.get('student_id'),
+                                'name': it.get('student_name') or it.get('name'),
+                                'class_name': it.get('class_name'),
+                                'grade_level': it.get('grade_level'),
+                                'score': it.get('score'),
+                                'percentage': it.get('percentage'),
+                                'letter': it.get('letter'),
+                                'class_rank': it.get('class_rank'),
+                                'grade_rank': it.get('grade_rank'),
+                                'rule_version': it.get('rule_version'),
+                            })
+                        # 命中缓存
+                        try:
+                            _CACHE_HITS.labels('export_list').inc()
+                        except Exception:
+                            pass
+                        rows = []  # 清空 rows，避免下方逻辑重复计算
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # 若 rows 仍非空，说明未从缓存构造 data_rows，则按传统路径查询
+    if rows is not None:
+        rows = q.all()
 
     # 列控制
     columns_param = params.get('columns')
@@ -3577,6 +3634,11 @@ def _build_export_file(params: dict, export_dir: str) -> str:
     for g in rows:
         key = (g.exam_type or 'regular', g.course.code)
         if key in max_cache:
+            try:
+                _CACHE_MISSES.labels('export_list').inc()
+            except Exception:
+                pass
+
             max_score = max_cache[key]
         else:
             s = ExamScheme.query.filter_by(exam_type=key[0], subject_code=key[1]).first()

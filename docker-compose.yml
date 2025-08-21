@@ -11,6 +11,9 @@ services:
       - EXPORT_RETENTION_DAYS=7
       - EXPORT_MAX_CONCURRENT_PER_USER=2
       - DOWNLOAD_LINK_TTL_SECONDS=3600
+      - SUMMARY_COUNT_TTL_SECONDS=60
+      - SUMMARY_LIST_TTL_SECONDS=60
+      - ANALYSIS_TTL_SECONDS=60
     volumes:
       - ./uploads:/app/uploads
       - ./exports:/app/exports
