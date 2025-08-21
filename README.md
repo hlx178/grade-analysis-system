@@ -334,6 +334,13 @@ spec:
   - 关注 gas_http_requests_total、gas_http_request_duration_seconds
   - 关注 gas_cache_hits_total / gas_cache_misses_total；命中率长期偏低则考虑延长 TTL 或增加缓存覆盖
 
+
+## 部署参考与清单
+
+- 生产清单：docs/deploy/PRODUCTION_CHECKLIST.md
+- Helm values 示例：docs/deploy/HELM_VALUES.example.yaml
+- GitHub Actions 部署示例（Compose）：docs/deploy/GHACTION_DEPLOY_EXAMPLE.md
+
 - 初始化数据库与管理员（脚本法，容器内执行 Python 脚本）：
 
 ```bash

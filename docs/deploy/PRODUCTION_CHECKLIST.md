@@ -1,0 +1,32 @@
+# Production Checklist
+
+- Security
+  - Set a strong SECRET_KEY
+  - Use strong ADMIN_INITIAL_PASSWORD (and rotate after first login)
+  - Restrict database and Redis to private network; TLS if exposed
+  - Limit admin accounts; enable audit logs shipping
+- Data & Backups
+  - Postgres: PITR or daily logical backups; verify restore
+  - Files: backups for uploads/exports; retention policy aligned with EXPORT_RETENTION_DAYS
+- Observability
+  - Prometheus scraping /metrics; dashboards for request rate, latency, cache hit rates
+  - Alert rules for 5xx, high latency, low cache hit rate, DB/Redis down
+  - Centralized logs (stdout + reverse proxy + DB logs)
+- Availability & Scaling
+  - Run >=2 replicas behind a reverse proxy/load balancer
+  - Health checks: /health (liveness), /ready (readiness)
+  - Configure resource limits/requests; HPA based on CPU/latency
+- Config
+  - DATABASE_URL, REDIS_URL configured via secrets
+  - Cache TTLs: SUMMARY_COUNT_TTL_SECONDS, SUMMARY_LIST_TTL_SECONDS, ANALYSIS_TTL_SECONDS
+  - EXPORT_RETENTION_DAYS and DOWNLOAD_LINK_TTL_SECONDS set appropriately
+- Performance
+  - Gunicorn workers/threads tuned to workload
+  - Postgres connection pool sizing; indexes reviewed for frequent queries
+  - Redis sized to hold working set; eviction policy
+- Security Headers & TLS
+  - Terminate TLS at proxy (Caddy/Nginx); HSTS if applicable
+  - Set basic security headers (X-Frame-Options, X-Content-Type-Options, etc.)
+- Runbooks
+  - Procedures for import spikes, cache clear (namespace bump), DB failover, restore drills
+

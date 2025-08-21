@@ -1,0 +1,51 @@
+image:
+  repository: ghcr.io/hlx178/grade-analysis-system
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 80
+
+app:
+  port: 8000
+  env:
+    FLASK_CONFIG: production
+    SUMMARY_COUNT_TTL_SECONDS: "60"
+    SUMMARY_LIST_TTL_SECONDS: "60"
+    ANALYSIS_TTL_SECONDS: "60"
+    EXPORT_RETENTION_DAYS: "7"
+  secretEnv:
+    DATABASE_URL: "postgresql+psycopg2://user:pass@postgres:5432/gas"
+    REDIS_URL: "redis://redis:6379/0"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+livenessProbe:
+  path: /health
+  port: 8000
+readinessProbe:
+  path: /ready
+  port: 8000
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: gas.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: gas-tls
+      hosts:
+        - gas.example.com
+
