@@ -73,16 +73,23 @@ def migrate():
             s = db.session
 
             # order matters (respect FKs)
-            def copy_table(name, model, key='id', mapper=None):
+            def copy_table(name, model, key='id', mapper=None, unique_keys=None):
                 copied = 0
                 skipped = 0
+                unique_keys = unique_keys or []
                 for r in fetch_rows(conn, name):
                     if mapper:
                         r = mapper(r)
-                    # check by PK if present
+                    # check by PK or unique keys
                     exists = None
                     if key in r and r[key] is not None:
                         exists = model.query.get(r[key])
+                    if not exists:
+                        for uk in unique_keys:
+                            val = r.get(uk)
+                            if val:
+                                exists = model.query.filter(getattr(model, uk)==val).first()
+                                if exists: break
                     if exists:
                         skipped += 1
                         continue
@@ -98,15 +105,19 @@ def migrate():
                     except Exception as e:
                         s.rollback()
                         log(f"{name}: row failed -> {e}")
-                s.commit()
+                try:
+                    s.commit()
+                except Exception as e:
+                    s.rollback()
+                    log(f"{name}: commit failed -> {e}")
                 if key == 'id':
                     set_pg_seq(s, model.__tablename__)
                 log(f"{name}: copied={copied}, skipped={skipped}")
 
             # Copy data
-            copy_table('users', User)
-            copy_table('students', Student)
-            copy_table('courses', Course)
+            copy_table('users', User, unique_keys=['username','email'])
+            copy_table('students', Student, unique_keys=['student_id','email'])
+            copy_table('courses', Course, unique_keys=['code'])
             copy_table('exam_schemes', ExamScheme)
             copy_table('user_preferences', UserPreference)
             copy_table('diagnostic_presets', DiagnosticPreset)
