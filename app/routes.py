@@ -93,6 +93,10 @@ try:
     _CACHE_HITS = Counter('gas_cache_hits_total', 'Cache hits', ['bucket'])
     _CACHE_MISSES = Counter('gas_cache_misses_total', 'Cache misses', ['bucket'])
 
+    _EXPORT_STARTED = Counter('gas_export_started_total', 'Export tasks started', ['mode'])
+    _EXPORT_COMPLETED = Counter('gas_export_completed_total', 'Export tasks completed', ['mode'])
+    _EXPORT_FAILED = Counter('gas_export_failed_total', 'Export tasks failed', ['mode'])
+
     @main_bp.before_app_request
     def _metrics_req_start():
         from flask import g, request
@@ -726,6 +730,10 @@ def api_grades_aggregated_export():
         fname = f"{clean(exam_name)}_{clean(str(subj_part))}_{ts}.xlsx"
         return send_file(buf, as_attachment=True, download_name=fname, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     except Exception as e:
+        try:
+            _EXPORT_FAILED.labels('sync').inc()
+        except Exception:
+            pass
         return jsonify({'error': f'export failed: {e}'}), 500
 
 
@@ -2608,7 +2616,16 @@ def api_summary_prefs():
             'trend_chrono': False,
             'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True},
             'class_compare': {'only_meets': False, 'sort_by': 'avg', 'min_count': 0, 'export_only_meets': False}
-        })
+)
+
+
+@api_bp.route('/summary/export', methods=['GET'])
+@login_required
+def api_summary_export():
+    try:
+        _EXPORT_STARTED.labels('sync').inc()
+    except Exception:
+        pass
 
 
 @api_bp.route('/summary/export', methods=['GET'])
@@ -2952,6 +2969,10 @@ def api_export_task_create():
                 filepath = _build_export_file(args, export_dir)
                 t.status = 'completed'; t.file = filepath; t.progress = 100; t.finished_at = dt.datetime.utcnow()
                 try:
+                    _EXPORT_COMPLETED.labels('async').inc()
+                except Exception:
+                    pass
+                try:
                     job = ExportJob.query.get(task_id)
                     if job:
                         job.status = 'completed'; job.progress = 100; job.file_path = filepath; job.finished_at = dt.datetime.utcnow()
@@ -2969,6 +2990,11 @@ def api_export_task_create():
                     db.session.commit()
             except Exception:
                 db.session.rollback()
+            try:
+                _EXPORT_FAILED.labels('async').inc()
+            except Exception:
+                pass
+
         try:
             t = _export_tasks.get(task_id)
             if not t: return
@@ -2992,12 +3018,21 @@ def api_export_task_create():
                 filepath = _build_export_file(args, export_dir)
                 t.status = 'completed'; t.file = filepath; t.progress = 100; t.finished_at = dt.datetime.utcnow()
                 try:
+                    _EXPORT_COMPLETED.labels('async').inc()
+                except Exception:
+                    pass
+                try:
                     job = ExportJob.query.get(task_id)
                     if job:
                         job.status = 'completed'; job.progress = 100; job.file_path = filepath; job.finished_at = dt.datetime.utcnow()
                         db.session.commit()
                 except Exception:
                     db.session.rollback()
+                try:
+                    _EXPORT_FAILED.labels('async').inc()
+                except Exception:
+                    pass
+
         except Exception as e:
             t = _export_tasks.get(task_id)
             if t:
