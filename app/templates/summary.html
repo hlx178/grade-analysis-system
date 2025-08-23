@@ -323,12 +323,9 @@
 {% endblock %}
 {% block scripts %}
 <script>
-console.log('Script block started');
 function selectedCsv(id){ return Array.from(document.getElementById(id).selectedOptions).map(o=>o.value).join(','); }
 async function loadOptions(){
-  console.log('loadOptions called');
   const r = await fetch('/api/summary/options'); if(!r.ok) return; const d = await r.json();
-  console.log('loadOptions data:', d);
   const fill = (id, arr)=>{ const sel=document.getElementById(id); sel.innerHTML=''; (arr||[]).forEach(x=>{ const o=document.createElement('option'); o.value=o.textContent=x; sel.appendChild(o); }); };
   fill('examName', d.exam_names);
   fill('gradeLevel', d.grade_levels);
@@ -339,12 +336,9 @@ async function loadOptions(){
     if (examSel && examSel.options.length){ const last = examSel.options[examSel.options.length-1]; last.selected = true; }
     const allSel = id => Array.from(document.getElementById(id).options).forEach(o=>o.selected=true);
     allSel('gradeLevel'); allSel('className');
-  }catch(e){
-      console.error('Error selecting default options:', e);
-  }
+  }catch(e){}
 }
 async function loadSummary(){
-  console.log('loadSummary called');
   const p = new URLSearchParams({
     exam_name: selectedCsv('examName'),
     grade_level: selectedCsv('gradeLevel'),
@@ -354,9 +348,7 @@ async function loadSummary(){
     page: 1,
     page_size: 100
   });
-  console.log('loadSummary params:', p.toString());
   const r = await fetch('/api/summary?' + p.toString()); const data = await r.json();
-  console.log('loadSummary data:', data);
   const tb = document.querySelector('#summaryTable tbody'); tb.innerHTML='';
   const subjName = (code)=>({TOTAL:'总分',CN:'语文',MA:'数学',EN:'英语',SC:'科学',SOC:'社会',MOR:'道法'})[code]||code;
   (data.items||[]).forEach(it=>{
@@ -367,7 +359,6 @@ async function loadSummary(){
 }
 
 function getPrefs(){
-  console.log('getPrefs called');
   return {
     letter: document.getElementById('colLetter').checked,
     class_rank: document.getElementById('colClassRank').checked,
@@ -383,7 +374,6 @@ function getPrefs(){
   };
 }
 function applyPrefs(p){
-  console.log('applyPrefs called with:', p);
   if (!p) return;
   document.getElementById('colLetter').checked = !!p.letter;
   document.getElementById('colClassRank').checked = !!p.class_rank;
@@ -404,18 +394,15 @@ function applyPrefs(p){
   document.querySelectorAll('.col-rule-version').forEach(e=>e.style.display = p.rule_version? '':'none');
 }
 async function savePrefs(){
-  console.log('savePrefs called');
   const res = await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(getPrefs())});
   if (res.ok) alert('已保存'); else alert('保存失败');
 }
 async function loadPrefs(){
-  console.log('loadPrefs called');
   const res = await fetch('/api/summary/prefs');
   if (res.ok){ const p = await res.json(); applyPrefs(p); }
 }
 
 function qs(){
-  console.log('qs called');
   const exam_name = Array.from(document.getElementById('examName').selectedOptions).map(o=>o.value).join(',');
   const grade_level = Array.from(document.getElementById('gradeLevel').selectedOptions).map(o=>o.value).join(',');
   const class_name = Array.from(document.getElementById('className').selectedOptions).map(o=>o.value).join(',');
@@ -449,7 +436,6 @@ async function loadMyTasks(page=1){
 }
 
 window.addEventListener('DOMContentLoaded', async ()=>{
-  console.log('DOMContentLoaded event fired');
   await loadOptions();
   await loadPrefs();
   await loadSummary();
