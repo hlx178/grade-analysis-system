@@ -31,7 +31,7 @@ services:
     restart: unless-stopped
 
   app:
-    image: ghcr.io/hlx178/grade-analysis-system:latest
+    image: ghcr.io/hlx178/grade-analysis:latest
     container_name: gas
     depends_on:
       db:

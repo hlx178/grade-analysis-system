@@ -65,7 +65,7 @@ from flask import Blueprint, current_app, flash, jsonify, redirect, render_templ
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db
-from app.models import Course, Grade, Student, User, ExamScheme, GradeBandRule, GradeBandSet, ExportJob
+from app.models import Course, Grade, Student, User, ExamScheme, GradeBandRule, GradeBandSet, ExportJob, DiagnosticPreset, UserPreference, UserPreference
 from app.utils import (
     SUBJECTS,
     TOTAL_SUBJECT,
@@ -472,6 +472,42 @@ def api_students_options():
     return jsonify({ 'grade_levels': grade_levels, 'class_names': class_names })
 
 
+@api_bp.route('/summary/prefs', methods=['GET'])
+@login_required
+def api_summary_prefs_get():
+    """获取当前用户的汇总页面偏好"""
+    import json
+    pref = UserPreference.query.filter_by(user_id=current_user.id, key='summary_prefs').first()
+    if pref and pref.value:
+        try:
+            return jsonify(json.loads(pref.value))
+        except (json.JSONDecodeError, TypeError):
+            return jsonify({})  # or some default
+    return jsonify({})
+
+@api_bp.route('/summary/prefs', methods=['PUT'])
+@login_required
+def api_summary_prefs_put():
+    """保存当前用户的汇总页面偏好"""
+    import json
+    data = request.get_json(force=True)
+    if not data:
+        return jsonify({'error': 'invalid json'}), 400
+
+    pref = UserPreference.query.filter_by(user_id=current_user.id, key='summary_prefs').first()
+    if not pref:
+        pref = UserPreference(user_id=current_user.id, key='summary_prefs')
+        db.session.add(pref)
+
+    try:
+        pref.value = json.dumps(data, ensure_ascii=False)
+        db.session.commit()
+        return jsonify({'message': 'ok'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
 
 # API: 课程
 @api_bp.route("/courses", methods=["GET", "POST"])
@@ -795,29 +831,26 @@ def api_grade_detail(grade_id):
     elif request.method == "PUT":
         data = request.get_json() or request.form
         if "score" in data and not validate_score(data["score"]):
-    if request.method == "PUT":
+            return jsonify({"error": "Score must be between 0 and 100"}), 400
+        grade.score = data.get("score", grade.score)
+        grade.exam_type = data.get("exam_type", grade.exam_type)
+        db.session.commit()
         # 成绩更新后 bump 缓存命名空间
         try:
             from flask import current_app
             _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
         except Exception:
             pass
-    if request.method == "DELETE":
+        return jsonify({"message": "Grade updated"})
+    elif request.method == "DELETE":
+        db.session.delete(grade)
+        db.session.commit()
         # 成绩删除后 bump 缓存命名空间
         try:
             from flask import current_app
             _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
         except Exception:
             pass
-
-            return jsonify({"error": "Score must be between 0 and 100"}), 400
-        grade.score = data.get("score", grade.score)
-        grade.exam_type = data.get("exam_type", grade.exam_type)
-        db.session.commit()
-        return jsonify({"message": "Grade updated"})
-    else:  # DELETE
-        db.session.delete(grade)
-        db.session.commit()
         return jsonify({"message": "Grade deleted"})
 
 
@@ -1383,55 +1416,80 @@ def api_import_grades():
                 student = Student(
                     student_id=str(row["学号"]).strip(),
                     name=str(row.get("姓名") or "").strip(),
-    # 成绩变更后失效 summary/analysis 缓存命名空间
-    try:
-        from flask import current_app
-        _cache_bump(current_app, 'summary')
-        _cache_bump(current_app, 'analysis')
-    except Exception:
-        pass
-
                     class_name=_cls,
-                    grade_level=_gl,
-                    email=None,
+                    grade_level=_gl
                 )
                 db.session.add(student)
-                db.session.flush()
 
-            course_code = str(row["课程代码"]).strip()
-            course = Course.query.filter_by(code=course_code).first()
+            course = Course.query.filter_by(code=str(row["课程代码"]).strip()).first()
             if not course:
-                course = Course(code=course_code, name=str(row.get("课程名称") or "").strip())
+                course = Course(
+                    code=str(row["课程代码"]).strip(),
+                    name=str(row.get("课程名称") or "").strip(),
+                )
                 db.session.add(course)
-                db.session.flush()
 
+            grade = Grade(
+                student=student,
+                course=course,
+                score=float(row["成绩"]),
+                exam_name=exam_name,
+                exam_type=normalize_exam_type(exam_name),
+            )
+            db.session.add(grade)
+            imported_count += 1
+
+        # 旧模式：逐行处理
+        for i, row in df.iterrows():
             try:
-                score_val = float(row["成绩"])
-            except Exception:
-                score_val = None
-            if score_val is None:
+                sid = str(row['学号']).strip()
+                if sid.endswith('.0'):
+                    sid = sid[:-2]
+                student = Student.query.filter_by(student_id=sid).first()
+                if not student:
+                    errors.append(f"第{i+2}行：学号 {sid} 不存在")
+                    continue
+
+                course_code = str(row["课程代码"]).strip()
+                course = Course.query.filter_by(code=course_code).first()
+                if not course:
+                    course = Course(code=course_code, name=str(row.get("课程名称") or "").strip())
+                    db.session.add(course)
+                    db.session.flush()
+
+                try:
+                    score_val = float(row["成绩"])
+                except (ValueError, TypeError):
+                    score_val = None
+
+                if score_val is None:
+                    errors.append(f"第{i+2}行：学生 {student.name} 的课程 {course.name} 成绩无效")
+                    continue
+
+                exam_type = normalize_exam_type(row.get("考试类型") or "regular")
+                exam_name = str(row.get("考试名称") or "default").strip() or "default"
+
+                # 查找现有成绩记录时，应同时匹配考试名称
+                grade = Grade.query.filter_by(student_id=student.id, course_id=course.id, exam_name=exam_name).first()
+                if not grade:
+                    grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type, exam_name=exam_name)
+                    db.session.add(grade)
+                    created += 1
+                else:
+                    grade.score = score_val
+                    grade.exam_type = exam_type
+                    updated += 1
+            except Exception as e:
+                errors.append(f"第{i+2}行处理失败: {e}")
                 continue
 
-            exam_type = normalize_exam_type(row.get("考试类型") or "regular")
-            exam_name = str(row.get("考试名称") or "default").strip() or "default"
-
-    # 成绩变更后失效 summary/analysis 缓存命名空间
-    try:
-        from flask import current_app
-        _cache_bump(current_app, 'summary')
-        _cache_bump(current_app, 'analysis')
-    except Exception:
-        pass
-
-            grade = Grade.query.filter_by(student_id=student.id, course_id=course.id).first()
-            if not grade:
-                grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type, exam_name=exam_name)
-                db.session.add(grade)
-                created += 1
-            else:
-                grade.score = score_val
-                grade.exam_type = exam_type
-                updated += 1
+        # 成绩变更后失效 summary/analysis 缓存命名空间
+        try:
+            from flask import current_app
+            _cache_bump(current_app, 'summary')
+            _cache_bump(current_app, 'analysis')
+        except Exception:
+            pass
 
     db.session.commit()
 
@@ -2991,56 +3049,6 @@ def api_export_task_create():
             except Exception:
                 pass
 
-        try:
-            t = _export_tasks.get(task_id)
-            if not t: return
-            t.status = 'running'; t.progress = 10
-            # 复用逻辑：构建查询，与同步导出一致
-            with current_app.app_context():
-                from copy import deepcopy
-                args = deepcopy(params)
-                # 将用户可见范围注入参数
-                if current_user.is_anonymous or current_user.role == 'admin':
-                    pass
-                else:
-                    if current_user.allowed_grade_levels:
-                        args['grade_level'] = args.get('grade_level') or current_user.allowed_grade_levels
-                    if current_user.allowed_class_names:
-                        args['class_name'] = args.get('class_name') or current_user.allowed_class_names
-                # 生成文件名与导出目录
-                export_dir = current_app.config.get('EXPORT_DIR', 'exports')
-                os.makedirs(export_dir, exist_ok=True)
-                # 调用一个内部函数生成文件
-                filepath = _build_export_file(args, export_dir)
-                t.status = 'completed'; t.file = filepath; t.progress = 100; t.finished_at = dt.datetime.utcnow()
-                try:
-                    _EXPORT_COMPLETED.labels('async').inc()
-                except Exception:
-                    pass
-                try:
-                    job = ExportJob.query.get(task_id)
-                    if job:
-                        job.status = 'completed'; job.progress = 100; job.file_path = filepath; job.finished_at = dt.datetime.utcnow()
-                        db.session.commit()
-                except Exception:
-                    db.session.rollback()
-                try:
-                    _EXPORT_FAILED.labels('async').inc()
-                except Exception:
-                    pass
-
-        except Exception as e:
-            t = _export_tasks.get(task_id)
-            if t:
-                t.status = 'failed'; t.error = str(e)
-            try:
-                job = ExportJob.query.get(task_id)
-                if job:
-                    job.status = 'failed'; job.error = str(e); job.finished_at = dt.datetime.utcnow()
-                    db.session.commit()
-            except Exception:
-                db.session.rollback()
-
     _cleanup_exports_once()
     Thread(target=worker, args=(task_id, params, user_id), daemon=True).start()
     return jsonify({ 'task_id': task_id })
@@ -3165,28 +3173,10 @@ def api_export_task_download_signed():
     except Exception:
         pass
 
-        return jsonify({'error':'forbidden'}), 403
     if job.status != 'completed' or not job.file_path or not os.path.isfile(job.file_path):
         return jsonify({'error':'not ready'}), 400
-    # 导出队列指标（简化版）：统计各状态数量与最老任务等待时长
-    try:
-        now = dt.datetime.utcnow()
-        def _emit(status):
-            q = ExportJob.query
-            if current_user.role != 'admin':
-                q = q.filter(ExportJob.user_id == current_user.id)
-            qs = q.filter(ExportJob.status == status)
-            _EXPORT_TASKS.labels(status).set(qs.count())
-            oldest = qs.order_by(ExportJob.created_at.asc()).first()
-            if oldest:
-                age = (now - (oldest.created_at or now)).total_seconds()
-                _EXPORT_OLDEST_SECONDS.labels(status).set(max(age, 0))
-        for st in ['pending','running','completed','failed']:
-            _emit(st)
-    except Exception:
-        pass
-
     return send_file(job.file_path, as_attachment=True)
+
 
 @api_bp.route('/export/tasks/<task_id>/download', methods=['GET'])
 @login_required
@@ -3607,6 +3597,7 @@ def _build_export_file(params: dict, export_dir: str) -> str:
         q = q.offset((page-1)*page_size).limit(page_size)
 
     # scope=current_page 时尝试复用 summary_list 缓存
+    rows = None
     if scope == 'current_page':
         try:
             from flask import current_app
@@ -3650,19 +3641,19 @@ def _build_export_file(params: dict, export_dir: str) -> str:
                                 'grade_rank': it.get('grade_rank'),
                                 'rule_version': it.get('rule_version'),
                             })
-                        # 命中缓存
-                        try:
-                            _CACHE_HITS.labels('export_list').inc()
-                        except Exception:
-                            pass
-                        rows = []  # 清空 rows，避免下方逻辑重复计算
+                            # 命中缓存
+                            try:
+                                _CACHE_HITS.labels('export_list').inc()
+                            except Exception:
+                                pass
+                            rows = []  # 清空 rows，避免下方逻辑重复计算
                     except Exception:
                         pass
         except Exception:
             pass
 
-    # 若 rows 仍非空，说明未从缓存构造 data_rows，则按传统路径查询
-    if rows is not None:
+    # 若 rows 仍为空，说明未从缓存构造 data_rows，则按传统路径查询
+    if rows is None:
         rows = q.all()
 
     # 列控制

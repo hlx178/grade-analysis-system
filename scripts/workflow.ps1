@@ -1,29 +1,8 @@
 param(
-  [switch]$DevCompose,
-  [switch]$Up,
-  [switch]$Down
-)
+  [switch]$DevCompose = $false,
+  [switch]$Up = $false,
+  [switch]$Down = $false,
 
-if ($DevCompose) {
-  if ($Up) {
-    Write-Host "[INFO] Starting dev stack (PG + Redis + App) via docker-compose.dev.yml" -ForegroundColor Cyan
-    docker compose -f docker-compose.dev.yml up -d
-    if ($LASTEXITCODE -ne 0) { Write-Host "[ERROR] compose up failed" -ForegroundColor Red; exit 1 }
-    Write-Host "[INFO] Waiting for app ready..." -ForegroundColor Cyan
-    for ($i=0; $i -lt 60; $i++) {
-      try { $code = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://localhost:8001/ready).StatusCode; if ($code -eq 200) { break } } catch { Start-Sleep -Seconds 2 }
-    }
-    Write-Host "[INFO] Dev stack ready at http://localhost:8001" -ForegroundColor Green
-    exit 0
-  }
-  if ($Down) {
-    Write-Host "[INFO] Stopping dev stack" -ForegroundColor Yellow
-    docker compose -f docker-compose.dev.yml down
-    exit 0
-  }
-}
-
-param(
   [string]$GitSshUrl = '',                # e.g. git@github.com:org/repo.git
   [string]$Branch = 'main',
   [switch]$InitRepo = $false,             # init repo if .git missing
@@ -48,6 +27,38 @@ param(
 
   [switch]$OpenBrowser = $true
 )
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Info($m){ Write-Host "[INFO] $m" -ForegroundColor Cyan }
+function Warn($m){ Write-Host "[WARN] $m" -ForegroundColor Yellow }
+function Err($m){ Write-Host "[ERROR] $m" -ForegroundColor Red }
+
+# Resolve repo root
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot = Resolve-Path (Join-Path $ScriptDir '..')
+Set-Location $RepoRoot
+Info "Repo root: $RepoRoot"
+
+if ($DevCompose) {
+  if ($Up) {
+    Write-Host "[INFO] Starting dev stack (PG + Redis + App) via docker-compose.dev.yml" -ForegroundColor Cyan
+    docker compose -f docker-compose.dev.yml up -d
+    if ($LASTEXITCODE -ne 0) { Err "compose up failed"; exit 1 }
+    Info "Waiting for app ready..."
+    for ($i=0; $i -lt 60; $i++) {
+      try { $code = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://localhost:8001/ready).StatusCode; if ($code -eq 200) { break } } catch { Start-Sleep -Seconds 2 }
+    }
+    Info "Dev stack ready at http://localhost:8001"
+    exit 0
+  }
+  if ($Down) {
+    Info "Stopping dev stack"
+    docker compose -f docker-compose.dev.yml down
+    exit 0
+  }
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

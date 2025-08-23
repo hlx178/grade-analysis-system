@@ -227,14 +227,8 @@ class ExportJob(db.Model):
 
     user = db.relationship('User')
 
-
-    @property
-    def is_pass(self):
-        """是否及格（默认60分及格）"""
-        return self.score >= 60
-
     def __repr__(self):
-        return f"<Grade {self.student.name}-{self.course.name}: {self.score}>"
+        return f"<ExportJob {self.id} {self.status}>"
 
 
 class GradeBandRule(db.Model):

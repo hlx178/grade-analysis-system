@@ -1,15 +1,4 @@
 param(
-  [switch]$DevCompose,
-  [switch]$Up,
-  [switch]$Down
-)
-
-if ($DevCompose) {
-  if ($Up) { & "$PSScriptRoot/workflow.ps1" -DevCompose -Up; exit $LASTEXITCODE }
-  if ($Down) { & "$PSScriptRoot/workflow.ps1" -DevCompose -Down; exit $LASTEXITCODE }
-}
-
-param(
   [string]$ContainerName = 'gas-local',
   [string]$ImageTag = 'gas-local:dev',
   [int]$Port = 8001,

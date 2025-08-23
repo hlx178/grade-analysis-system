@@ -148,7 +148,7 @@
   </div>
 </div>
 
-  </div>
+
 <div class="row g-3 my-3">
   <div class="col-md-6">
     <div class="card">
@@ -323,9 +323,12 @@
 {% endblock %}
 {% block scripts %}
 <script>
+console.log('Script block started');
 function selectedCsv(id){ return Array.from(document.getElementById(id).selectedOptions).map(o=>o.value).join(','); }
 async function loadOptions(){
+  console.log('loadOptions called');
   const r = await fetch('/api/summary/options'); if(!r.ok) return; const d = await r.json();
+  console.log('loadOptions data:', d);
   const fill = (id, arr)=>{ const sel=document.getElementById(id); sel.innerHTML=''; (arr||[]).forEach(x=>{ const o=document.createElement('option'); o.value=o.textContent=x; sel.appendChild(o); }); };
   fill('examName', d.exam_names);
   fill('gradeLevel', d.grade_levels);
@@ -336,9 +339,12 @@ async function loadOptions(){
     if (examSel && examSel.options.length){ const last = examSel.options[examSel.options.length-1]; last.selected = true; }
     const allSel = id => Array.from(document.getElementById(id).options).forEach(o=>o.selected=true);
     allSel('gradeLevel'); allSel('className');
-  }catch(e){}
+  }catch(e){
+      console.error('Error selecting default options:', e);
+  }
 }
 async function loadSummary(){
+  console.log('loadSummary called');
   const p = new URLSearchParams({
     exam_name: selectedCsv('examName'),
     grade_level: selectedCsv('gradeLevel'),
@@ -348,7 +354,9 @@ async function loadSummary(){
     page: 1,
     page_size: 100
   });
+  console.log('loadSummary params:', p.toString());
   const r = await fetch('/api/summary?' + p.toString()); const data = await r.json();
+  console.log('loadSummary data:', data);
   const tb = document.querySelector('#summaryTable tbody'); tb.innerHTML='';
   const subjName = (code)=>({TOTAL:'总分',CN:'语文',MA:'数学',EN:'英语',SC:'科学',SOC:'社会',MOR:'道法'})[code]||code;
   (data.items||[]).forEach(it=>{
@@ -357,10 +365,9 @@ async function loadSummary(){
     tb.appendChild(tr);
   });
 }
-window.addEventListener('DOMContentLoaded', async ()=>{ await loadOptions(); await loadSummary(); });
-</script>
-{% endblock %}
+
 function getPrefs(){
+  console.log('getPrefs called');
   return {
     letter: document.getElementById('colLetter').checked,
     class_rank: document.getElementById('colClassRank').checked,
@@ -376,36 +383,19 @@ function getPrefs(){
   };
 }
 function applyPrefs(p){
+  console.log('applyPrefs called with:', p);
   if (!p) return;
   document.getElementById('colLetter').checked = !!p.letter;
   document.getElementById('colClassRank').checked = !!p.class_rank;
   document.getElementById('colGradeRank').checked = !!p.grade_rank;
   document.getElementById('colPercentage').checked = !!p.percentage;
   document.getElementById('colRuleVersion').checked = !!p.rule_version;
-  // 保存趋势显示开关
-  const toggles = {
-    avg: document.getElementById('tgAvg')?.checked !== false,
-    med: document.getElementById('tgMed')?.checked !== false,
-    band: document.getElementById('tgBand')?.checked !== false,
-    max: document.getElementById('tgMax')?.checked !== false,
-    min: document.getElementById('tgMin')?.checked !== false,
-  };
-  try{ localStorage.setItem('trend_toggles', JSON.stringify(toggles)); }catch(e){}
-  // 同步保存到后端偏好
-  try{ fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), trend_toggles: toggles})}); }catch(e){}
-
   const chrono = document.getElementById('trendChrono'); if (chrono) chrono.checked = !!p.trend_chrono;
-  // 班级对比偏好
   if (p.class_compare){
     const onlyMeets = document.getElementById('onlyMeets'); if (onlyMeets) onlyMeets.checked = !!p.class_compare.only_meets;
     const sortSel = document.getElementById('compareSortBy'); if (sortSel && p.class_compare.sort_by) sortSel.value = p.class_compare.sort_by;
     const minCountEl = document.getElementById('minCount'); if (minCountEl && (p.class_compare.min_count ?? null) !== null) minCountEl.value = p.class_compare.min_count;
     const expMeets = document.getElementById('exportOnlyMeets'); if (expMeets) expMeets.checked = !!p.class_compare.export_only_meets;
-  }
-  // 合并后端偏好中的趋势开关（覆盖 localStorage）
-  if (p.trend_toggles){
-    const map = {tgAvg:'avg', tgMed:'med', tgBand:'band', tgMax:'max', tgMin:'min'};
-    Object.entries(map).forEach(([id,key])=>{ const el = document.getElementById(id); if (el && key in p.trend_toggles) el.checked = !!p.trend_toggles[key]; });
   }
   document.querySelectorAll('.col-letter').forEach(e=>e.style.display = p.letter? '':'none');
   document.querySelectorAll('.col-class-rank').forEach(e=>e.style.display = p.class_rank? '':'none');
@@ -414,46 +404,18 @@ function applyPrefs(p){
   document.querySelectorAll('.col-rule-version').forEach(e=>e.style.display = p.rule_version? '':'none');
 }
 async function savePrefs(){
+  console.log('savePrefs called');
   const res = await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(getPrefs())});
   if (res.ok) alert('已保存'); else alert('保存失败');
 }
 async function loadPrefs(){
+  console.log('loadPrefs called');
   const res = await fetch('/api/summary/prefs');
   if (res.ok){ const p = await res.json(); applyPrefs(p); }
 }
-async function loadSummary(){
-  const exam_name = document.getElementById('examName').value.trim() || '';
-  const grade_level = document.getElementById('gradeLevel').value.trim() || '';
-  const class_name = document.getElementById('className').value.trim() || '';
-  const subject_code = document.getElementById('subjectCode').value;
-  const order_by = document.getElementById('orderBy').value;
-  const p = new URLSearchParams({ exam_name, grade_level, class_name, subject_code, order_by });
-  const res = await fetch('/api/summary?' + p.toString());
-  const data = await res.json();
-  const tbody = document.querySelector('#summaryTable tbody');
-  tbody.innerHTML = '';
-  data.items.forEach(it => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${it.student_id}</td>
-      <td>${it.name}</td>
-      <td>${it.class_name||''}</td>
-      <td>${it.grade_level||''}</td>
-      <td>${(document.getElementById('subjectCode').value==='TOTAL')?'总分':'学科'}</td>
-      <td>${it.score}</td>
-      <td class="col-percentage">${it.percentage ?? ''}</td>
-      <td class="col-letter">${it.letter||''}</td>
-      <td class="col-class-rank">${it.class_rank ?? ''}</td>
-      <td class="col-grade-rank">${it.grade_rank ?? ''}</td>
-      <td class="col-rule-version">${it.rule_version ?? ''}</td>`;
-    tbody.appendChild(tr);
-  });
-  applyPrefs(getPrefs());
-  // 分页渲染
-  renderPager(data.total, data.page, data.page_size);
-}
 
 function qs(){
+  console.log('qs called');
   const exam_name = Array.from(document.getElementById('examName').selectedOptions).map(o=>o.value).join(',');
   const grade_level = Array.from(document.getElementById('gradeLevel').selectedOptions).map(o=>o.value).join(',');
   const class_name = Array.from(document.getElementById('className').selectedOptions).map(o=>o.value).join(',');
@@ -471,601 +433,6 @@ function clearSel(id){
   Array.from(sel.options).forEach(o => o.selected = false);
 }
 
-function renderPager(total, page, page_size){
-  const totalPages = Math.max(1, Math.ceil(total / page_size));
-  const pager = document.getElementById('pager');
-  pager.dataset.page = page;
-  pager.dataset.pageSize = page_size;
-  pager.innerHTML = '';
-  const mkBtn = (p, label, disabled=false) => `<button class="btn btn-sm ${disabled?'btn-secondary':'btn-outline-secondary'} me-1" ${disabled?'disabled':''} onclick="gotoPage(${p})">${label}</button>`;
-  pager.innerHTML += mkBtn(1, '首页', page<=1);
-  pager.innerHTML += mkBtn(page-1, '上一页', page<=1);
-  pager.innerHTML += `<span class="me-2">第 ${page}/${totalPages} 页，共 ${total} 条</span>`;
-  pager.innerHTML += mkBtn(page+1, '下一页', page>=totalPages);
-  pager.innerHTML += mkBtn(totalPages, '末页', page>=totalPages);
-}
-
-function gotoPage(p){
-  const psize = Number(document.getElementById('pageSize').value) || 50;
-  const params = new URLSearchParams({ ...qs(), page: p, page_size: psize });
-  fetch('/api/summary?' + params.toString()).then(r=>r.json()).then(data=>{
-    const tbody = document.querySelector('#summaryTable tbody');
-    tbody.innerHTML = '';
-    data.items.forEach(it => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${it.student_id}</td>
-        <td>${it.name}</td>
-        <td>${it.class_name||''}</td>
-        <td>${it.grade_level||''}</td>
-        <td>${(document.getElementById('subjectCode').value==='TOTAL')?'总分':'学科'}</td>
-        <td>${it.score}</td>
-        <td class="col-letter">${it.letter||''}</td>
-        <td class="col-class-rank">${it.class_rank ?? ''}</td>
-        <td class="col-grade-rank">${it.grade_rank ?? ''}</td>`;
-      tbody.appendChild(tr);
-    });
-    applyPrefs(getPrefs());
-    renderPager(data.total, data.page, data.page_size);
-  });
-}
-
-function buildExportParams(){
-  const scope = document.getElementById('exportScope').value;
-  const page = document.querySelector('#pager')?.dataset.page || 1;
-  const page_size = document.getElementById('pageSize').value || 50;
-  const params = new URLSearchParams({ ...qs(), scope, page, page_size });
-  if (document.getElementById('exportUsePrefs').checked){
-    const p = getPrefs();
-    const cols = ['student_id','name','class_name','grade_level','score'];
-    if (p.percentage) cols.push('percentage');
-    if (p.letter) cols.push('letter');
-    if (p.class_rank) cols.push('class_rank');
-    if (p.grade_rank) cols.push('grade_rank');
-    if (p.rule_version) cols.push('rule_version');
-    params.append('columns', cols.join(','));
-  }
-  return params;
-}
-
-function exportSummary(fmt){
-  const params = buildExportParams();
-  params.set('format', fmt);
-  window.location = '/api/summary/export?' + params.toString();
-}
-
-async function exportSummaryAsync(){
-  const params = buildExportParams();
-  const res = await fetch('/api/export/tasks', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.fromEntries(params)) });
-  if (!res.ok){ alert('创建任务失败'); return; }
-  const data = await res.json();
-  alert('已创建任务：' + data.task_id);
-  refreshExportTasks();
-}
-<script>
-const _taskIds = new Set();
-async function refreshExportTasks(){
-  const tbody = document.querySelector('#exportTasksTable tbody');
-  if (!tbody) return;
-  const ids = Array.from(_taskIds);
-  for (const id of ids){
-    const r = await fetch(`/api/export/tasks/${id}`);
-    if (!r.ok) continue;
-    const t = await r.json();
-    let row = tbody.querySelector(`tr[data-id="${id}"]`);
-    if (!row){ row = document.createElement('tr'); row.dataset.id = id; tbody.prepend(row); }
-    row.innerHTML = `<td></td><td>${id}</td><td>${t.status}</td><td>${t.progress||0}%</td><td>${t.filename||''}</td><td>${t.status==='completed'?`<a href="/api/export/tasks/${id}/download" class="btn btn-sm btn-success">下载</a>`:''}</td>`;
-  }
-}
-</script>
-
-// 完成通知与高亮
-let _notifyPermChecked = false;
-async function ensureNotifyPermission(){
-  if (_notifyPermChecked) return;
-  _notifyPermChecked = true;
-  if ('Notification' in window && Notification.permission === 'default'){
-    try{ await Notification.requestPermission(); }catch(e){}
-  }
-}
-
-function notifyDone(task){
-  if (!('Notification' in window)) return;
-  if (Notification.permission === 'granted'){
-    new Notification('导出完成', { body: `任务 ${task.task_id} 已完成`, tag: task.task_id });
-  }
-}
-
-
-let _autoTimer = null;
-function autoRefreshToggle(btn){
-  if (_autoTimer){
-    clearInterval(_autoTimer); _autoTimer = null; btn.textContent = '开启自动刷新';
-  } else {
-    _autoTimer = setInterval(()=> loadMyTasks(), 5000); btn.textContent = '关闭自动刷新';
-  }
-}
-
-async function loadMyTasks(page=1){
-  const page_size = Number(document.getElementById('taskPageSize').value)||10;
-  const status = document.getElementById('taskStatus').value;
-  const q = document.getElementById('taskQuery').value.trim();
-  const qs = new URLSearchParams({ page, page_size });
-  if (status) qs.set('status', status);
-  if (q) qs.set('q', q);
-  const r = await fetch(`/api/export/my-tasks?${qs.toString()}`);
-  if (!r.ok) return;
-  const data = await r.json();
-  const tbody = document.querySelector('#exportTasksTable tbody');
-  tbody.innerHTML = '';
-  // 记住筛选与分页偏好
-  localStorage.setItem('exportTasks.status', status || '');
-  localStorage.setItem('exportTasks.page_size', String(page_size));
-  localStorage.setItem('exportTasks.q', q || '');
-  data.items.forEach(it => {
-    const tr = document.createElement('tr');
-    tr.dataset.id = it.task_id;
-    _taskIds.add(it.task_id);
-    tr.innerHTML = `<td><input type=\"checkbox\" class=\"task-cb\"></td><td>${it.created_at||''}</td><td>${it.task_id}</td><td>${it.status}</td><td>${it.progress||0}%</td><td>${it.filename||''}</td><td>${it.file_size||''}</td><td>${it.summary||''}</td><td>${it.file_ready?`<a href=\"/api/export/tasks/${it.task_id}/download\" class=\"btn btn-sm btn-success me-1\">下载</a><button class=\"btn btn-sm btn-outline-primary me-1\" onclick=\"copySignedUrl('${it.task_id}')\">签名链接</button>`:''}<button class=\"btn btn-sm btn-outline-danger\" onclick=\"deleteTask('${it.task_id}')\">删除</button></td>`;
-    if (it.status === 'completed'){ tr.classList.add('table-success'); }
-    else if (it.status === 'failed'){ tr.classList.add('table-danger'); }
-    tbody.appendChild(tr);
-  });
-  ensureNotifyPermission();
-  data.items.filter(it=>it.status==='completed').forEach(notifyDone);
-  renderTaskPager(data.total, data.page, data.page_size);
-
-function toggleTaskAll(cb){
-
-async function copySignedUrl(id){
-  const r = await fetch(`/api/export/tasks/${id}/signed-url`);
-  if (!r.ok){ alert('生成签名链接失败'); return; }
-  const data = await r.json();
-  await navigator.clipboard.writeText(data.url);
-  alert('已复制签名下载链接（有效期秒）：' + data.ttl_seconds);
-}
-
-  document.querySelectorAll('#exportTasksTable tbody .task-cb').forEach(x=> x.checked = cb.checked);
-}
-
-async function deleteSelectedTasks(){
-  const ids = Array.from(document.querySelectorAll('#exportTasksTable tbody tr'))
-    .filter(tr=> tr.querySelector('.task-cb')?.checked)
-    .map(tr=> tr.dataset.id);
-  if (!ids.length){ alert('请选择任务'); return; }
-  if (!confirm('确认删除所选任务及文件？')) return;
-  const r = await fetch('/api/export/my-tasks/batch', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids }) });
-  if (!r.ok){ alert('删除失败'); return; }
-  loadMyTasks(1);
-}
-
-async function deleteCompletedTasks(){
-  if (!confirm('确认删除所有已完成任务及文件？')) return;
-  const r = await fetch('/api/export/my-tasks/batch', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'completed' }) });
-  if (!r.ok){ alert('删除失败'); return; }
-  loadMyTasks(1);
-}
-
-}
-
-async function deleteTask(id){
-  if (!confirm('确认删除该任务及文件？')) return;
-  const r = await fetch(`/api/export/my-tasks/${id}`, { method:'DELETE' });
-  if (!r.ok){ alert('删除失败'); return; }
-  loadMyTasks(1);
-}
-
-function renderTaskPager(total, page, page_size){
-  const totalPages = Math.max(1, Math.ceil(total / page_size));
-  const pager = document.getElementById('taskPager');
-  pager.innerHTML = '';
-  const mkBtn = (p, label, disabled=false) => `<button class="btn btn-sm ${disabled?'btn-secondary':'btn-outline-secondary'} me-1" ${disabled?'disabled':''} onclick="loadMyTasks(${p})">${label}</button>`;
-  pager.innerHTML += mkBtn(1, '首页', page<=1);
-  pager.innerHTML += mkBtn(page-1, '上一页', page<=1);
-  // 恢复趋势显示开关
-  try{
-    const s = localStorage.getItem('trend_toggles');
-    if (s){ const t = JSON.parse(s);
-      const map = {tgAvg:'avg', tgMed:'med', tgBand:'band', tgMax:'max', tgMin:'min'};
-      Object.entries(map).forEach(([id,key])=>{ const el = document.getElementById(id); if (el && key in t) el.checked = !!t[key]; });
-    }
-  }catch(e){}
-
-  pager.innerHTML += `<span class=\"me-2\">第 ${page}/${totalPages} 页，共 ${total} 条</span>`;
-  pager.innerHTML += mkBtn(page+1, '下一页', page>=totalPages);
-  pager.innerHTML += mkBtn(totalPages, '末页', page>=totalPages);
-}
-
-
-async function loadOptions(){
-  const res = await fetch('/api/summary/options');
-  if (!res.ok) return;
-  const data = await res.json();
-  const fill = (id, arr) => {
-    const sel = document.getElementById(id);
-    sel.innerHTML = '';
-    (arr||[]).forEach(v => {
-      const opt = document.createElement('option');
-      opt.value = v; opt.textContent = v;
-      sel.appendChild(opt);
-    });
-
-let _trendChart, _classChart;
-async function loadTrendChart(){
-  const { subject_code, grade_level, class_name } = qs();
-  const p = new URLSearchParams({ subject_code, grade_level, class_name });
-  const r = await fetch('/api/analysis/trends?'+p.toString());
-  if (!r.ok) return;
-  const data = await r.json();
-  let labels = data.trends.map(x=>x.exam_name);
-  // 按时间排序（尝试解析日期/学期），失败时使用原顺序
-  if (document.getElementById('trendChrono')?.checked){
-    const parseDate = (s)=>{
-      if (!s) return null;
-      // 常见格式 YYYY-MM-DD 或 YYYYMMDD
-      const m1 = s.match(/(\d{4})[-/]?(\d{2})[-/]?(\d{2})/);
-      if (m1) return new Date(`${m1[1]}-${m1[2]}-${m1[3]}`);
-      // 学期关键字：2024上/2024下/2024春/2024秋/2024S/2024F
-      const m2 = s.match(/(\d{4}).*?(上|下|春|秋|S|F)/i);
-      if (m2){
-        const y = Number(m2[1]); const half = /下|秋|F/i.test(m2[2]) ? 10 : 3; // 10月或3月
-        return new Date(`${y}-${String(half).padStart(2,'0')}-01`);
-      }
-      return null;
-    };
-    const items = data.trends.map((x,i)=>({i, x, d: parseDate(x.exam_name)}));
-    items.sort((a,b)=>{
-      if (a.d && b.d) return a.d - b.d;
-      if (a.d && !b.d) return -1;
-      if (!a.d && b.d) return 1;
-      return String(a.x.exam_name).localeCompare(String(b.x.exam_name));
-    });
-    data.trends = items.map(it=>it.x);
-    labels = data.trends.map(x=>x.exam_name);
-  }
-  const avgs = data.trends.map(x=>x.avg);
-  const meds = data.trends.map(x=>x.median);
-  const p25 = data.trends.map(x=>x.p25);
-  const p75 = data.trends.map(x=>x.p75);
-  const ctx = document.getElementById('trendChart').getContext('2d');
-  if (_trendChart) _trendChart.destroy();
-  const maxs = data.trends.map(x=>x.max);
-  const mins = data.trends.map(x=>x.min);
-  const stds = data.trends.map(x=>x.std);
-  const showAvg = document.getElementById('tgAvg')?.checked !== false;
-  const showMed = document.getElementById('tgMed')?.checked !== false;
-  const showBand = document.getElementById('tgBand')?.checked !== false;
-  const showMax = document.getElementById('tgMax')?.checked !== false;
-  const showMin = document.getElementById('tgMin')?.checked !== false;
-
-  const datasets = [];
-  if (showAvg) datasets.push({ label: '均分', data: avgs, borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.1)' });
-  if (showMed) datasets.push({ label: '中位数', data: meds, borderColor: '#0dcaf0', borderDash:[2,2] });
-  if (showBand){
-    // 先压入 P25 作为下边界
-    datasets.push({ label: 'P25', data: p25, borderColor: 'rgba(108,117,125,0.0)' });
-    // 再压入 P75，并将其填充到前一个数据集（即 P25）
-    datasets.push({ label: 'P25-P75', data: p75, borderColor: 'rgba(111,66,193,0.0)', backgroundColor: 'rgba(111,66,193,0.15)', fill: '-1' });
-  }
-  if (showMax) datasets.push({ label: '最高', data: maxs, borderColor: '#198754', borderDash:[4,3] });
-  if (showMin) datasets.push({ label: '最低', data: mins, borderColor: '#dc3545', borderDash:[4,3] });
-
-  _trendChart = new Chart(ctx, {
-    type: 'line',
-    data: { labels, datasets },
-    options: { responsive: true, scales: { y: { beginAtZero: true }}, plugins:{
-      tooltip:{ callbacks:{
-        afterBody(items){
-          const i = items[0].dataIndex; return 'STD: '+ stds[i];
-        }
-      }}
-    }}
-  });
-
-  const sortTag = document.getElementById('compareSortTag'); if (sortTag) sortTag.textContent = '排序：' + ((document.getElementById('compareSortBy')?.value||'avg')==='count'?'按人数':'按均分');
-  const tmeta = document.getElementById('trendMeta'); if (tmeta){
-    const toggles = {
-      avg: document.getElementById('tgAvg')?.checked !== false,
-      med: document.getElementById('tgMed')?.checked !== false,
-      band: document.getElementById('tgBand')?.checked !== false,
-      max: document.getElementById('tgMax')?.checked !== false,
-      min: document.getElementById('tgMin')?.checked !== false,
-    };
-    const items = [];
-    if (toggles.avg) items.push('均分');
-    if (toggles.med) items.push('中位数');
-    if (toggles.band) items.push('P25/P75');
-    if (toggles.max) items.push('最高');
-    if (toggles.min) items.push('最低');
-    const sortWord = document.getElementById('trendChrono')?.checked ? '按时间排序' : '按名称排序';
-    tmeta.textContent = `排序：${sortWord}；导出曲线：${items.join('、')||'无'}`;
-  }
-
-
-  // 勾选联动
-  // 导出偏好提示：当“仅导出达标”开启但当前阈值与偏好不同
-  (async ()=>{
-    const expOnly = document.getElementById('exportOnlyMeets')?.checked || false;
-    const hint = document.getElementById('exportPrefHint');
-    if (!hint) return;
-    hint.textContent = '';
-    if (expOnly){
-      try{
-        const r = await fetch('/api/summary/prefs');
-        if (r.ok){
-          const j = await r.json();
-          const prefMin = Number(j?.class_compare?.min_count||0);
-          const curMin = Number(document.getElementById('minCount')?.value||0);
-          if (prefMin !== curMin){
-            const a = document.createElement('a'); a.href='#'; a.textContent='将偏好阈值更新为当前值'; a.onclick = async (e)=>{ e.preventDefault(); try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, min_count: curMin}})}); hint.textContent='已更新偏好阈值为 '+curMin; }catch(e){ hint.textContent='更新失败'; }};
-            hint.innerHTML = `提示：导出将按偏好中的阈值(${prefMin})执行，当前设置为(${curMin})。`;
-            hint.appendChild(document.createTextNode(' ')); hint.appendChild(a);
-          }
-        }
-      }catch(e){}
-    }
-  })();
-
-  ['tgAvg','tgMed','tgBand','tgMax','tgMin'].forEach(id=>{
-    const el = document.getElementById(id); if (!el) return;
-    el.onchange = ()=> loadTrendChart();
-  });
-}
-
-async function loadClassCompare(){
-  const exam = document.getElementById('compareExam').value.trim() || (Array.from(document.getElementById('examName').selectedOptions)[0]?.value || '');
-  const subject_code = document.getElementById('subjectCode').value;
-  if (!exam){ alert('请填写考试名称或在左侧选择一个'); return; }
-  const grade_level = (document.getElementById('gradeLevel')?.value || '').trim();
-  const top_n = (document.getElementById('compareTopN')?.value || '').trim();
-  const p = new URLSearchParams({ exam_name: exam, subject_code });
-  if (grade_level) p.set('grade_level', grade_level);
-  if (top_n) p.set('top_n', top_n);
-  const minCount = Number(document.getElementById('minCount')?.value || 0);
-  if (minCount>0) p.set('min_count', String(minCount));
-  const sort_by = (document.getElementById('compareSortBy')?.value || 'avg');
-  p.set('sort_by', sort_by);
-  const r = await fetch('/api/analysis/class-compare?'+p.toString());
-  if (!r.ok) return;
-  const data = await r.json();
-  const metaDiv = document.getElementById('compareMeta');
-  if (metaDiv && data.meta){
-    const m = data.meta;
-    if (m.min_count && m.min_count>0){
-      metaDiv.textContent = `当前人数阈值: ${m.min_count}；原始班级数: ${m.total}；被过滤: ${m.filtered_out}；返回: ${m.returned}`;
-  // 仅显示达标（前端过滤）
-  if (document.getElementById('onlyMeets')?.checked){
-    const zipped = labels.map((l,i)=>({l, i})).filter(z=>meets[z.i]);
-    const keepIdx = zipped.map(z=>z.i);
-    const _labels = zipped.map(z=>z.l);
-    const _avgs = keepIdx.map(i=>avgs[i]);
-    const _counts = keepIdx.map(i=>counts[i]);
-    const _stds = keepIdx.map(i=>stds[i]);
-    labels = _labels; avgs = _avgs; counts = _counts; stds = _stds;
-    // 颜色统一为达标色
-  }
-
-    }else{
-      metaDiv.textContent = `班级数: ${m.total}；返回: ${m.returned}`;
-    }
-  }
-  const labels = data.compare.map(x=>x.class_name);
-  const avgs = data.compare.map(x=>x.avg);
-  const meets = data.compare.map(x=>x.meets_threshold !== false);
-  const bgColors = meets.map(ok => ok ? '#198754' : 'rgba(220,53,69,0.3)');
-  const borderColors = meets.map(ok => ok ? '#198754' : '#dc3545');
-
-let _distChart;
-async function loadDistribution(){
-  const subject_code = document.getElementById('subjectCode').value;
-  const exam_name = document.getElementById('distExam').value.trim();
-  const bin_raw = document.getElementById('distBin').value.trim();
-  const bin_width = (bin_raw.toLowerCase?.() === 'auto' || bin_raw === '') ? 'auto' : (Number(bin_raw)||10);
-  const usePct = document.getElementById('distPercent')?.checked || false;
-  const showCDF = document.getElementById('distCDF')?.checked || false;
-  const p = new URLSearchParams({ subject_code, bin_width });
-  if (exam_name) p.set('exam_name', exam_name);
-  const r = await fetch('/api/analysis/distribution?'+p.toString());
-  if (!r.ok) return;
-  const data = await r.json();
-  const labels = data.bins.map(b=>b.label);
-  const counts = data.bins.map(b=>b.count);
-  const percents = data.bins.map(b=>b.percent);
-  const cdf = data.bins.map(b=>b.cdf);
-  const ctx = document.getElementById('distChart').getContext('2d');
-  if (_distChart) _distChart.destroy();
-  const datasets = [];
-  if (usePct) {
-    datasets.push({ label: '比例(%)', data: percents, type: 'bar', backgroundColor: '#6f42c1', yAxisID: 'y' });
-  } else {
-    datasets.push({ label: '人数', data: counts, type: 'bar', backgroundColor: '#6f42c1', yAxisID: 'y' });
-  }
-  if (showCDF) {
-    datasets.push({ label: '累计(%)', data: cdf, type: 'line', borderColor: '#0d6efd', yAxisID: 'y1' });
-  }
-  const meta = document.getElementById('distMeta');
-  if (meta) meta.textContent = `实际桶宽: ${data.summary?.bin_width ?? (typeof bin_width==='string'?bin_width:bin_width||'auto')}；模式：${usePct?'百分比':'人数'}${showCDF?'；叠加CDF':''}`;
-  _distChart = new Chart(ctx, {
-  const range = document.getElementById('distRange');
-  if (range && data.bins?.length){
-    const first = data.bins[0], last = data.bins[data.bins.length-1];
-    range.textContent = `范围: ${first.start} ~ ${last.end}（分箱数 ${data.bins.length}）`;
-  }
-
-    type: 'bar',
-    data: { labels, datasets },
-    options: { responsive: true, scales: {
-      y: { beginAtZero: true, title: { display: true, text: usePct ? '百分比(%)' : '人数' } },
-      y1: { beginAtZero: true, position: 'right', min: 0, max: 100, grid: { drawOnChartArea: false }, ticks: { callback: (v)=>v+'%' } }
-    }}
-  });
-  ['distPercent','distCDF'].forEach(id=>{ const el = document.getElementById(id); if (el) el.onchange = ()=> loadDistribution(); });
-}
-
-  const counts = data.compare.map(x=>x.count);
-  const stds = data.compare.map(x=>x.std);
-  const ctx = document.getElementById('classCompareChart').getContext('2d');
-  if (_classChart) _classChart.destroy();
-  // 构造图例：达标/未达标
-  const showLegend = true;
-  _classChart = new Chart(ctx, {
-    type: 'bar',
-    data: { labels, datasets: [{ label: '均分', data: avgs, backgroundColor: bgColors, borderColor: borderColors, borderWidth: 1 }]},
-    options: { responsive: true, scales: { y: { beginAtZero: true }}, plugins:{
-      annotation: {
-        annotations: (function(){
-          const m = Number(document.getElementById('minCount')?.value||0);
-          if (!m) return {};
-          return {
-            threshold: {
-              type: 'line', yMin: m, yMax: m, borderColor: '#6c757d', borderDash: [6,4], borderWidth: 1,
-              label: { enabled: true, content: `阈值 ${m}`, position: 'start', backgroundColor: 'rgba(108,117,125,0.1)', color: '#6c757d' }
-            }
-          };
-        })()
-      },
-      legend: { display: showLegend, labels: { generateLabels(chart){
-        return [
-          { text: '达标', fillStyle: '#198754', strokeStyle: '#198754' },
-          { text: '低于阈值', fillStyle: 'rgba(220,53,69,0.3)', strokeStyle: '#dc3545' },
-        ];
-      }}},
-      tooltip:{ callbacks:{
-        afterBody(items){
-          const i = items[0].dataIndex;
-          const flag = meets[i] ? '' : '（低于阈值）';
-          const m = Number(document.getElementById('minCount')?.value||0);
-          const delta = Math.max(0, m - Number(counts[i]||0));
-          const extra = delta>0 ? ` 距达标还差${delta}人` : '';
-          return '人数:'+counts[i]+' 标准差:'+stds[i] + ' ' + flag + extra;
-        }
-      }}
-    }}
-  });
-
-function buildTrendExportUrl(){
-  const { subject_code, grade_level, class_name } = qs();
-  const p = new URLSearchParams({ subject_code, grade_level, class_name });
-  return '/api/analysis/trends/export?'+p.toString();
-}
-function buildClassExportUrl(){
-  const exam = document.getElementById('compareExam').value.trim() || (Array.from(document.getElementById('examName').selectedOptions)[0]?.value || '');
-  const subject_code = document.getElementById('subjectCode').value;
-  const p = new URLSearchParams({ subject_code });
-  if (exam) p.set('exam_name', exam);
-  const grade_level = (document.getElementById('gradeLevel')?.value || '').trim();
-  const top_n = (document.getElementById('compareTopN')?.value || '').trim();
-  let minCount = Number(document.getElementById('minCount')?.value || 0);
-  const sort_by = (document.getElementById('compareSortBy')?.value || 'avg');
-  const onlyExportMeets = document.getElementById('exportOnlyMeets')?.checked || false;
-  if (onlyExportMeets){
-    const prefMin = Number((await (async()=>{ try{ const r=await fetch('/api/summary/prefs'); if(r.ok){ const j=await r.json(); return j?.class_compare?.min_count||0;} }catch(e){}; return 0;})())||0);
-    if (prefMin>0) minCount = prefMin;
-  }
-  if (grade_level) p.set('grade_level', grade_level);
-  if (top_n) p.set('top_n', top_n);
-  if (minCount>0) p.set('min_count', String(minCount));
-  p.set('sort_by', sort_by);
-  return '/api/analysis/class-compare/export?'+p.toString();
-}
-
-function wireExportLinks(){
-
-function buildExportAllUrl(){
-  async function updateExportHint(){
-    if (sessionStorage.getItem('suppress_export_hints')==='1') return;
-    const expOnly = document.getElementById('exportOnlyMeets')?.checked || false;
-    const hint = document.getElementById('exportPrefHint'); if (!hint) return;
-    hint.textContent = '';
-    if (!expOnly) return;
-    try{
-      const r = await fetch('/api/summary/prefs'); if (!r.ok) return;
-      const j = await r.json();
-      const prefMin = Number(j?.class_compare?.min_count||0);
-      const curMin = Number(document.getElementById('minCount')?.value||0);
-      if (prefMin !== curMin){
-        const a = document.createElement('a'); a.href='#'; a.textContent='将偏好阈值更新为当前值'; a.onclick = async (e)=>{ e.preventDefault(); try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, min_count: curMin}})}); hint.textContent='已更新偏好阈值为 '+curMin; }catch(e){ hint.textContent='更新失败'; }};
-        const b = document.createElement('a'); b.href='#'; b.textContent='本次不再提示'; b.onclick = (e)=>{ e.preventDefault(); try{ sessionStorage.setItem('suppress_export_hints','1'); }catch(_){}; hint.textContent=''; };
-        hint.innerHTML = `提示：导出将按偏好中的阈值(${prefMin})执行，当前设置为(${curMin})。`;
-        hint.appendChild(document.createTextNode(' ')); hint.appendChild(a);
-        hint.appendChild(document.createTextNode(' | ')); hint.appendChild(b);
-      }
-    }catch(e){}
-  }
-
-  const { subject_code, grade_level, class_name } = qs();
-  const exam = document.getElementById('compareExam').value.trim() || (Array.from(document.getElementById('examName').selectedOptions)[0]?.value || '');
-  const top_n = (document.getElementById('compareTopN')?.value || '').trim();
-  const bin_raw = document.getElementById('distBin').value.trim();
-  const bin_width = (bin_raw.toLowerCase?.() === 'auto' || bin_raw === '') ? 'auto' : (Number(bin_raw)||10);
-  const p = new URLSearchParams({ subject_code, grade_level, class_name, bin_width });
-  if (exam) p.set('exam_name', exam);
-  if (top_n) p.set('top_n', top_n);
-  return '/api/analysis/export-all?'+p.toString();
-}
-(function(){
-  const oldWire = wireExportLinks;
-  window.wireExportLinks = function(){
-    oldWire && oldWire();
-  // export-all 提示：仅导出达标开启时提示使用偏好阈值
-  (async ()=>{
-    const expOnly = document.getElementById('exportOnlyMeets')?.checked || false;
-    const hint = document.getElementById('exportAllHint'); if (!hint) return;
-    hint.textContent = '';
-    if (!expOnly) return;
-    try{
-      const r = await fetch('/api/summary/prefs'); if (!r.ok) return;
-      const j = await r.json();
-      const prefMin = Number(j?.class_compare?.min_count||0);
-      if (prefMin>0){ hint.textContent = `打包导出：班级对比将按偏好阈值(${prefMin})筛选达标班级导出`; }
-    }catch(e){}
-  })();
-
-    const a = document.getElementById('exportAllBtn'); if (a) a.href = buildExportAllUrl();
-  }
-})();
-
-  const t = document.getElementById('trendExportBtn'); if (t) t.href = buildTrendExportUrl();
-  const c = document.getElementById('classExportBtn'); if (c) c.href = buildClassExportUrl();
-}
-
-const _oldLoadTrendChart = loadTrendChart;
-loadTrendChart = async function(){ await _oldLoadTrendChart(); wireExportLinks(); }
-const _oldLoadClassCompare = loadClassCompare;
-loadClassCompare = async function(){ await _oldLoadClassCompare(); wireExportLinks(); }
-  const exportOnlyMeetsEl = document.getElementById('exportOnlyMeets'); if (exportOnlyMeetsEl) exportOnlyMeetsEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, export_only_meets: exportOnlyMeetsEl.checked }})}); }catch(e){}; };
-
-
-window.addEventListener('DOMContentLoaded', wireExportLinks);
-
-}
-
-window.addEventListener('DOMContentLoaded', ()=>{
-  setTimeout(()=>{ loadTrendChart(); }, 300);
-  // 联动刷新：每次查询/分页后可手动调用
-  // 当偏好加载后，按偏好重绘趋势图
-  const prefChrono = document.getElementById('trendChrono')?.checked;
-  if (typeof prefChrono !== 'undefined') { loadTrendChart(); }
-
-  const minCountEl = document.getElementById('minCount'); if (minCountEl) minCountEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, min_count: Number(minCountEl.value||0) }})}); }catch(e){}; };
-
-  const onlyMeetsEl = document.getElementById('onlyMeets'); if (onlyMeetsEl) onlyMeetsEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, only_meets: onlyMeetsEl.checked }})}); }catch(e){}; loadClassCompare(); };
-  const sortByEl = document.getElementById('compareSortBy'); if (sortByEl) sortByEl.onchange = async ()=>{ try{ await fetch('/api/summary/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...getPrefs(), class_compare: {...getPrefs().class_compare, sort_by: sortByEl.value }})}); }catch(e){}; const sortTag = document.getElementById('compareSortTag'); if (sortTag) sortTag.textContent = '排序：' + ((sortByEl.value||'avg')==='count'?'按人数':'按均分'); loadClassCompare(); };
-
-  const oldLoadSummary = loadSummary;
-  window.loadSummary = async function(){ await oldLoadSummary(); await loadTrendChart(); }
-  const chrono = document.getElementById('trendChrono'); if (chrono) chrono.onchange = ()=> loadTrendChart();
-});
-
-  };
-  fill('examName', data.exam_names);
-  fill('gradeLevel', data.grade_levels);
-  fill('className', data.class_names);
-  // 初始默认全选，便于快速查询
-  selectAll('examName'); selectAll('gradeLevel'); selectAll('className');
-}
-
-// 轻量搜索：对当前下拉选项进行过滤
 function attachFilter(inputId, selectId){
   const input = document.getElementById(inputId);
   const sel = document.getElementById(selectId);
@@ -1077,25 +444,15 @@ function attachFilter(inputId, selectId){
   });
 }
 
-
-function buildDistExportUrl(){
-  const subject_code = document.getElementById('subjectCode').value;
-  const bin_width = Number(document.getElementById('distBin').value)||10;
-  const exam_name = document.getElementById('distExam').value.trim();
-  const p = new URLSearchParams({ subject_code, bin_width });
-  if (exam_name) p.set('exam_name', exam_name);
-  return '/api/analysis/distribution/export?'+p.toString();
+async function loadMyTasks(page=1){
+    console.log('loadMyTasks called');
 }
-(function(){
-  const oldWire = wireExportLinks;
-  window.wireExportLinks = function(){
-    oldWire && oldWire();
-    const d = document.getElementById('distExportBtn'); if (d) d.href = buildDistExportUrl();
-  }
-})();
 
-window.addEventListener('DOMContentLoaded', ()=>{
-  loadOptions(); loadPrefs();
+window.addEventListener('DOMContentLoaded', async ()=>{
+  console.log('DOMContentLoaded event fired');
+  await loadOptions();
+  await loadPrefs();
+  await loadSummary();
   attachFilter('examFilter','examName');
   attachFilter('gradeFilter','gradeLevel');
   attachFilter('classFilter','className');

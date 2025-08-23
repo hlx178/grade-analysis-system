@@ -87,6 +87,28 @@ def create_app(config_name="default"):
                 pass
             return response
 
+    # 全局异常处理：记录完整栈并对 /api/* 返回 JSON，便于快速定位 500 根因
+    @app.errorhandler(Exception)
+    def _handle_exception(e):
+        try:
+            from flask import request, jsonify
+            # 结构化错误日志
+            _json_log('error', logging.ERROR,
+                      kind='exception', path=getattr(request, 'path', None),
+                      error=str(e), type=type(e).__name__)
+            try:
+                import traceback as _tb
+                tb = _tb.format_exc()
+                _json_log('error', logging.ERROR, traceback=tb)
+            except Exception:
+                pass
+            # API 路径返回 JSON，页面仍走默认错误页面
+            if getattr(request, 'path', '') .startswith('/api/'):
+                return jsonify({'error': 'internal_error', 'type': type(e).__name__, 'message': str(e)}), 500
+        except Exception:
+            pass
+        return e
+
     # 用户加载回调
     @login_manager.user_loader
     def load_user(user_id):

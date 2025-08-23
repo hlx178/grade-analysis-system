@@ -1,0 +1,116 @@
+name: Build and Push Docker (GHCR)
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*", "release-*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: grade-analysis
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare image tags
+        id: prep
+        run: |
+          OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"
+          IMAGE_BASE="${{ env.REGISTRY }}/${OWNER_LOWER}/${{ env.IMAGE_NAME }}"
+          TAGS=()
+          # latest for main
+          if [[ "${GITHUB_REF_NAME}" == "main" && "${GITHUB_REF_TYPE}" == "branch" ]]; then
+            TAGS+=("${IMAGE_BASE}:latest")
+          fi
+          # tag for git tag (e.g., v1.2.3)
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAGS+=("${IMAGE_BASE}:${GITHUB_REF_NAME}")
+          fi
+          # always include short sha
+          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          TAGS+=("${IMAGE_BASE}:sha-${SHORT_SHA}")
+          printf '%s\n' "tags=$(IFS=, ; echo "${TAGS[*]}")" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        if: ${{ steps.prep.outputs.tags != '' }}
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.prep.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-and-push-dockerhub:
+    name: Build and Push Docker (Docker Hub)
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: docker.io
+      IMAGE_NAME: grade-analysis
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Prepare image tags
+        id: prep
+        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+        run: |
+          # Namespace defaults to Docker Hub username unless DOCKERHUB_NAMESPACE repo variable is set
+          NAMESPACE="${{ vars.DOCKERHUB_NAMESPACE }}"
+          if [ -z "$NAMESPACE" ]; then NAMESPACE="${{ secrets.DOCKERHUB_USERNAME }}"; fi
+          IMAGE_BASE="${{ env.REGISTRY }}/$NAMESPACE/${{ env.IMAGE_NAME }}"
+          TAGS=()
+          if [[ "${GITHUB_REF_NAME}" == "main" && "${GITHUB_REF_TYPE}" == "branch" ]]; then
+            TAGS+=("${IMAGE_BASE}:latest")
+          fi
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAGS+=("${IMAGE_BASE}:${GITHUB_REF_NAME}")
+          fi
+          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          TAGS+=("${IMAGE_BASE}:sha-${SHORT_SHA}")
+          printf '%s\n' "tags=$(IFS=, ; echo "${TAGS[*]}")" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.prep.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

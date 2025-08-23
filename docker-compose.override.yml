@@ -1,0 +1,17 @@
+version: '3.9'
+
+services:
+  app:
+    build: .
+    image: grade-analysis:dev
+    ports:
+      - "8002:8000"
+    environment:
+      - LOG_LEVEL=DEBUG
+      - LOG_FORMAT_JSON=false
+      - DIAG_SQL_LOG=true
+      - READY_DISK_FREE_MB=64
+    # retain existing volumes from base
+    volumes:
+      - ./uploads:/app/uploads
+      - ./exports:/app/exports
