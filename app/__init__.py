@@ -47,6 +47,13 @@ def create_app(config_name="default"):
         try:
             if app.config.get('LOG_FORMAT_JSON', True):
                 fields.setdefault('ts', int(time.time()*1000))
+
+    # Force logging to stdout for debugging in container
+    import logging
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    app.logger.addHandler(stream_handler)
+
                 fields.setdefault('app', 'gas')
                 fields.setdefault('level', logging.getLevelName(level))
                 msg = json.dumps(fields, ensure_ascii=False)
