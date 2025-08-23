@@ -893,29 +893,47 @@ async function loadDistribution(){
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
+    // Decorate loadSummary to include chart loading and error handling
+    const originalLoadSummary = loadSummary;
+    window.loadSummary = async function() {
+        console.log("Loading summary data...");
+        try {
+            await originalLoadSummary();
+        } catch (e) {
+            console.error("Error loading summary table:", e);
+            alert('加载汇总表格失败，请检查控制台日志。');
+        }
+
+        console.log("Loading charts...");
+        try {
+            await loadTrendChart();
+        } catch (e) {
+            console.error("Error loading trend chart:", e);
+        }
+        try {
+            await loadClassCompare();
+        } catch (e) {
+            console.error("Error loading class compare chart:", e);
+        }
+        try {
+            await loadDistribution();
+        } catch (e) {
+            console.error("Error loading distribution chart:", e);
+        }
+    };
+
+    // Initial data load
     await loadOptions();
     await loadPrefs();
-    await loadSummary();
+    await window.loadSummary(); // Call the decorated function
 
-    // The rest of the initializations can be done after the main data is loaded
+    // Attach filters and other event handlers
     attachFilter('examFilter', 'examName');
     attachFilter('gradeFilter', 'gradeLevel');
     attachFilter('classFilter', 'className');
 
     const chrono = document.getElementById('trendChrono');
     if (chrono) chrono.onchange = () => loadTrendChart();
-
-    // Simplified summary loading
-    const originalLoadSummary = loadSummary;
-    window.loadSummary = async function() {
-        await originalLoadSummary();
-        // Charts will be loaded on demand or after a delay
-        setTimeout(() => {
-            loadTrendChart();
-            loadClassCompare();
-            loadDistribution();
-        }, 100);
-    }
 });
 </script>
 {% endblock %}
