@@ -48,7 +48,7 @@ def get_summary_data(user, exam_names, grade_levels, class_names, subject_code, 
     if subject_code:
         q = q.filter(Course.code == subject_code)
 
-    total = q.with_entities(db.func.count()).scalar()
+        total = db.session.query(db.func.count(Grade.id)).select_from(q.subquery()).scalar()
     rows = q.offset((page - 1) * page_size).limit(page_size).all()
 
     published_set = None
