@@ -897,6 +897,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     await loadPrefs();
     await loadSummary();
 
+    // The rest of the initializations can be done after the main data is loaded
     attachFilter('examFilter', 'examName');
     attachFilter('gradeFilter', 'gradeLevel');
     attachFilter('classFilter', 'className');
@@ -904,12 +905,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     const chrono = document.getElementById('trendChrono');
     if (chrono) chrono.onchange = () => loadTrendChart();
 
-    const oldLoadSummary = loadSummary;
+    // Simplified summary loading
+    const originalLoadSummary = loadSummary;
     window.loadSummary = async function() {
-        await oldLoadSummary();
-        await loadTrendChart();
-        await loadClassCompare();
-        await loadDistribution();
+        await originalLoadSummary();
+        // Charts will be loaded on demand or after a delay
+        setTimeout(() => {
+            loadTrendChart();
+            loadClassCompare();
+            loadDistribution();
+        }, 100);
     }
 });
 </script>
