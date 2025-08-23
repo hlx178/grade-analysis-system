@@ -2380,7 +2380,7 @@ def api_summary_list():
     order_by = request.args.get('order_by') or 'score_desc'
     page = request.args.get('page', 1, type=int)
     page_size = request.args.get('page_size', 100, type=int)
-    data = get_summary_data(exam_names, grade_levels, class_names, subject_code, order_by, page, page_size)
+    data = get_summary_data(current_user, exam_names, grade_levels, class_names, subject_code, order_by, page, page_size)
     return jsonify(data)
 
 
@@ -3575,7 +3575,7 @@ def _build_export_file(params: dict, export_dir: str) -> str:
 @api_bp.route('/summary/options', methods=['GET'])
 @login_required
 def api_summary_options():
-    return jsonify(get_summary_options())
+    return jsonify(get_summary_options(current_user))
 
 
 # 诊断 API（管理员）：构造典型查询，返回 EXPLAIN 计划与耗时
