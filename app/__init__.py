@@ -54,6 +54,9 @@ def create_app(config_name="default"):
     stream_handler.setLevel(logging.INFO)
     app.logger.addHandler(stream_handler)
 
+
+
+
                 fields.setdefault('app', 'gas')
                 fields.setdefault('level', logging.getLevelName(level))
                 msg = json.dumps(fields, ensure_ascii=False)
