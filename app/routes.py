@@ -78,6 +78,7 @@ from app.utils import (
     normalize_exam_type,
     validate_score,
 )
+from app.services.summary_service import get_summary_options, get_summary_data
 
 # 蓝图定义
 main_bp = Blueprint("main", __name__)
@@ -2365,230 +2366,15 @@ def _cache_nsver(current_app, ns: str) -> str:
 @api_bp.route('/summary', methods=['GET'])
 @login_required
 def api_summary_list():
-    from sqlalchemy import desc
-    def _multi(param_name: str):
-        # 支持 ?param=a&param=b 或 ?param=a,b
-        vals = request.args.getlist(param_name)
-        out = []
-        for v in vals:
-            out.extend([s.strip() for s in v.split(',') if s.strip()])
-        return out
-
-    exam_names = _multi('exam_name')
-    grade_levels = _multi('grade_level')
-    class_names = _multi('class_name')
+    exam_name = request.args.get('exam_name')
+    grade_level = request.args.get('grade_level')
+    class_name = request.args.get('class_name')
     subject_code = request.args.get('subject_code') or 'TOTAL'
     order_by = request.args.get('order_by') or 'score_desc'
-
-    # 查询匹配的成绩（按考试名称与科目）
-    q = Grade.query.join(Student).join(Course)
-    if exam_names:
-        q = q.filter(Grade.exam_name.in_(exam_names))
-    if grade_levels:
-        q = q.filter(Student.grade_level.in_(grade_levels))
-    if class_names:
-        q = q.filter(Student.class_name.in_(class_names))
-    # 非管理员可见范围限制
-    if not current_user.is_anonymous and current_user.role != 'admin':
-        if current_user.allowed_grade_levels:
-            allowed = [s.strip() for s in current_user.allowed_grade_levels.split(',') if s.strip()]
-            if allowed:
-                q = q.filter(Student.grade_level.in_(allowed))
-        if current_user.allowed_class_names:
-            allowed = [s.strip() for s in current_user.allowed_class_names.split(',') if s.strip()]
-            if allowed:
-                q = q.filter(Student.class_name.in_(allowed))
-    if subject_code:
-        q = q.filter(Course.code == subject_code)
-
-    # 分页参数
-    page = request.args.get('page', type=int) or 1
-    page_size = min(max(request.args.get('page_size', type=int) or 50, 1), 1000)
-
-    # 简化 COUNT：去除排序，仅对过滤后的结果进行计数（带 Redis 短缓存）
-    total = None
-    try:
-        from flask import current_app
-        import json, time, hashlib
-        rurl = current_app.config.get('REDIS_URL')
-        if rurl:
-            import redis
-            rc = getattr(current_app, '_redis_cli', None)
-            if rc is None:
-                rc = redis.from_url(rurl, decode_responses=True)
-                current_app._redis_cli = rc
-            # metrics
-            try:
-                _CACHE_HITS; _CACHE_MISSES
-            except NameError:
-                pass
-            key_payload = {
-                'ns': 'summary_count:' + (_cache_nsver(current_app,'summary') or ''),
-                'exam_names': sorted(exam_names),
-                'grade_levels': sorted(grade_levels),
-                'class_names': sorted(class_names),
-                'subject_code': subject_code,
-                'user': (current_user.id if (not current_user.is_anonymous) else 0),
-                'page': page,
-                'page_size': page_size,
-            }
-            key = 'gas:sumlist:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-            # 列表数据缓存（短 TTL）
-            cached_list = rc.get(key)
-            if cached_list:
-                try:
-                    import json as _json
-                    payload = _json.loads(cached_list)
-                    try:
-                        _CACHE_HITS.labels('summary_list').inc()
-                    except Exception:
-                        pass
-                    return jsonify(payload)
-                except Exception:
-                    pass
-            # 计数缓存键
-            key = 'gas:sumcnt:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-            cached = rc.get(key)
-            if cached is not None:
-                total = int(cached)
-                try:
-                    _CACHE_HITS.labels('summary_count').inc()
-                except Exception:
-                    pass
-            else:
-                total = q.with_entities(db.func.count()).scalar()
-                ttl = int(current_app.config.get('SUMMARY_COUNT_TTL_SECONDS', 60))
-                rc.setex(key, ttl, str(total))
-                try:
-                    _CACHE_MISSES.labels('summary_count').inc()
-                except Exception:
-                    pass
-    except Exception:
-        total = None
-    if total is None:
-        total = q.with_entities(db.func.count()).scalar()
-    rows = q.offset((page-1)*page_size).limit(page_size).all()
-
-    # 慢请求 SQL 摘要（仅在 DEBUG 或 DIAG_SQL_LOG 开启时）
-    try:
-        if current_app.debug or current_app.config.get('DIAG_SQL_LOG', False):
-            import logging, time
-            threshold = current_app.config.get('SLOW_QUERY_MS', 500)
-            # 仅粗略记录分页查询耗时
-            # 如有需要可精细化到 COUNT/列表分开计时，这里以 rows 拉取为准
-            # 由于我们没有显式计时开始点，简化处理：略过
-            comp = q.statement.compile(dialect=db.engine.dialect, compile_kwargs={"literal_binds": True})
-            sql_snippet = str(comp)
-            if len(sql_snippet) > 300:
-                sql_snippet = sql_snippet[:300] + '...'
-            # 不知道实际耗时，只有在页面层或全局 after_request 记录；此处直接输出片段以便诊断
-            logging.getLogger('slow').warning(f"SUMMARY SQL: {sql_snippet}")
-    except Exception:
-        pass
-    items = []
-
-    # 规则版本（发布的最新版本号），便于展示来源
-    published_set = None
-    rule_version = None
-    if exam_names and len(exam_names) == 1:
-        published_set = GradeBandSet.query.filter_by(exam_name=exam_names[0], status='published').order_by(GradeBandSet.version.desc()).first()
-        if published_set:
-            rule_version = published_set.version
-
-    # 准备满分缓存 (exam_type, subject_code) -> max_score
-    max_cache = {}
-
-    # 计算班级/年级排名：需要同班/同年级的集合
-    # 先聚合：key -> list of (student_id, score)
-    from collections import defaultdict
-    by_class = defaultdict(list)
-    by_grade = defaultdict(list)
-    for g in rows:
-        by_class[g.student.class_name].append((g.student_id, g.score))
-        by_grade[g.student.grade_level].append((g.student_id, g.score))
-
-    # 排名映射
-    def rank_map(pairs):
-        # pairs: list[(student_id, score)]
-        pairs_sorted = sorted(pairs, key=lambda x: x[1], reverse=True)
-        rank = {}
-        for i, (sid, _) in enumerate(pairs_sorted, 1):
-            rank[sid] = i
-        return rank
-
-    class_rank_map = {k: rank_map(v) for k, v in by_class.items()}
-    grade_rank_map = {k: rank_map(v) for k, v in by_grade.items()}
-
-    from app.utils import grade_letter_for
-    for g in rows:
-        letter = grade_letter_for(g.exam_name or 'default', g.course.code, g.score)
-        # 百分比（若配置了满分）
-        perc = None
-        key = (g.exam_type or 'regular', g.course.code)
-        if key in max_cache:
-            max_score = max_cache[key]
-        else:
-            s = ExamScheme.query.filter_by(exam_type=key[0], subject_code=key[1]).first()
-            max_score = s.max_score if s else None
-            max_cache[key] = max_score
-        if max_score and max_score > 0:
-            perc = round(float(g.score) / float(max_score) * 100.0, 2)
-
-        items.append({
-            'student_id': g.student.student_id,
-            'name': g.student.name,
-            'class_name': g.student.class_name,
-            'grade_level': g.student.grade_level,
-            'exam_name': g.exam_name,
-            'subject_code': g.course.code,
-            'score': g.score,
-            'percentage': perc,
-            'letter': letter,
-            'class_rank': class_rank_map.get(g.student.class_name, {}).get(g.student_id),
-            'grade_rank': grade_rank_map.get(g.student.grade_level, {}).get(g.student_id),
-            'rule_version': rule_version,
-        })
-
-    # 排序
-    if order_by == 'score_desc':
-        items.sort(key=lambda x: x['score'], reverse=True)
-    elif order_by == 'score_asc':
-        items.sort(key=lambda x: x['score'])
-    elif order_by == 'class_rank':
-        items.sort(key=lambda x: (x['class_name'] or '', x['class_rank'] or 1e9))
-    elif order_by == 'grade_rank':
-        items.sort(key=lambda x: (x['grade_level'] or '', x['grade_rank'] or 1e9))
-
-    resp = {'items': items, 'total': total, 'page': page, 'page_size': page_size, 'rule_version': rule_version}
-    try:
-        from flask import current_app
-        rurl = current_app.config.get('REDIS_URL')
-        if rurl:
-            import redis, json, hashlib
-            rc = getattr(current_app, '_redis_cli', None)
-            if rc is None:
-                rc = redis.from_url(rurl, decode_responses=True)
-                current_app._redis_cli = rc
-            key_payload = {
-                'ns': 'summary_list:' + (_cache_nsver(current_app,'summary') or ''),
-                'exam_names': sorted(exam_names),
-                'grade_levels': sorted(grade_levels),
-                'class_names': sorted(class_names),
-                'subject_code': subject_code,
-                'user': (current_user.id if (not current_user.is_anonymous) else 0),
-                'page': page,
-                'page_size': page_size,
-            }
-            key = 'gas:sumlist:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
-            ttl = int(current_app.config.get('SUMMARY_LIST_TTL_SECONDS', 60))
-            rc.setex(key, ttl, json.dumps(resp, ensure_ascii=False))
-            try:
-                _CACHE_MISSES.labels('summary_list').inc()
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return jsonify(resp)
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('page_size', 100, type=int)
+    data = get_summary_data(exam_name, grade_level, class_name, subject_code, order_by, page, page_size)
+    return jsonify(data)
 
 
 @api_bp.route('/summary/prefs', methods=['GET', 'PUT'])
@@ -3782,25 +3568,7 @@ def _build_export_file(params: dict, export_dir: str) -> str:
 @api_bp.route('/summary/options', methods=['GET'])
 @login_required
 def api_summary_options():
-    # 枚举考试名称、年级、班级（应用非管理员可见范围）
-    exam_q = db.session.query(Grade.exam_name).distinct()
-    gl_q = db.session.query(Student.grade_level).distinct()
-    cl_q = db.session.query(Student.class_name).distinct()
-
-    if not current_user.is_anonymous and current_user.role != 'admin':
-        if current_user.allowed_grade_levels:
-            allowed = [s.strip() for s in current_user.allowed_grade_levels.split(',') if s.strip()]
-            if allowed:
-                gl_q = gl_q.filter(Student.grade_level.in_(allowed))
-        if current_user.allowed_class_names:
-            allowed = [s.strip() for s in current_user.allowed_class_names.split(',') if s.strip()]
-            if allowed:
-                cl_q = cl_q.filter(Student.class_name.in_(allowed))
-
-    exam_names = sorted({ n[0] for n in exam_q.all() if n[0] })
-    grade_levels = sorted({ n[0] for n in gl_q.all() if n[0] })
-    class_names = sorted({ n[0] for n in cl_q.all() if n[0] })
-    return jsonify({ 'exam_names': exam_names, 'grade_levels': grade_levels, 'class_names': class_names })
+    return jsonify(get_summary_options())
 
 
 # 诊断 API（管理员）：构造典型查询，返回 EXPLAIN 计划与耗时
