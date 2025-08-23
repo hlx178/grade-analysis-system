@@ -23,22 +23,11 @@ def get_summary_options():
         'class_names': class_names
     }
 
-def get_summary_data(exam_name, grade_level, class_name, subject_code, order_by, page, page_size):
+def get_summary_data(exam_names, grade_levels, class_names, subject_code, order_by, page, page_size):
     from sqlalchemy import desc
-    from flask import request, current_app, jsonify
+    from flask import current_app, jsonify
     from app.models import Grade, Student, Course, ExamScheme, GradeBandSet
     from app.utils import grade_letter_for, _cache_nsver
-
-    def _multi(param_name: str):
-        vals = request.args.getlist(param_name)
-        out = []
-        for v in vals:
-            out.extend([s.strip() for s in v.split(',') if s.strip()])
-        return out
-
-    exam_names = _multi('exam_name')
-    grade_levels = _multi('grade_level')
-    class_names = _multi('class_name')
 
     q = Grade.query.join(Student).join(Course)
     if exam_names:

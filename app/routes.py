@@ -2366,14 +2366,21 @@ def _cache_nsver(current_app, ns: str) -> str:
 @api_bp.route('/summary', methods=['GET'])
 @login_required
 def api_summary_list():
-    exam_name = request.args.get('exam_name')
-    grade_level = request.args.get('grade_level')
-    class_name = request.args.get('class_name')
+    def _multi(param_name: str):
+        vals = request.args.getlist(param_name)
+        out = []
+        for v in vals:
+            out.extend([s.strip() for s in v.split(',') if s.strip()])
+        return out
+
+    exam_names = _multi('exam_name')
+    grade_levels = _multi('grade_level')
+    class_names = _multi('class_name')
     subject_code = request.args.get('subject_code') or 'TOTAL'
     order_by = request.args.get('order_by') or 'score_desc'
     page = request.args.get('page', 1, type=int)
     page_size = request.args.get('page_size', 100, type=int)
-    data = get_summary_data(exam_name, grade_level, class_name, subject_code, order_by, page, page_size)
+    data = get_summary_data(exam_names, grade_levels, class_names, subject_code, order_by, page, page_size)
     return jsonify(data)
 
 
