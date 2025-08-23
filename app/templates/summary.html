@@ -357,7 +357,7 @@ async function loadSummary(){
     tb.appendChild(tr);
   });
 }
-window.addEventListener('DOMContentLoaded', async ()=>{ await loadOptions(); await loadSummary(); });
+
 
 function getPrefs(){
   return {
@@ -892,28 +892,25 @@ async function loadDistribution(){
     console.log('loadDistribution called');
 }
 
-window.addEventListener('DOMContentLoaded', ()=>{
-  loadOptions();
-  loadPrefs();
-  setTimeout(()=>{
-    loadTrendChart();
-    loadClassCompare();
-    loadDistribution();
-  }, 300);
-  attachFilter('examFilter','examName');
-  attachFilter('gradeFilter','gradeLevel');
-  attachFilter('classFilter','className');
+window.addEventListener('DOMContentLoaded', async () => {
+    await loadOptions();
+    await loadPrefs();
+    await loadSummary();
 
-  const chrono = document.getElementById('trendChrono');
-  if (chrono) chrono.onchange = ()=> loadTrendChart();
+    attachFilter('examFilter', 'examName');
+    attachFilter('gradeFilter', 'gradeLevel');
+    attachFilter('classFilter', 'className');
 
-  const oldLoadSummary = loadSummary;
-  window.loadSummary = async function(){
-    await oldLoadSummary();
-    await loadTrendChart();
-    await loadClassCompare();
-    await loadDistribution();
-  }
+    const chrono = document.getElementById('trendChrono');
+    if (chrono) chrono.onchange = () => loadTrendChart();
+
+    const oldLoadSummary = loadSummary;
+    window.loadSummary = async function() {
+        await oldLoadSummary();
+        await loadTrendChart();
+        await loadClassCompare();
+        await loadDistribution();
+    }
 });
 </script>
 {% endblock %}
