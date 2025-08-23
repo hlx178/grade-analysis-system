@@ -510,6 +510,31 @@ def api_summary_prefs_put():
 
 
 
+# API: Summary Page
+@api_bp.route('/summary/options', methods=['GET'])
+@login_required
+def api_summary_options():
+    options = get_summary_options()
+    return jsonify(options)
+
+@api_bp.route('/summary/data', methods=['GET'])
+@login_required
+def api_summary_data():
+    exam_name = request.args.get('exam_name')
+    grade_level = request.args.get('grade_level')
+    class_name = request.args.get('class_name')
+    # student_id is not used in summary_data, but let's keep it for future use
+    # student_id = request.args.get('student_id')
+
+    data = get_summary_data(
+        exam_name=exam_name,
+        grade_level=grade_level,
+        class_name=class_name,
+        current_user=current_user
+    )
+    return jsonify(data)
+
+
 # API: 课程
 @api_bp.route("/courses", methods=["GET", "POST"])
 @login_required
