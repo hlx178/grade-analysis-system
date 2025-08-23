@@ -1,8 +1,8 @@
 from flask_login import current_user
-from app import db
 from app.models import Grade, Student, Course, UserPreference
 
 def get_summary_options(user):
+    from app import db
     q = Grade.query.join(Student)
     if not user.is_anonymous and user.role != 'admin':
         if user.allowed_grade_levels:
@@ -13,7 +13,7 @@ def get_summary_options(user):
             allowed = [s.strip() for s in (user.allowed_class_names or '').split(',') if s.strip()]
             if allowed:
                 q = q.filter(Student.class_name.in_(allowed))
-    
+
     exam_names = sorted([r[0] for r in q.with_entities(Grade.exam_name).distinct().all() if r[0]])
     grade_levels = sorted([r[0] for r in q.with_entities(Student.grade_level).distinct().all() if r[0]])
     class_names = sorted([r[0] for r in q.with_entities(Student.class_name).distinct().all() if r[0]])
@@ -25,6 +25,7 @@ def get_summary_options(user):
 
 def get_summary_data(user, exam_names, grade_levels, class_names, subject_code, order_by, page, page_size):
     from sqlalchemy import desc
+    from app import db
     from flask import current_app, jsonify
     from app.models import Grade, Student, Course, ExamScheme, GradeBandSet
     from app.utils import grade_letter_for, _cache_nsver
