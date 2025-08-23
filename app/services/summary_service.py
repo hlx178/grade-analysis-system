@@ -1,4 +1,3 @@
-from flask_login import current_user
 from app.models import Grade, Student, Course, UserPreference
 
 def get_summary_options(user):
