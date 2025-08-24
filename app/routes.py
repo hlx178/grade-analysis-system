@@ -1227,6 +1227,10 @@ def api_import_file_delete(file_id):
             grades_deleted = 0
             if delete_grades:
                 exam_name = (meta.get('exam_name') or '').strip()
+                # 回退策略：若元数据缺少 exam_name 且请求显式开启 fallback_by='default'，使用 'default' 清理
+                fallback_by = request.args.get('fallback_by')
+                if not exam_name and fallback_by == 'default':
+                    exam_name = 'default'
                 if exam_name:
                     try:
                         grades_deleted = Grade.query.filter(Grade.exam_name == exam_name).delete(synchronize_session=False)
@@ -1273,6 +1277,33 @@ def api_grades_cleanup_by_exam():
 
 
 # 管理员清理：清空所有成绩（可选按学科过滤）
+
+# 管理员清理：姓名为空的学生（可选级联删除成绩）
+@api_bp.route('/admin/cleanup/nameless-students', methods=['POST'])
+@login_required
+def api_cleanup_nameless_students():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(silent=True) or {}
+    cascade = bool(data.get('cascade'))
+    try:
+        q = Student.query.filter((Student.name == None) | (Student.name == ''))
+        if cascade:
+            # 删除这些学生的成绩
+            ids = [s.id for s in q.all()]
+            if ids:
+                Grade.query.filter(Grade.student_id.in_(ids)).delete(synchronize_session=False)
+        deleted = q.delete(synchronize_session=False)
+        db.session.commit()
+        try:
+            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+        except Exception:
+            pass
+        return jsonify({'deleted_students': deleted})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
 @api_bp.route('/grades/cleanup-all', methods=['POST'])
 @login_required
 def api_grades_cleanup_all():

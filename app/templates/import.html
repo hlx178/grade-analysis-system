@@ -109,6 +109,17 @@
     </div>
   </div>
 
+  <div class="card mt-3">
+    <div class="card-body">
+      <div class="d-flex align-items-center gap-2">
+        <span>清理“姓名为空”的学生</span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="cleanupNameless(false)">仅删除无成绩的无名学生</button>
+        <button class="btn btn-outline-danger btn-sm" onclick="cleanupNameless(true)">级联删除无名学生及其成绩</button>
+      </div>
+      <div id="cleanupNamelessResult" class="small text-muted mt-2"></div>
+    </div>
+  </div>
+
 
 
   <p>学生导入模板：学号（8位：入学年份4位+流水号4位）、姓名、班级必填；可选：年级、邮箱。</p>
@@ -228,11 +239,16 @@ async function loadUploadList(){
       delBtn.onclick = async ()=>{
         if (!confirm('确认删除该文件？')) return;
         const withGrades = confirm('是否同时删除该文件对应考试名称下的所有成绩记录？[确定=是/取消=否]');
-        const url = '/api/import/files/'+it.file_id + (withGrades? '?delete_grades=1' : '');
+        let url = '/api/import/files/'+it.file_id + (withGrades? '?delete_grades=1' : '');
+        if (withGrades && !it.exam_name){
+          const useDefault = confirm('元数据缺少考试名称，是否使用 "default" 作为回退进行清理？');
+          if (useDefault) url += '&fallback_by=default';
+        }
         const r = await fetch(url, { method: 'DELETE' });
         const d = await r.json();
         if (r.ok) {
           if (d.grades_deleted) { alert('已删除关联成绩 '+ d.grades_deleted +' 条'); }
+          else if (withGrades) { alert('未发现可删除的关联成绩，请尝试使用“按考试名称清理成绩”工具'); }
           loadUploadList();
         }
         else { alert(d.error||'删除失败'); }
@@ -240,6 +256,16 @@ async function loadUploadList(){
       tdOp.appendChild(delBtn); tr.appendChild(tdOp); tb.appendChild(tr);
     });
   } catch(e) { console.warn('load uploads failed', e); }
+}
+
+
+async function cleanupNameless(cascade){
+  if (cascade && !confirm('将删除“姓名为空”的学生及其所有成绩，确认继续？')) return;
+  const res = await fetch('/api/admin/cleanup/nameless-students', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ cascade }) });
+  const data = await res.json();
+  const box = document.getElementById('cleanupNamelessResult');
+  if (res.ok){ box.textContent = `已删除学生 ${data.deleted_students||0} 个`; }
+  else { box.textContent = `清理失败：${data.error||res.status}`; }
 }
 
 function toggleAllUploads(cb){
