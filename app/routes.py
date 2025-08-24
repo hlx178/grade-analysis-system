@@ -514,23 +514,31 @@ def api_summary_prefs_put():
 @api_bp.route('/summary/options', methods=['GET'])
 @login_required
 def api_summary_options():
-    options = get_summary_options()
+    # Pass current_user to respect data-access scope
+    options = get_summary_options(current_user)
     return jsonify(options)
 
 @api_bp.route('/summary/data', methods=['GET'])
 @login_required
 def api_summary_data():
-    exam_name = request.args.get('exam_name')
-    grade_level = request.args.get('grade_level')
-    class_name = request.args.get('class_name')
-    # student_id is not used in summary_data, but let's keep it for future use
-    # student_id = request.args.get('student_id')
+    # Backward-compatible endpoint: adapt single-value params to the new service signature
+    exam_name = (request.args.get('exam_name') or '').strip()
+    grade_level = (request.args.get('grade_level') or '').strip()
+    class_name = (request.args.get('class_name') or '').strip()
+    subject_code = (request.args.get('subject_code') or 'TOTAL').strip()
+    order_by = (request.args.get('order_by') or 'score_desc').strip()
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('page_size', 100, type=int)
 
     data = get_summary_data(
-        exam_name=exam_name,
-        grade_level=grade_level,
-        class_name=class_name,
-        current_user=current_user
+        current_user,
+        [exam_name] if exam_name else [],
+        [grade_level] if grade_level else [],
+        [class_name] if class_name else [],
+        subject_code,
+        order_by,
+        page,
+        page_size,
     )
     return jsonify(data)
 
@@ -3596,11 +3604,6 @@ def _build_export_file(params: dict, export_dir: str) -> str:
             writer.writerow([rec.get(c, '') for c in use_cols])
     return filepath
 
-
-@api_bp.route('/summary/options', methods=['GET'])
-@login_required
-def api_summary_options():
-    return jsonify(get_summary_options(current_user))
 
 
 # 诊断 API（管理员）：构造典型查询，返回 EXPLAIN 计划与耗时

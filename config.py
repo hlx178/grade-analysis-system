@@ -10,10 +10,10 @@ class Config:
 
     # 诊断与慢查询 & 日志
     SLOW_QUERY_MS = int(os.environ.get("SLOW_QUERY_MS") or 500)
-    DIAG_SQL_LOG = os.environ.get("DIAG_SQL_LOG", "false").lower() in ["1","true","on"]
-    LOG_FORMAT_JSON = os.environ.get("LOG_FORMAT_JSON", "true").lower() in ["1","true","on"]
+    DIAG_SQL_LOG = os.environ.get("DIAG_SQL_LOG", "false").lower() in ["1", "true", "on"]
+    LOG_FORMAT_JSON = os.environ.get("LOG_FORMAT_JSON", "true").lower() in ["1", "true", "on"]
     LOG_LEVEL = os.environ.get("LOG_LEVEL") or "INFO"
-    LOG_ACCESS = os.environ.get("LOG_ACCESS", "true").lower() in ["1","true","on"]
+    LOG_ACCESS = os.environ.get("LOG_ACCESS", "true").lower() in ["1", "true", "on"]
 
     # COUNT 微缓存与其他缓存 TTL
     SUMMARY_COUNT_TTL_SECONDS = int(os.environ.get("SUMMARY_COUNT_TTL_SECONDS") or 60)
@@ -35,7 +35,6 @@ class Config:
 
     # 可选：Redis 缓存配置
     REDIS_URL = os.environ.get("REDIS_URL")  # e.g., redis://redis:6379/0
-
 
     # 会话配置
     PERMANENT_SESSION_LIFETIME = timedelta(hours=2)

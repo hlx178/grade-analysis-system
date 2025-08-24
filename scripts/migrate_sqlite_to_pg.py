@@ -1,16 +1,31 @@
-import os, sqlite3, sys
+import os
+import sqlite3
+import sys
 from contextlib import closing
 
 from flask import Flask
 
 # Ensure app importable
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app import create_app, db  # type: ignore
 from app.models import (
-    User, Student, Course, Grade, ExamScheme, UserPreference,
-    DiagnosticPreset, GradeBandRule, GradeBandSet, ExportJob,
-    AuditLog, GradeMaster, ClassMaster, ModuleSetting, BrandSetting, RolePermission
+    AuditLog,
+    BrandSetting,
+    ClassMaster,
+    Course,
+    DiagnosticPreset,
+    ExamScheme,
+    ExportJob,
+    Grade,
+    GradeBandRule,
+    GradeBandSet,
+    GradeMaster,
+    ModuleSetting,
+    RolePermission,
+    Student,
+    User,
+    UserPreference,
 )
 
 
@@ -19,11 +34,13 @@ def log(msg):
 
 
 def get_sqlite_path() -> str:
-    p = os.environ.get('SOURCE_SQLITE')
+    p = os.environ.get("SOURCE_SQLITE")
     if p:
         return p
     # default to repo data dir
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'grade_analysis.db'))
+    return os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "data", "grade_analysis.db")
+    )
 
 
 def fetch_rows(conn, table: str):
@@ -38,7 +55,7 @@ def upsert(session, obj):
     session.add(obj)
 
 
-def set_pg_seq(session, table: str, id_col: str = 'id'):
+def set_pg_seq(session, table: str, id_col: str = "id"):
     try:
         session.execute(
             db.text(
@@ -53,7 +70,7 @@ def set_pg_seq(session, table: str, id_col: str = 'id'):
 
 
 def migrate():
-    app: Flask = create_app('production')
+    app: Flask = create_app("production")
     with app.app_context():
         sqlite_path = get_sqlite_path()
         if not os.path.exists(sqlite_path):
@@ -65,7 +82,8 @@ def migrate():
         # Ensure tables exist on PG
         try:
             import subprocess
-            subprocess.run(['alembic', 'upgrade', 'head'], check=False)
+
+            subprocess.run(["alembic", "upgrade", "head"], check=False)
         except Exception:
             db.create_all()
 
@@ -73,7 +91,7 @@ def migrate():
             s = db.session
 
             # order matters (respect FKs)
-            def copy_table(name, model, key='id', mapper=None, unique_keys=None):
+            def copy_table(name, model, key="id", mapper=None, unique_keys=None):
                 copied = 0
                 skipped = 0
                 unique_keys = unique_keys or []
@@ -88,8 +106,9 @@ def migrate():
                         for uk in unique_keys:
                             val = r.get(uk)
                             if val:
-                                exists = model.query.filter(getattr(model, uk)==val).first()
-                                if exists: break
+                                exists = model.query.filter(getattr(model, uk) == val).first()
+                                if exists:
+                                    break
                     if exists:
                         skipped += 1
                         continue
@@ -110,32 +129,31 @@ def migrate():
                 except Exception as e:
                     s.rollback()
                     log(f"{name}: commit failed -> {e}")
-                if key == 'id':
+                if key == "id":
                     set_pg_seq(s, model.__tablename__)
                 log(f"{name}: copied={copied}, skipped={skipped}")
 
             # Copy data
-            copy_table('users', User, unique_keys=['username','email'])
-            copy_table('students', Student, unique_keys=['student_id','email'])
-            copy_table('courses', Course, unique_keys=['code'])
-            copy_table('exam_schemes', ExamScheme)
-            copy_table('user_preferences', UserPreference)
-            copy_table('diagnostic_presets', DiagnosticPreset)
-            copy_table('grade_band_rules', GradeBandRule)
-            copy_table('grade_band_sets', GradeBandSet)
-            copy_table('export_jobs', ExportJob, key='id')  # id is string
-            copy_table('audit_logs', AuditLog)
-            copy_table('grade_master', GradeMaster)
-            copy_table('class_master', ClassMaster)
-            copy_table('module_settings', ModuleSetting)
-            copy_table('brand_settings', BrandSetting, key='key')
-            copy_table('role_permissions', RolePermission, key='role')
+            copy_table("users", User, unique_keys=["username", "email"])
+            copy_table("students", Student, unique_keys=["student_id", "email"])
+            copy_table("courses", Course, unique_keys=["code"])
+            copy_table("exam_schemes", ExamScheme)
+            copy_table("user_preferences", UserPreference)
+            copy_table("diagnostic_presets", DiagnosticPreset)
+            copy_table("grade_band_rules", GradeBandRule)
+            copy_table("grade_band_sets", GradeBandSet)
+            copy_table("export_jobs", ExportJob, key="id")  # id is string
+            copy_table("audit_logs", AuditLog)
+            copy_table("grade_master", GradeMaster)
+            copy_table("class_master", ClassMaster)
+            copy_table("module_settings", ModuleSetting)
+            copy_table("brand_settings", BrandSetting, key="key")
+            copy_table("role_permissions", RolePermission, key="role")
             # Grades last (has FKs to students/courses)
-            copy_table('grades', Grade)
+            copy_table("grades", Grade)
 
-        log('Migration completed.')
+        log("Migration completed.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     migrate()
-

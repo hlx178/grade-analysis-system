@@ -1,10 +1,10 @@
-from datetime import date
 import random
+from datetime import date
 
 from app import create_app, db
-from app.models import Course, Student, Grade
+from app.models import Course, Grade, Student
 
-app = create_app('production')
+app = create_app("production")
 
 COURSES = [
     ("CN", "语文"),
@@ -69,7 +69,14 @@ def ensure_grades():
             g = Grade.query.filter_by(student_id=stu.id, course_id=course.id).first()
             score = max(0, min(100, int(60 + random.gauss(10, 15))))
             if not g:
-                g = Grade(student_id=stu.id, course_id=course.id, score=score, exam_type="regular", exam_name=exam_name, exam_date=date.today())
+                g = Grade(
+                    student_id=stu.id,
+                    course_id=course.id,
+                    score=score,
+                    exam_type="regular",
+                    exam_name=exam_name,
+                    exam_date=date.today(),
+                )
                 db.session.add(g)
                 created += 1
             else:
@@ -88,4 +95,3 @@ if __name__ == "__main__":
         s = ensure_students()
         g = ensure_grades()
         print(f"Sample data ready: courses+{c}, students+{s}, grades+{g}")
-

@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import func
 
-from app.models import Course, Grade, Student, ExamScheme, GradeBandRule
+from app.models import Course, ExamScheme, Grade, GradeBandRule, Student
 
 # 学科列与课程编码映射（可扩展）
 SUBJECTS = [
@@ -19,7 +19,7 @@ SUBJECTS = [
 ]
 TOTAL_SUBJECT = ("总分", "TOTAL", "总分")
 # 排名同分规则使用学科优先级（语文+数学总分、其和相同则比较两科最高分、再比英语、再比社会、再比道法）
-RANK_TIE_PRIORITY = ['CN','MA','EN','SOC','MOR']
+RANK_TIE_PRIORITY = ["CN", "MA", "EN", "SOC", "MOR"]
 
 
 EXAM_TYPE_MAP = {
@@ -28,6 +28,7 @@ EXAM_TYPE_MAP = {
     "regular": "regular",
     "mock": "mock",
 }
+
 
 def normalize_exam_type(exam_type: str) -> str:
     if not exam_type:
@@ -42,18 +43,25 @@ def ensure_default_exam_scheme(exam_type: str):
     from app import db
 
     norm = normalize_exam_type(exam_type)
-    exists = (
-        ExamScheme.query.filter_by(exam_type=norm).first() is not None
-    )
+    exists = ExamScheme.query.filter_by(exam_type=norm).first() is not None
     if exists:
         return
     # 创建默认配置
     total = 0
     for _, code, name in SUBJECTS:
-        db.session.add(ExamScheme(exam_type=norm, subject_code=code, subject_name=name, max_score=100.0))
+        db.session.add(
+            ExamScheme(exam_type=norm, subject_code=code, subject_name=name, max_score=100.0)
+        )
         total += 100
     # 总分
-    db.session.add(ExamScheme(exam_type=norm, subject_code=TOTAL_SUBJECT[1], subject_name=TOTAL_SUBJECT[2], max_score=float(total)))
+    db.session.add(
+        ExamScheme(
+            exam_type=norm,
+            subject_code=TOTAL_SUBJECT[1],
+            subject_name=TOTAL_SUBJECT[2],
+            max_score=float(total),
+        )
+    )
     db.session.commit()
 
 
@@ -82,34 +90,36 @@ def grade_letter_for(exam_name: str, subject_code: str, score: float) -> str:
     """根据规则或默认阈值计算单个成绩的等级（A-E）。"""
     # 优先查找范围法规则
     rule = GradeBandRule.query.filter_by(exam_name=exam_name, subject_code=subject_code).first()
-    if rule and rule.method == 'range':
+    if rule and rule.method == "range":
         # 注意：若a_min等为空，按默认区间
         a = rule.a_min if rule.a_min is not None else 90
         b = rule.b_min if rule.b_min is not None else 80
         c = rule.c_min if rule.c_min is not None else 70
         d = rule.d_min if rule.d_min is not None else 60
         if score >= a:
-            return 'A'
+            return "A"
         elif score >= b:
-            return 'B'
+            return "B"
         elif score >= c:
-            return 'C'
+            return "C"
         elif score >= d:
-            return 'D'
-        return 'E'
+            return "D"
+        return "E"
     # 若没有范围法规则配置且方法为percentile，需要整体分布，单个无法计算，回退默认
     if score >= 80:
-        return 'A'
+        return "A"
     elif score >= 60:
-        return 'B'
+        return "B"
     elif score >= 40:
-        return 'C'
+        return "C"
     elif score >= 20:
-        return 'D'
-    return 'E'
+        return "D"
+    return "E"
 
 
-def get_grade_distribution(grades_query, exam_name: str | None = None, subject_code: str | None = None):
+def get_grade_distribution(
+    grades_query, exam_name: str | None = None, subject_code: str | None = None
+):
     """获取成绩分布，根据需要应用等级规则。
     - 若存在 range 规则，直接按阈值划分
     - 若存在 percentile 规则，则按比例切分
@@ -124,7 +134,7 @@ def get_grade_distribution(grades_query, exam_name: str | None = None, subject_c
     if exam_name and subject_code:
         rule = GradeBandRule.query.filter_by(exam_name=exam_name, subject_code=subject_code).first()
 
-    if rule and rule.method == 'range':
+    if rule and rule.method == "range":
         a = rule.a_min if rule.a_min is not None else 80
         b = rule.b_min if rule.b_min is not None else 60
         c = rule.c_min if rule.c_min is not None else 40
@@ -132,18 +142,18 @@ def get_grade_distribution(grades_query, exam_name: str | None = None, subject_c
         dist = {"A": 0, "B": 0, "C": 0, "D": 0, "E": 0}
         for s in scores:
             if s >= a:
-                dist['A'] += 1
+                dist["A"] += 1
             elif s >= b:
-                dist['B'] += 1
+                dist["B"] += 1
             elif s >= c:
-                dist['C'] += 1
+                dist["C"] += 1
             elif s >= d:
-                dist['D'] += 1
+                dist["D"] += 1
             else:
-                dist['E'] += 1
+                dist["E"] += 1
         return dist
 
-    if rule and rule.method == 'percentile':
+    if rule and rule.method == "percentile":
         # 计算分位点
         scores_sorted = sorted(scores, reverse=True)
         n = len(scores_sorted)
@@ -187,11 +197,28 @@ def get_grade_distribution(grades_query, exam_name: str | None = None, subject_c
 
 # 简易年级推断：依据班级名称首字符（数字或汉字数字）
 _CHINESE_NUM = {
-    '一':'一年级','二':'二年级','三':'三年级','四':'四年级','五':'五年级','六':'六年级','七':'七年级','八':'八年级','九':'九年级'
+    "一": "一年级",
+    "二": "二年级",
+    "三": "三年级",
+    "四": "四年级",
+    "五": "五年级",
+    "六": "六年级",
+    "七": "七年级",
+    "八": "八年级",
+    "九": "九年级",
 }
 _DIGIT_MAP = {
-    '1':'一年级','2':'二年级','3':'三年级','4':'四年级','5':'五年级','6':'六年级','7':'七年级','8':'八年级','9':'九年级'
+    "1": "一年级",
+    "2": "二年级",
+    "3": "三年级",
+    "4": "四年级",
+    "5": "五年级",
+    "6": "六年级",
+    "7": "七年级",
+    "8": "八年级",
+    "9": "九年级",
 }
+
 
 def infer_grade_from_class_name(class_name: str | None) -> str | None:
     if not class_name:
@@ -200,12 +227,12 @@ def infer_grade_from_class_name(class_name: str | None) -> str | None:
     if not s:
         return None
     # 特例：初一/初二/初三
-    if s.startswith('初一'):
-        return '七年级'
-    if s.startswith('初二'):
-        return '八年级'
-    if s.startswith('初三'):
-        return '九年级'
+    if s.startswith("初一"):
+        return "七年级"
+    if s.startswith("初二"):
+        return "八年级"
+    if s.startswith("初三"):
+        return "九年级"
     c0 = s[0]
     if c0 in _CHINESE_NUM:
         return _CHINESE_NUM[c0]
@@ -266,18 +293,15 @@ def get_course_statistics(exam_name: str | None = None):
     """获取课程统计信息，可选按考试名称筛选"""
     from app import db
 
-    q = (
-        db.session.query(
-            Course.id,
-            Course.code,
-            Course.name,
-            func.count(Grade.id).label("total_grades"),
-            func.avg(Grade.score).label("avg_score"),
-            func.max(Grade.score).label("max_score"),
-            func.min(Grade.score).label("min_score"),
-        )
-        .join(Grade)
-    )
+    q = db.session.query(
+        Course.id,
+        Course.code,
+        Course.name,
+        func.count(Grade.id).label("total_grades"),
+        func.avg(Grade.score).label("avg_score"),
+        func.max(Grade.score).label("max_score"),
+        func.min(Grade.score).label("min_score"),
+    ).join(Grade)
     if exam_name:
         q = q.filter(Grade.exam_name == exam_name)
     stats = q.group_by(Course.id).all()
@@ -290,9 +314,15 @@ def get_course_statistics(exam_name: str | None = None):
                 "course_code": stat.code,
                 "course_name": stat.name,
                 "total_students": stat.total_grades,
-                "avg_score": round(float(stat.avg_score), 2) if stat.avg_score is not None else None,
-                "max_score": round(float(stat.max_score), 2) if stat.max_score is not None else None,
-                "min_score": round(float(stat.min_score), 2) if stat.min_score is not None else None,
+                "avg_score": (
+                    round(float(stat.avg_score), 2) if stat.avg_score is not None else None
+                ),
+                "max_score": (
+                    round(float(stat.max_score), 2) if stat.max_score is not None else None
+                ),
+                "min_score": (
+                    round(float(stat.min_score), 2) if stat.min_score is not None else None
+                ),
             }
         )
 
