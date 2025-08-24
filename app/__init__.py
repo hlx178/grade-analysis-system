@@ -61,7 +61,9 @@ def create_app(config_name="default"):
             pass
 
     # Force logging to stdout for debugging in container
-    import logging
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    app.logger.addHandler(stream_handler)
 
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(logging.INFO)
