@@ -1329,15 +1329,7 @@ def api_import_grades():
     # 标准化与自动识别表头/别名
     try:
         import re
-        # 若第一行看起来是表头（包含“学号/姓名/班级”等），则将其作为列名
-        if len(df) > 0:
-            first_row = [str(x).strip() for x in list(df.iloc[0].values)]
-            if any(x in first_row for x in ["学号","姓名","班级","课程代码","课程名称","成绩"]):
-                df.columns = first_row
-                df = df.iloc[1:].reset_index(drop=True)
-        # 去除全空列与全空行
-        df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
-        # 清洗列名（去空格/全角空格/括号内“分/成绩”等）并映射常见别名
+        # 预处理：尝试识别第一行为表头（考虑别名后再判断）
         def _norm_col(c: str) -> str:
             c = str(c or '').strip()
             c = c.replace('\u3000','').replace(' ','').replace('\t','')
@@ -1357,16 +1349,25 @@ def api_import_grades():
             # 总分别名
             '总成绩':'总分','总分数':'总分','总分(分)':'总分',
         }
-        # 映射列名
-        new_cols = []
-        for col in list(df.columns):
-            raw = _norm_col(col)
-            # 去掉如 “xxx(原始)” 后缀
+        def _map_alias(s: str) -> str:
+            raw = _norm_col(s)
             raw = re.sub(r'^(.*?)(\(|（).*(\)|）)$', r'\1', raw)
             raw = alias.get(raw, raw)
-            # 将如 “语文(分)” -> 语文
             raw = re.sub(r'^(语文|数学|英语|科学|社会|道法).*(分|成绩)?$', r'\1', raw)
-            new_cols.append(raw)
+            return raw
+        if len(df) > 0:
+            first_row = [str(x).strip() for x in list(df.iloc[0].values)]
+            mapped = [_map_alias(x) for x in first_row]
+            known = {"学号","姓名","班级","课程代码","课程名称","成绩","语文","数学","英语","科学","社会","道法","总分"}
+            if any(x in mapped for x in known):
+                df.columns = mapped
+                df = df.iloc[1:].reset_index(drop=True)
+        # 去除全空列与全空行
+        df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
+        # 清洗列名并映射常见别名（再次应用，防止原始列名也需规范化）
+        new_cols = []
+        for col in list(df.columns):
+            new_cols.append(_map_alias(col))
         df.columns = new_cols
     except Exception:
         pass
