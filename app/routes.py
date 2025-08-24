@@ -1443,38 +1443,6 @@ def api_import_grades():
             return jsonify({"error": "导入校验失败", "details": errors}), 400
     else:
         # 兼容旧方式
-        for _, row in df.iterrows():
-            student = Student.query.filter_by(student_id=str(row["学号"]).strip()).first()
-            if not student:
-                from app.utils import infer_grade_from_class_name
-                _cls = str(row.get("班级") or "").strip()
-                _gl = str(row.get("年级") or "").strip() or infer_grade_from_class_name(_cls)
-                student = Student(
-                    student_id=str(row["学号"]).strip(),
-                    name=str(row.get("姓名") or "").strip(),
-                    class_name=_cls,
-                    grade_level=_gl
-                )
-                db.session.add(student)
-
-            course = Course.query.filter_by(code=str(row["课程代码"]).strip()).first()
-            if not course:
-                course = Course(
-                    code=str(row["课程代码"]).strip(),
-                    name=str(row.get("课程名称") or "").strip(),
-                )
-                db.session.add(course)
-
-            grade = Grade(
-                student=student,
-                course=course,
-                score=float(row["成绩"]),
-                exam_name=exam_name,
-                exam_type=normalize_exam_type(exam_name),
-            )
-            db.session.add(grade)
-            imported_count += 1
-
         # 旧模式：逐行处理
         for i, row in df.iterrows():
             try:
@@ -1527,6 +1495,12 @@ def api_import_grades():
             pass
 
     db.session.commit()
+
+    # 成绩变更后失效 summary/analysis 缓存命名空间
+    try:
+        _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+    except Exception:
+        pass
 
     # 导入完成后可清理临时文件
     # 保留上传文件，便于在“已上传文件管理”中查看/二次导入/批量删除

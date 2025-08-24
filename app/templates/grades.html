@@ -214,12 +214,23 @@ function exportVisible(){
   const q = new URLSearchParams({ exam_name: exam, subject_code: s || '', show_scores: String(+opts.showScores), show_letters: String(+opts.showLetters), show_sub_ranks: String(+opts.showSubRanks), show_total_ranks: String(+opts.showTotalRanks) });
   window.open('/api/grades/aggregated/export?' + q.toString(), '_blank');
 }
+// 加载筛选项
+async function loadFilters(){
+  try{
+    const r = await fetch('/api/grades/filters');
+    const d = await r.json();
+    const fill = (id, arr)=>{ const sel=document.getElementById(id); const cur=sel.value; sel.innerHTML='<option value="">全部</option>'; (arr||[]).forEach(x=>{ const o=document.createElement('option'); o.value=o.textContent=x; sel.appendChild(o); }); if ([...sel.options].some(o=>o.value===cur)) sel.value=cur; };
+    fill('gradeFilter', d.grades);
+    fill('classFilter', d.classes);
+  }catch(e){ console.warn('loadFilters failed', e); }
+}
 // 初始加载 & 选项切换时刷新
-window.addEventListener('DOMContentLoaded', () => {
-  loadAggregated();
-  document.getElementById('showLetters').addEventListener('change', loadAggregated);
-  document.getElementById('showSubRanks').addEventListener('change', loadAggregated);
-  document.getElementById('showTotalRanks').addEventListener('change', loadAggregated);
+window.addEventListener('DOMContentLoaded', async () => {
+  await loadFilters();
+  await loadAggregated();
+  ['showLetters','showSubRanks','showTotalRanks','gradeFilter','classFilter','subjectFilter','examName'].forEach(id=>{
+    const el = document.getElementById(id); if (el) el.addEventListener('change', loadAggregated);
+  });
 });
 </script>
 {% endblock %}
