@@ -1386,15 +1386,27 @@ def api_import_grades():
         # 自动补充 学号 列，后续导入逻辑会在需要时生成
         df["学号"] = None
 
+    # 记录一次导入的列与判断
+    try:
+        current_app.logger.info('import grades: cols=%s rows=%d', list(map(str, df.columns)), len(df))
+        current_app.logger.info('import grades: is_template=%s has_sid=%s has_subject=%s', is_template, has_sid, has_subject)
+    except Exception:
+        pass
+
     if not is_template:
         # 非模板方式则要求旧字段存在（严格检查）
         for col in legacy_required_cols:
             if col not in df.columns:
+                try:
+                    current_app.logger.warning('import grades legacy missing column: %s', col)
+                except Exception:
+                    pass
                 return jsonify({"error": f"Missing required column: {col}"}), 400
 
     created = 0
     updated = 0
     errors = []
+    skipped = 0
 
     if is_template:
         # 处理考试类型与考试方案（从接口参数接收）
@@ -1495,7 +1507,8 @@ def api_import_grades():
                 except Exception:
                     pass
             if not has_any_score:
-                errors.append(f"第{idx}行：至少填写一门学科成绩")
+                skipped += 1
+                # 仅跳过全空成绩行，不视为错误；保留软提示
                 continue
 
             # 规范化学号（防止 Excel 将学号当数字导致 202580040.0）
@@ -1679,9 +1692,12 @@ def api_import_grades():
     except Exception:
         pass
 
-    # 导入完成后可清理临时文件
-    # 保留上传文件，便于在“已上传文件管理”中查看/二次导入/批量删除
-    return jsonify({"message": "Import finished", "created": created, "updated": updated})
+    # 导入完成后返回统计
+    try:
+        current_app.logger.info('import grades done: created=%d updated=%d skipped=%d', created, updated, skipped)
+    except Exception:
+        pass
+    return jsonify({"message": "Import finished", "created": created, "updated": updated, "skipped": skipped})
 
 # 导入: 学生主数据（可选自动创建用户账号）
 @api_bp.route("/import/students", methods=["POST"])
