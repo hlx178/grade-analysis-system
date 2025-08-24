@@ -85,6 +85,31 @@
     </div>
   </div>
 </div>
+  <div class="card mt-3">
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-auto"><label class="form-label mb-0">按考试名称清理成绩</label></div>
+        <div class="col-auto"><input id="cleanupExam" class="form-control form-control-sm" placeholder="考试名称"></div>
+        <div class="col-auto"><input id="cleanupSubject" class="form-control form-control-sm" placeholder="学科代码(可选，如 CN/TOTAL)"></div>
+        <div class="col-auto"><button class="btn btn-outline-danger btn-sm" onclick="cleanupByExam()">清理</button></div>
+        <div class="col"><small class="text-muted">仅管理员可见；清理后汇总/分析将自动刷新。</small></div>
+      </div>
+      <div id="cleanupResult" class="small mt-2 text-muted"></div>
+    </div>
+  </div>
+  <div class="card mt-3">
+    <div class="card-body">
+      <div class="d-flex align-items-center gap-2">
+        <span class="text-danger">危险操作：</span>
+        <button class="btn btn-outline-danger btn-sm" onclick="cleanupAllGrades()">清空所有成绩</button>
+        <input id="cleanupAllSubject" class="form-control form-control-sm" placeholder="学科代码(可选，如 TOTAL/CN)">
+      </div>
+      <div class="small text-muted mt-2">仅管理员可见。将删除所有成绩记录（或指定学科的所有成绩），不可恢复，请谨慎操作。</div>
+      <div id="cleanupAllResult" class="small mt-2 text-muted"></div>
+    </div>
+  </div>
+
+
 
   <p>学生导入模板：学号（8位：入学年份4位+流水号4位）、姓名、班级必填；可选：年级、邮箱。</p>
 </div>
@@ -195,9 +220,14 @@ async function loadUploadList(){
       const delBtn = document.createElement('button'); delBtn.className='btn btn-sm btn-outline-danger'; delBtn.textContent='删除';
       delBtn.onclick = async ()=>{
         if (!confirm('确认删除该文件？')) return;
-        const r = await fetch('/api/import/files/'+it.file_id, { method: 'DELETE' });
+        const withGrades = confirm('是否同时删除该文件对应考试名称下的所有成绩记录？[确定=是/取消=否]');
+        const url = '/api/import/files/'+it.file_id + (withGrades? '?delete_grades=1' : '');
+        const r = await fetch(url, { method: 'DELETE' });
         const d = await r.json();
-        if (r.ok) { loadUploadList(); }
+        if (r.ok) {
+          if (d.grades_deleted) { alert('已删除关联成绩 '+ d.grades_deleted +' 条'); }
+          loadUploadList();
+        }
         else { alert(d.error||'删除失败'); }
       };
       tdOp.appendChild(delBtn); tr.appendChild(tdOp); tb.appendChild(tr);
@@ -209,12 +239,36 @@ function toggleAllUploads(cb){
   document.querySelectorAll('#uploadTable .upload-cb').forEach(x=> x.checked = cb.checked);
 }
 async function batchDeleteSelected(){
+
+async function cleanupByExam(){
+  const exam = document.getElementById('cleanupExam').value.trim();
+  const subj = document.getElementById('cleanupSubject').value.trim();
+  if (!exam){ alert('请输入考试名称'); return; }
+  const res = await fetch('/api/grades/cleanup-by-exam', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ exam_name: exam, subject_code: subj||undefined }) });
+  const data = await res.json();
+  const box = document.getElementById('cleanupResult');
+}
+
+async function cleanupAllGrades(){
+  if (!confirm('将要删除所有成绩（或指定学科的所有成绩），不可恢复。确认继续？')) return;
+  const subj = document.getElementById('cleanupAllSubject').value.trim();
+  const res = await fetch('/api/grades/cleanup-all', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ confirm: true, subject_code: subj||undefined }) });
+  const data = await res.json();
+  const box = document.getElementById('cleanupAllResult');
+  if (res.ok){ box.textContent = `已删除 ${data.deleted||0} 条成绩`; }
+  else { box.textContent = `清理失败：${data.error||res.status}`; }
+}
+  if (res.ok){ box.textContent = `已删除 ${data.deleted||0} 条成绩`; loadUploadList(); }
+  else { box.textContent = `清理失败：${data.error||res.status}`; }
+}
+
   const ids = Array.from(document.querySelectorAll('#uploadTable .upload-cb:checked')).map(x=>x.value);
   if (!ids.length){ alert('请选择文件'); return; }
   if (!confirm('确认删除选中的 ' + ids.length + ' 个文件？')) return;
-  const r = await fetch('/api/import/files/batch-delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ file_ids: ids }) });
+  const withGrades = confirm('是否同时删除这些文件对应考试名称下的成绩记录？[确定=是/取消=否]');
+  const r = await fetch('/api/import/files/batch-delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ file_ids: ids, delete_grades: withGrades }) });
   const d = await r.json();
-  if (r.ok){ loadUploadList(); }
+  if (r.ok){ if (d.grades_deleted) alert('已删除关联成绩 '+ d.grades_deleted +' 条'); loadUploadList(); }
   else { alert(d.error||'批量删除失败'); }
 }
 // 页面加载尝试拉取一次列表

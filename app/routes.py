@@ -1156,16 +1156,48 @@ def api_import_files_batch_delete():
     ids = data.get('file_ids') or []
     if not isinstance(ids, list):
         return jsonify({'error': 'file_ids must be list'}), 400
+    delete_grades = bool(data.get('delete_grades'))
     upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
-    deleted = 0; not_found = []
+    deleted_files = 0; not_found = []; grades_deleted_total = 0
     for fid in ids:
         p = os.path.join(upload_dir, f"{fid}.xlsx")
+        meta = {}
+        try:
+            import json
+            with open(p + '.json', 'r', encoding='utf-8') as mf:
+                meta = json.load(mf) or {}
+        except Exception:
+            meta = {}
         if os.path.exists(p):
-            try: os.remove(p); deleted += 1
-            except Exception: pass
+            try:
+                os.remove(p); deleted_files += 1
+                # 同时删除元数据文件
+                try:
+                    if os.path.exists(p + '.json'):
+                        os.remove(p + '.json')
+                except Exception:
+                    pass
+            except Exception:
+                pass
         else:
             not_found.append(fid)
-    return jsonify({'deleted': deleted, 'not_found': not_found})
+        # 可选删除关联成绩（按考试名称匹配）
+        if delete_grades:
+            exam_name = (meta.get('exam_name') or '').strip()
+            if exam_name:
+                try:
+                    cnt = Grade.query.filter(Grade.exam_name == exam_name).delete(synchronize_session=False)
+                    if cnt:
+                        grades_deleted_total += cnt
+                except Exception:
+                    current_app.logger.exception('batch delete grades failed for %s', exam_name)
+    if grades_deleted_total:
+        db.session.commit()
+        try:
+            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+        except Exception:
+            pass
+    return jsonify({'deleted': deleted_files, 'not_found': not_found, 'grades_deleted': grades_deleted_total})
 
 
 @api_bp.route('/import/files/<file_id>', methods=['DELETE'])
@@ -1173,15 +1205,102 @@ def api_import_files_batch_delete():
 def api_import_file_delete(file_id):
     if current_user.role != 'admin':
         return jsonify({'error': 'forbidden'}), 403
+    delete_grades = request.args.get('delete_grades', '').lower() in ('1','true','yes')
     upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
     p = os.path.join(upload_dir, f"{file_id}.xlsx")
+    meta = {}
+    try:
+        import json
+        if os.path.exists(p + '.json'):
+            with open(p + '.json', 'r', encoding='utf-8') as mf:
+                meta = json.load(mf) or {}
+    except Exception:
+        meta = {}
     if os.path.exists(p):
         try:
             os.remove(p)
-            return jsonify({'deleted': True})
+            try:
+                if os.path.exists(p + '.json'):
+                    os.remove(p + '.json')
+            except Exception:
+                pass
+            grades_deleted = 0
+            if delete_grades:
+                exam_name = (meta.get('exam_name') or '').strip()
+                if exam_name:
+                    try:
+                        grades_deleted = Grade.query.filter(Grade.exam_name == exam_name).delete(synchronize_session=False)
+                        db.session.commit()
+                        try:
+                            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        current_app.logger.exception('delete grades failed for %s', exam_name)
+                        return jsonify({'deleted': True, 'grades_deleted': 0, 'warning': str(e)})
+            return jsonify({'deleted': True, 'grades_deleted': grades_deleted})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
     return jsonify({'deleted': False, 'error': 'not found'}), 404
+
+# 管理员清理：按考试名称（可选按学科）删除成绩
+@api_bp.route('/grades/cleanup-by-exam', methods=['POST'])
+@login_required
+def api_grades_cleanup_by_exam():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(force=True) or {}
+    exam_name = (data.get('exam_name') or '').strip()
+    subject_code = (data.get('subject_code') or '').strip()
+    if not exam_name:
+        return jsonify({'error': 'exam_name is required'}), 400
+    q = Grade.query.filter(Grade.exam_name == exam_name)
+    if subject_code:
+        from sqlalchemy import select
+        course_ids = db.session.query(Course.id).filter(Course.code == subject_code)
+        q = q.filter(Grade.course_id.in_(course_ids))
+    try:
+        deleted = q.delete(synchronize_session=False)
+        db.session.commit()
+        try:
+            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+        except Exception:
+            pass
+        return jsonify({'deleted': deleted or 0})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 管理员清理：清空所有成绩（可选按学科过滤）
+@api_bp.route('/grades/cleanup-all', methods=['POST'])
+@login_required
+def api_grades_cleanup_all():
+    if current_user.role != 'admin':
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(silent=True) or {}
+    confirm = data.get('confirm') in (True, 'true', '1', 1)
+    subject_code = (data.get('subject_code') or '').strip()
+    if not confirm:
+        return jsonify({'error': 'confirmation required'}), 400
+    try:
+        if subject_code:
+            # 仅清理某一学科
+            course_ids = db.session.query(Course.id).filter(Course.code == subject_code)
+            deleted = Grade.query.filter(Grade.course_id.in_(course_ids)).delete(synchronize_session=False)
+        else:
+            # 清空所有成绩
+            deleted = Grade.query.delete(synchronize_session=False)
+        db.session.commit()
+        try:
+            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+        except Exception:
+            pass
+        return jsonify({'deleted': deleted or 0})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
 
 
 
@@ -1233,6 +1352,10 @@ def api_import_grades():
             '语文分':'语文','数学分':'数学','英语分':'英语','科学分':'科学','社会分':'社会','道法分':'道法',
             '语文分数':'语文','数学分数':'数学','英语分数':'英语','科学分数':'科学','社会分数':'社会','道法分数':'道法',
             '社会道法合科分数':'道法', '社会道法分数':'道法', '社会道法':'道法',
+            # 常见学科别名
+            '道德与法治':'道法','思想品德':'道法','品德与社会':'社会','历史与社会':'社会',
+            # 总分别名
+            '总成绩':'总分','总分数':'总分','总分(分)':'总分',
         }
         # 映射列名
         new_cols = []
@@ -1275,12 +1398,23 @@ def api_import_grades():
     if is_template:
         # 处理考试类型与考试方案（从接口参数接收）
         exam_type = normalize_exam_type((data.get("exam_type") or "regular").strip())
-        # 优先使用预览文件的文件名作为考试名称（页面可覆盖；未填用文件名；不从表内读取）
+        # 考试名称优先使用页面输入，其次使用上传文件元数据中的 exam_name，最后回退为 'default'
         try:
             import json
-            with open(file_path + '.json', 'r', encoding='utf-8') as mf:
-                meta = json.load(mf)
-                exam_name = (meta.get('exam_name') or '').strip() or (data.get("exam_name") or "default").strip() or "default"
+            meta = {}
+            try:
+                with open(file_path + '.json', 'r', encoding='utf-8') as mf:
+                    meta = json.load(mf) or {}
+            except Exception:
+                meta = {}
+            exam_name = (data.get("exam_name") or '').strip() or (meta.get('exam_name') or '').strip() or "default"
+            # 将本次实际使用的考试名称回写到元数据，便于后续按文件删除时准确联动清理
+            try:
+                meta.update({'exam_name': exam_name})
+                with open(file_path + '.json', 'w', encoding='utf-8') as mf:
+                    json.dump(meta, mf, ensure_ascii=False)
+            except Exception:
+                pass
         except Exception:
             exam_name = (data.get("exam_name") or "default").strip() or "default"
         ensure_default_exam_scheme(exam_type)
@@ -1414,10 +1548,15 @@ def api_import_grades():
                     student.class_name = cls
 
             total_score = 0.0
+            total_present = False
             for col_name, code, _ in SUBJECTS:
                 val = row.get(col_name)
                 try:
-                    score_val = float(val) if pd.notna(val) else None
+                    # 支持用逗号作为小数点、去除百分号与中文空格
+                    sval = str(val).replace('％','%').replace('，','.') if pd.notna(val) else ''
+                    if sval.endswith('%'):
+                        sval = sval[:-1]
+                    score_val = float(sval) if sval != '' else None
                 except Exception:
                     score_val = None
                 if score_val is None:
@@ -1433,28 +1572,37 @@ def api_import_grades():
                     grade.exam_type = exam_type
                     updated += 1
                 total_score += score_val
+                total_present = True
 
-            # 总分（TOTAL）
-            total_code = TOTAL_SUBJECT[1]
-            total_course = Course.query.filter_by(code=total_code).first()
-            if not total_course:
-                total_course = Course(code=total_code, name=TOTAL_SUBJECT[2])
-                db.session.add(total_course)
-                db.session.flush()
-            grade_total = Grade.query.filter_by(student_id=student.id, course_id=total_course.id, exam_name=exam_name).first()
-            if not grade_total:
-                grade_total = Grade(student=student, course=total_course, score=total_score, exam_type=exam_type, exam_name=exam_name)
-                db.session.add(grade_total)
-                created += 1
-            else:
-                grade_total.score = total_score
-                grade_total.exam_type = exam_type
-                updated += 1
+            # 总分（TOTAL）仅在至少有一科成绩时写入
+            if total_present:
+                total_code = TOTAL_SUBJECT[1]
+                total_course = Course.query.filter_by(code=total_code).first()
+                if not total_course:
+                    total_course = Course(code=total_code, name=TOTAL_SUBJECT[2])
+                    db.session.add(total_course)
+                    db.session.flush()
+                grade_total = Grade.query.filter_by(student_id=student.id, course_id=total_course.id, exam_name=exam_name).first()
+                if not grade_total:
+                    grade_total = Grade(student=student, course=total_course, score=total_score, exam_type=exam_type, exam_name=exam_name)
+                    db.session.add(grade_total)
+                    created += 1
+                else:
+                    grade_total.score = total_score
+                    grade_total.exam_type = exam_type
+                    updated += 1
 
         # 校验错误处理
         if errors:
             db.session.rollback()
-            return jsonify({"error": "导入校验失败", "details": errors}), 400
+            # 记录详细校验失败原因，便于定位
+            try:
+                current_app.logger.warning('import validation errors: %s', errors)
+            except Exception:
+                pass
+            # 返回前端更友好的第一条错误，同时提供详情
+            msg = errors[0] if isinstance(errors, list) and errors else '导入校验失败'
+            return jsonify({"error": msg, "details": errors}), 400
     else:
         # 兼容旧方式
         # 旧模式：逐行处理
