@@ -1189,6 +1189,8 @@ def api_import_file_delete(file_id):
 @api_bp.route("/import/grades", methods=["POST"])
 @login_required
 def api_import_grades():
+    from flask import current_app
+
     data = request.get_json() or request.form
     file_id = data.get("file_id")
     sheet_name = data.get("sheet_name")
@@ -1519,7 +1521,6 @@ def api_import_grades():
 
         # 成绩变更后失效 summary/analysis 缓存命名空间
         try:
-            from flask import current_app
             _cache_bump(current_app, 'summary')
             _cache_bump(current_app, 'analysis')
         except Exception:
