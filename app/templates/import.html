@@ -180,9 +180,16 @@ async function importGrades(){
   const data = await res.json();
   const result = document.getElementById('result');
   if (res.ok) {
-    result.innerHTML = `<div class="alert alert-success">导入完成：新增 ${data.created} 条，更新 ${data.updated} 条。</div>`;
+    const skipped = data.skipped ? `；跳过空行 ${data.skipped} 条` : '';
+    result.innerHTML = `<div class=\"alert alert-success\">导入完成：新增 ${data.created} 条，更新 ${data.updated} 条${skipped}。</div>`;
   } else {
-    result.innerHTML = `<div class="alert alert-danger">导入失败：${data.error || '未知错误'}</div>`;
+    let detailHtml = '';
+    if (Array.isArray(data.details) && data.details.length) {
+      const top = data.details.slice(0, 5).map(x=>`<li>${x}</li>`).join('');
+      const more = data.details.length>5 ? `<div class=\"small text-muted\">其余 ${data.details.length-5} 条省略</div>` : '';
+      detailHtml = `<ul class=\"mb-1\">${top}</ul>${more}`;
+    }
+    result.innerHTML = `<div class=\"alert alert-danger\">导入失败：${data.error || '未知错误'}${detailHtml?'<hr/>'+detailHtml:''}</div>`;
   }
 }
 
