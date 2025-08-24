@@ -7,8 +7,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Compute full image
-$FullImage = "$Registry/$Namespace/$ImageName:$Tag"
+# Compute full image (use ${} to avoid ':' parsing issues)
+$FullImage = "${Registry}/${Namespace}/${ImageName}:${Tag}"
 
 Write-Host "[build] Image => $FullImage"
 
