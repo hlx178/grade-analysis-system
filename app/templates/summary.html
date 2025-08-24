@@ -320,6 +320,14 @@
       <th class="col-rule-version">规则版本</th>
     </tr>
   </thead>
+<div class="d-flex align-items-center justify-content-between mb-2">
+  <div id="pager" class="btn-toolbar"></div>
+  <div class="input-group" style="width:200px">
+    <span class="input-group-text">每页</span>
+    <input id="pageSize" type="number" class="form-control" value="50" min="10" step="10">
+  </div>
+</div>
+
   <tbody></tbody>
 </table>
 {% endblock %}
@@ -327,7 +335,12 @@
 <script>
 function selectedCsv(id){ return Array.from(document.getElementById(id).selectedOptions).map(o=>o.value).join(','); }
 async function loadOptions(){
-  const r = await fetch('/api/summary/options'); if(!r.ok) return; const d = await r.json();
+  const r = await fetch('/api/summary/options');
+  if(!r.ok) {
+    console.error('Failed to load options:', r.status, r.statusText);
+    return;
+  }
+  const d = await r.json();
   const fill = (id, arr)=>{ const sel=document.getElementById(id); sel.innerHTML=''; (arr||[]).forEach(x=>{ const o=document.createElement('option'); o.value=o.textContent=x; sel.appendChild(o); }); };
   fill('examName', d.exam_names);
   fill('gradeLevel', d.grade_levels);
@@ -341,6 +354,7 @@ async function loadOptions(){
   }catch(e){}
 }
 async function loadSummary(){
+  const page_size = Number(document.getElementById('pageSize')?.value || 50);
   const p = new URLSearchParams({
     exam_name: selectedCsv('examName'),
     grade_level: selectedCsv('gradeLevel'),
@@ -348,16 +362,26 @@ async function loadSummary(){
     subject_code: document.getElementById('subjectCode').value,
     order_by: document.getElementById('orderBy').value,
     page: 1,
-    page_size: 100
+    page_size
   });
-  const r = await fetch('/api/summary?' + p.toString()); const data = await r.json();
+  const r = await fetch('/api/summary?' + p.toString());
   const tb = document.querySelector('#summaryTable tbody'); tb.innerHTML='';
+
+  if (!r.ok) {
+    tb.innerHTML = `<tr><td colspan="11" class="text-danger">加载失败：${r.status} ${r.statusText}</td></tr>`;
+    return;
+  }
+
+  const data = await r.json();
   const subjName = (code)=>({TOTAL:'总分',CN:'语文',MA:'数学',EN:'英语',SC:'科学',SOC:'社会',MOR:'道法'})[code]||code;
   (data.items||[]).forEach(it=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${it.student_id||''}</td><td>${it.name||''}</td><td>${it.class_name||''}</td><td>${it.grade_level||''}</td><td>${subjName(it.subject_code||data.subject_code||'')}</td><td>${it.score}</td><td class="col-percentage">${it.percentage??''}</td><td class="col-letter">${it.letter||''}</td><td class="col-class-rank">${it.class_rank??''}</td><td class="col-grade-rank">${it.grade_rank??''}</td><td class="col-rule-version">${it.rule_version||''}</td>`;
     tb.appendChild(tr);
   });
+  applyPrefs(getPrefs());
+  renderPager(data.total, data.page, data.page_size);
+  wireExportLinks();
 }
 
 
@@ -890,8 +914,39 @@ function attachFilter(inputId, selectId){
 
 let _distChart;
 async function loadDistribution(){
-    // Placeholder function
-    console.log('loadDistribution called');
+  const subject_code = document.getElementById('subjectCode').value;
+  const bin_raw = (document.getElementById('distBin')?.value || 'auto').trim();
+  const bin_width = (bin_raw.toLowerCase?.() === 'auto' || bin_raw === '') ? 'auto' : String(Number(bin_raw)||10);
+  const exam_name = (document.getElementById('distExam')?.value || '').trim();
+  const p = new URLSearchParams({ subject_code, bin_width });
+  if (exam_name) p.set('exam_name', exam_name);
+  const r = await fetch('/api/analysis/distribution?' + p.toString());
+  if (!r.ok){ console.warn('distribution load failed'); return; }
+  const data = await r.json();
+  const labels = (data.bins||[]).map(b=>b.label);
+  const counts = (data.bins||[]).map(b=>b.count);
+  const percents = (data.bins||[]).map(b=>b.percent);
+  const cdfs = (data.bins||[]).map(b=>b.cdf);
+  const ctx = document.getElementById('distChart').getContext('2d');
+  if (_distChart) _distChart.destroy();
+  const percentMode = document.getElementById('distPercent')?.checked || false;
+  const showCDF = document.getElementById('distCDF')?.checked || false;
+  const datasets = [];
+  datasets.push({ label: percentMode ? '百分比(%)' : '人数', type: 'bar', data: percentMode? percents : counts, backgroundColor: 'rgba(13,110,253,0.4)', borderColor: '#0d6efd' });
+  if (showCDF){ datasets.push({ label: '累计(%)', type: 'line', data: cdfs, yAxisID: 'y1', borderColor: '#198754', backgroundColor: 'rgba(25,135,84,0.1)' }); }
+  _distChart = new Chart(ctx, {
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      scales: {
+        y: { beginAtZero: true, title: { display: true, text: percentMode ? '百分比(%)' : '人数' } },
+        y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: !!showCDF, text: '累计(%)' }, min: 0, max: 100 }
+      }
+    }
+  });
+  const meta = document.getElementById('distMeta');
+  if (meta && data.summary){ meta.textContent = `样本数: ${data.summary.count||0}；均分: ${data.summary.avg??''}；最大: ${data.summary.max??''}；最小: ${data.summary.min??''}；STD: ${data.summary.std??''}；分箱: ${data.summary.bin_width??''}`; }
+  wireExportLinks();
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -927,6 +982,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Initial data load
     await loadOptions();
     await loadPrefs();
+    wireExportLinks();
     await window.loadSummary(); // Call the decorated function
 
     // Attach filters and other event handlers
@@ -936,6 +992,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     const chrono = document.getElementById('trendChrono');
     if (chrono) chrono.onchange = () => loadTrendChart();
+
+    // React to distribution options change
+    const distPercent = document.getElementById('distPercent');
+    const distCDF = document.getElementById('distCDF');
+    const distBin = document.getElementById('distBin');
+    if (distPercent) distPercent.onchange = () => loadDistribution();
+    if (distCDF) distCDF.onchange = () => loadDistribution();
+    if (distBin) distBin.onchange = () => loadDistribution();
 });
 </script>
 {% endblock %}

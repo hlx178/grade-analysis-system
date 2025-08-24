@@ -218,6 +218,12 @@ _DIGIT_MAP = {
     "8": "八年级",
     "9": "九年级",
 }
+# 高中年级映射
+_HIGH_SCHOOL_MAP = {
+    "高一": "高一年级",
+    "高二": "高二年级",
+    "高三": "高三年级",
+}
 
 
 def infer_grade_from_class_name(class_name: str | None) -> str | None:
@@ -226,6 +232,7 @@ def infer_grade_from_class_name(class_name: str | None) -> str | None:
     s = str(class_name).strip()
     if not s:
         return None
+
     # 特例：初一/初二/初三
     if s.startswith("初一"):
         return "七年级"
@@ -233,11 +240,27 @@ def infer_grade_from_class_name(class_name: str | None) -> str | None:
         return "八年级"
     if s.startswith("初三"):
         return "九年级"
+
+    # 高中年级：高一/高二/高三
+    for high_grade, grade_name in _HIGH_SCHOOL_MAP.items():
+        if s.startswith(high_grade):
+            return grade_name
+
+    # 支持"七1班"、"八1班"等格式
+    import re
+    # 匹配"七1班"、"八1班"等格式
+    match = re.match(r'^(七|八|九)', s)
+    if match:
+        grade_char = match.group(1)
+        return _CHINESE_NUM.get(grade_char)
+
+    # 支持"71班"、"81班"、"91班"等格式
     c0 = s[0]
     if c0 in _CHINESE_NUM:
         return _CHINESE_NUM[c0]
     if c0 in _DIGIT_MAP:
         return _DIGIT_MAP[c0]
+
     return None
 
 

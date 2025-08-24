@@ -152,7 +152,7 @@ function colorize(td){
 async function loadAggregated(){
   const exam = document.getElementById('examName').value || 'default';
   const params = new URLSearchParams({ exam_name: exam });
-  const g = document.getElementById('gradeFilter').value; if (g) params.set('grade', g);
+  const g = document.getElementById('gradeFilter').value; if (g) params.set('grade_level', g);
   const c = document.getElementById('classFilter').value; if (c) params.set('class_name', c);
   const s = document.getElementById('subjectFilter').value; if (s) params.set('subject_code', s);
   const res = await fetch(`/api/grades/aggregated?${params.toString()}`);
