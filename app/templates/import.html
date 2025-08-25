@@ -9,7 +9,7 @@
       <input class="form-control" type="file" id="fileInput" accept=".xlsx">
     </div>
     <div class="mb-3 d-flex gap-2">
-      <button class="btn btn-secondary" onclick="previewSheets()">预览工作表</button>
+      <button class="btn btn-secondary" id="previewBtn">预览工作表</button>
       <a class="btn btn-outline-secondary" href="/api/import/template/grades?v=2" target="_blank">下载成绩导入模板</a>
     </div>
     <div class="mb-3 small text-muted">
@@ -35,7 +35,7 @@
           </select>
         </div>
         <div class="col-auto">
-          <button class="btn btn-primary" id="importBtn" onclick="importGrades()" disabled>开始导入</button>
+          <button class="btn btn-primary" id="importBtn" disabled>开始导入</button>
         </div>
       </div>
     </div>
@@ -49,7 +49,7 @@
 <div class="card">
   <div class="card-body">
     <div class="mb-3 d-flex gap-2">
-      <button class="btn btn-secondary" onclick="previewSheets()">预览工作表</button>
+      <button class="btn btn-secondary" id="previewBtn2">预览工作表</button>
       <a class="btn btn-outline-secondary" href="/api/import/template/students" target="_blank">下载学生导入模板</a>
     </div>
     <!-- 学生导入共用上面的工作表选择区域 -->
@@ -62,7 +62,7 @@
       <input class="form-control" id="defaultPassword" placeholder="默认 123456"/>
     </div>
     <div class="mb-3">
-      <button class="btn btn-primary" onclick="importStudents()" id="importStudentsBtn" disabled>开始导入学生</button>
+      <button class="btn btn-primary" id="importStudentsBtn" disabled>开始导入学生</button>
     </div>
     <div id="resultStudents" class="mt-3"></div>
   </div>
@@ -75,7 +75,7 @@
   <div class="card-body">
     <div class="d-flex justify-content-between align-items-center mb-2">
       <span class="text-muted">仅管理员可见</span>
-      <button class="btn btn-outline-secondary btn-sm" onclick="loadUploadList()">刷新</button>
+      <button class="btn btn-outline-secondary btn-sm" id="uploadRefreshBtn">刷新</button>
     </div>
     <div class="d-flex justify-content-between align-items-center mb-2">
       <div>
@@ -84,7 +84,7 @@
     </div>
     <div class="table-responsive">
       <table class="table table-sm" id="uploadTable">
-        <thead><tr><th><input type=\"checkbox\" onclick=\"toggleAllUploads(this)\"></th><th>文件名</th><th>文件ID</th><th>考试名称</th><th>大小</th><th>上传时间</th><th>操作</th></tr></thead>
+        <thead><tr><th><input type=\"checkbox\" id=\"toggleAllUploads\"></th><th>文件名</th><th>文件ID</th><th>考试名称</th><th>大小</th><th>上传时间</th><th>操作</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -96,7 +96,7 @@
         <div class="col-auto"><label class="form-label mb-0">按考试名称清理成绩</label></div>
         <div class="col-auto"><input id="cleanupExam" class="form-control form-control-sm" placeholder="考试名称"></div>
         <div class="col-auto"><input id="cleanupSubject" class="form-control form-control-sm" placeholder="学科代码(可选，如 CN/TOTAL)"></div>
-        <div class="col-auto"><button class="btn btn-outline-danger btn-sm" onclick="cleanupByExam()">清理</button></div>
+        <div class="col-auto"><button class="btn btn-outline-danger btn-sm" id="cleanupByExamBtn">清理</button></div>
         <div class="col"><small class="text-muted">仅管理员可见；清理后汇总/分析将自动刷新。</small></div>
       </div>
       <div id="cleanupResult" class="small mt-2 text-muted"></div>
@@ -106,7 +106,7 @@
     <div class="card-body">
       <div class="d-flex align-items-center gap-2">
         <span class="text-danger">危险操作：</span>
-        <button class="btn btn-outline-danger btn-sm" onclick="cleanupAllGrades()">清空所有成绩</button>
+        <button class="btn btn-outline-danger btn-sm" id="cleanupAllBtn">清空所有成绩</button>
         <input id="cleanupAllSubject" class="form-control form-control-sm" placeholder="学科代码(可选，如 TOTAL/CN)">
       </div>
       <div class="small text-muted mt-2">仅管理员可见。将删除所有成绩记录（或指定学科的所有成绩），不可恢复，请谨慎操作。</div>
@@ -118,8 +118,8 @@
     <div class="card-body">
       <div class="d-flex align-items-center gap-2">
         <span>清理“姓名为空”的学生</span>
-        <button class="btn btn-outline-secondary btn-sm" onclick="cleanupNameless(false)">仅删除无成绩的无名学生</button>
-        <button class="btn btn-outline-danger btn-sm" onclick="cleanupNameless(true)">级联删除无名学生及其成绩</button>
+        <button class="btn btn-outline-secondary btn-sm" id="cleanupNamelessBtn">仅删除无成绩的无名学生</button>
+        <button class="btn btn-outline-danger btn-sm" id="cleanupNamelessCascadeBtn">级联删除无名学生及其成绩</button>
       </div>
       <div id="cleanupNamelessResult" class="small text-muted mt-2"></div>
     </div>
@@ -131,9 +131,8 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script>
-let fileId = null;
-async function previewSheets(){
+<script src="{{ url_for('static', filename='js/import.js') }}"></script>
+{% endblock %}
   const fileInput = document.getElementById('fileInput');
   if (!fileInput.files.length) { alert('请先选择文件'); return; }
   const form = new FormData();
