@@ -67,6 +67,9 @@ def test_export_filter_by_student_as_admin(client, app):
         query_string={"exam_name": "E1", "subject_code": "TOTAL", "student_id": "S1", "format": "csv"},
     )
     assert r.status_code == 200
+    # 文件名应包含 SID 片段
+    cd = r.headers.get("Content-Disposition", "")
+    assert "SID-S1" in cd
     rows = read_csv_bytes(r.data)
     # header + 1 row
     assert len(rows) == 2
