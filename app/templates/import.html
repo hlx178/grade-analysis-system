@@ -149,6 +149,9 @@ async function previewSheets(){
     opt.value = name; opt.textContent = name;
     sel.appendChild(opt);
   });
+  // 预览后默认选中第一个工作表
+  if (sel.options.length > 0){ sel.selectedIndex = 0; }
+
   document.getElementById('sheetSelectWrap').style.display = 'block';
   // 预览后进行一次检查
   await inspectSelectedSheet();
@@ -176,14 +179,23 @@ async function inspectSelectedSheet(){
              (sample?`<div class=\"mt-2\"><strong>样例(最多3行)：</strong><br/>${sample}</div>`:'');
   box.innerHTML = html; box.style.display='block';
   const ok = !!data.can_import;
-  document.getElementById('importBtn').disabled = !ok;
-  document.getElementById('importStudentsBtn').disabled = !ok;
+  const importBtn = document.getElementById('importBtn');
+  const importStuBtn = document.getElementById('importStudentsBtn');
+  if (importBtn) importBtn.disabled = !ok;
+  if (importStuBtn) importStuBtn.disabled = !ok;
 }
 
 // 当用户切换工作表时，自动重检
- document.getElementById('sheetSelect').addEventListener('change', inspectSelectedSheet);
+(function(){
+  const sel = document.getElementById('sheetSelect');
+  if (sel) sel.addEventListener('change', inspectSelectedSheet);
+})();
 
 async function importGrades(){
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true; btn.textContent = '导入中...';
+  try {
+
   const sheet = document.getElementById('sheetSelect').value;
   if (!fileId || !sheet) { alert('请先预览并选择工作表'); return; }
   const examName = document.getElementById('examNameInput').value.trim() || 'default';
@@ -207,6 +219,8 @@ async function importGrades(){
     }
     result.innerHTML = `<div class=\"alert alert-danger\">导入失败：${data.error || '未知错误'}${detailHtml?'<hr/>'+detailHtml:''}</div>`;
   }
+} finally {
+  btn.disabled = false; btn.textContent = '开始导入';
 }
 
 async function importStudents(){
@@ -276,30 +290,8 @@ async function cleanupNameless(cascade){
 function toggleAllUploads(cb){
   document.querySelectorAll('#uploadTable .upload-cb').forEach(x=> x.checked = cb.checked);
 }
+
 async function batchDeleteSelected(){
-
-async function cleanupByExam(){
-  const exam = document.getElementById('cleanupExam').value.trim();
-  const subj = document.getElementById('cleanupSubject').value.trim();
-  if (!exam){ alert('请输入考试名称'); return; }
-  const res = await fetch('/api/grades/cleanup-by-exam', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ exam_name: exam, subject_code: subj||undefined }) });
-  const data = await res.json();
-  const box = document.getElementById('cleanupResult');
-}
-
-async function cleanupAllGrades(){
-  if (!confirm('将要删除所有成绩（或指定学科的所有成绩），不可恢复。确认继续？')) return;
-  const subj = document.getElementById('cleanupAllSubject').value.trim();
-  const res = await fetch('/api/grades/cleanup-all', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ confirm: true, subject_code: subj||undefined }) });
-  const data = await res.json();
-  const box = document.getElementById('cleanupAllResult');
-  if (res.ok){ box.textContent = `已删除 ${data.deleted||0} 条成绩`; }
-  else { box.textContent = `清理失败：${data.error||res.status}`; }
-}
-  if (res.ok){ box.textContent = `已删除 ${data.deleted||0} 条成绩`; loadUploadList(); }
-  else { box.textContent = `清理失败：${data.error||res.status}`; }
-}
-
   const ids = Array.from(document.querySelectorAll('#uploadTable .upload-cb:checked')).map(x=>x.value);
   if (!ids.length){ alert('请选择文件'); return; }
   if (!confirm('确认删除选中的 ' + ids.length + ' 个文件？')) return;
@@ -309,6 +301,28 @@ async function cleanupAllGrades(){
   if (r.ok){ if (d.grades_deleted) alert('已删除关联成绩 '+ d.grades_deleted +' 条'); loadUploadList(); }
   else { alert(d.error||'批量删除失败'); }
 }
+
+async function cleanupByExam(){
+  const exam = document.getElementById('cleanupExam').value.trim();
+  const subj = document.getElementById('cleanupSubject').value.trim();
+  if (!exam){ alert('请输入考试名称'); return; }
+  const res = await fetch('/api/grades/cleanup-by-exam', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ exam_name: exam, subject_code: subj||undefined }) });
+  const data = await res.json();
+  const box = document.getElementById('cleanupResult');
+  if (res.ok){ box.textContent = `已删除 ${data.deleted||0} 条成绩`; }
+  else { box.textContent = `清理失败：${data.error||res.status}`; }
+}
+
+async function cleanupAllGrades(){
+  if (!confirm('将要删除所有成绩（或指定学科的所有成绩），不可恢复。确认继续？')) return;
+  const subj = document.getElementById('cleanupAllSubject').value.trim();
+  const res = await fetch('/api/grades/cleanup-all', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ confirm: true, subject_code: subj||undefined }) });
+  const data = await res.json();
+  const box = document.getElementById('cleanupAllResult');
+  if (res.ok){ box.textContent = `已删除 ${data.deleted||0} 条成绩`; loadUploadList(); }
+  else { box.textContent = `清理失败：${data.error||res.status}`; }
+}
+
 // 页面加载尝试拉取一次列表
 loadUploadList();
 
