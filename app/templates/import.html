@@ -12,6 +12,11 @@
       <button class="btn btn-secondary" onclick="previewSheets()">预览工作表</button>
       <a class="btn btn-outline-secondary" href="/api/import/template/grades?v=2" target="_blank">下载成绩导入模板</a>
     </div>
+    <div class="mb-3 small text-muted">
+      仅支持 .xlsx。若为 .xls，请在 Excel 中另存为 .xlsx 后再上传。<br/>
+      新模板要求：包含“姓名、班级”，并至少包含一门具体学科列（语文/数学/英语/科学/社会/道法）。
+    </div>
+
     <div class="mb-3" id="sheetSelectWrap" style="display:none;">
       <label class="form-label">选择工作表</label>
       <select id="sheetSelect" class="form-select"></select>

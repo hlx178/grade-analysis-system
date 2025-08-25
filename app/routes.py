@@ -1188,6 +1188,10 @@ def api_import_preview():
     f = request.files["file"]
     if not f.filename:
         return jsonify({"error": "Empty filename"}), 400
+    # 仅支持 .xlsx（openpyxl），对 .xls 给出明确提示
+    lower_name = (f.filename or "").lower()
+    if not lower_name.endswith(".xlsx"):
+        return jsonify({"error": "仅支持 .xlsx 格式，请在 Excel 中另存为 .xlsx 后再上传"}), 400
 
     # 保存到上传目录
     upload_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
