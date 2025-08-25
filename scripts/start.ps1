@@ -4,8 +4,19 @@ param(
   [int]$Port = 8001,
   [string]$AdminPassword = '123456',
   [switch]$NoBuild = $false,
-  [switch]$OpenBrowser = $true
+  [object]$OpenBrowser = $true,
+  [switch]$AutoPort = $true
 )
+
+# Normalize OpenBrowser to boolean in case caller passed a string like "$false" or "false"
+if ($OpenBrowser -isnot [bool]) {
+  try {
+    $val = ("{0}" -f $OpenBrowser).Trim().ToLower()
+    $OpenBrowser = @('1','true','t','yes','y') -contains $val
+  } catch {
+    $OpenBrowser = $true
+  }
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -52,6 +63,22 @@ if ($existing) {
 }
 
 # Run container
+# Auto port selection if requested and current Port busy
+if ($AutoPort) {
+  try {
+    $busy = (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+    if ($busy) {
+      Write-Warn "Port $Port is busy; searching next available..."
+      for ($p = [Math]::Max(1024, $Port); $p -lt 9000; $p++) {
+        $used = (Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue)
+        if (-not $used) { $Port = $p; Write-Info "Using Port: $Port"; break }
+      }
+    }
+  } catch {
+    Write-Warn "Port check failed, continuing with requested port $Port"
+  }
+}
+
 Write-Info "Starting container '$ContainerName' on http://localhost:$Port ..."
 if (-not $Port -or $Port -le 0) { Write-Err "Invalid Port '$Port'"; exit 1 }
 $portMap = ("{0}:{1}" -f $Port, 8000)
