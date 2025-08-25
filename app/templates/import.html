@@ -195,32 +195,35 @@ async function importGrades(){
   const btn = document.getElementById('importBtn');
   btn.disabled = true; btn.textContent = '导入中...';
   try {
-
-  const sheet = document.getElementById('sheetSelect').value;
-  if (!fileId || !sheet) { alert('请先预览并选择工作表'); return; }
-  const examName = document.getElementById('examNameInput').value.trim() || 'default';
-  const examType = document.getElementById('examTypeSelect').value;
-  const res = await fetch('/api/import/grades', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ file_id: fileId, sheet_name: sheet, exam_name: examName, exam_type: examType })
-  });
-  const data = await res.json();
-  const result = document.getElementById('result');
-  if (res.ok) {
-    const skipped = data.skipped ? `；跳过空行 ${data.skipped} 条` : '';
-    result.innerHTML = `<div class=\"alert alert-success\">导入完成：新增 ${data.created} 条，更新 ${data.updated} 条${skipped}。</div>`;
-  } else {
-    let detailHtml = '';
-    if (Array.isArray(data.details) && data.details.length) {
-      const top = data.details.slice(0, 5).map(x=>`<li>${x}</li>`).join('');
-      const more = data.details.length>5 ? `<div class=\"small text-muted\">其余 ${data.details.length-5} 条省略</div>` : '';
-      detailHtml = `<ul class=\"mb-1\">${top}</ul>${more}`;
+    const sheet = document.getElementById('sheetSelect').value;
+    if (!fileId || !sheet) { alert('请先预览并选择工作表'); return; }
+    const examName = document.getElementById('examNameInput').value.trim() || 'default';
+    const examType = document.getElementById('examTypeSelect').value;
+    const res = await fetch('/api/import/grades', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_id: fileId, sheet_name: sheet, exam_name: examName, exam_type: examType })
+    });
+    const data = await res.json();
+    const result = document.getElementById('result');
+    if (res.ok) {
+      const skipped = data.skipped ? `；跳过空行 ${data.skipped} 条` : '';
+      result.innerHTML = `<div class=\"alert alert-success\">导入完成：新增 ${data.created} 条，更新 ${data.updated} 条${skipped}。</div>`;
+    } else {
+      let detailHtml = '';
+      if (Array.isArray(data.details) && data.details.length) {
+        const top = data.details.slice(0, 5).map(x=>`<li>${x}</li>`).join('');
+        const more = data.details.length>5 ? `<div class=\"small text-muted\">其余 ${data.details.length-5} 条省略</div>` : '';
+        detailHtml = `<ul class=\"mb-1\">${top}</ul>${more}`;
+      }
+      result.innerHTML = `<div class=\"alert alert-danger\">导入失败：${data.error || '未知错误'}${detailHtml?'<hr/>'+detailHtml:''}</div>`;
     }
-    result.innerHTML = `<div class=\"alert alert-danger\">导入失败：${data.error || '未知错误'}${detailHtml?'<hr/>'+detailHtml:''}</div>`;
+  } catch(e){
+    const result = document.getElementById('result');
+    if (result) result.innerHTML = `<div class=\"alert alert-danger\">导入失败：${(e && e.message) ? e.message : '异常'}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '开始导入';
   }
-} finally {
-  btn.disabled = false; btn.textContent = '开始导入';
 }
 
 async function importStudents(){
