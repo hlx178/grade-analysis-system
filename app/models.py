@@ -2,7 +2,7 @@
 数据模型定义
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask_login import UserMixin
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -54,7 +54,7 @@ class User(UserMixin, db.Model):
     allowed_grade_levels = db.Column(db.Text)  # 如：七年级,八年级
     allowed_class_names = db.Column(db.Text)  # 如：一班,二班
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     last_login = db.Column(db.DateTime)
 
     def set_password(self, password):
@@ -83,9 +83,9 @@ class Student(db.Model):
     phone = db.Column(db.String(20))
     gender = db.Column(db.String(10))
     birth_date = db.Column(db.Date)
-    enrollment_date = db.Column(db.Date, default=datetime.utcnow().date())
+    enrollment_date = db.Column(db.Date, default=lambda: datetime.now(timezone.utc).date())
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # 关系
     grades = db.relationship(
@@ -110,7 +110,7 @@ class Course(db.Model):
     academic_year = db.Column(db.String(10))  # 学年
     teacher_id = db.Column(db.Integer, db.ForeignKey("users.id"))
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # 关系
     grades = db.relationship(
@@ -148,7 +148,7 @@ class GradeMaster(db.Model):
     name = db.Column(db.String(50), unique=True, nullable=False, index=True)
     order_no = db.Column(db.Integer, default=0)
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class ClassMaster(db.Model):
@@ -160,7 +160,7 @@ class ClassMaster(db.Model):
     grade_level = db.Column(db.String(50), nullable=True, index=True)
     order_no = db.Column(db.Integer, default=0)
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     __table_args__ = (db.UniqueConstraint("grade_level", "name", name="uix_grade_class"),)
 
 
@@ -186,10 +186,14 @@ class Grade(db.Model):
     score = db.Column(db.Float, nullable=False)
     exam_type = db.Column(db.String(20), default="final")  # midterm, final, quiz, assignment
     exam_name = db.Column(db.String(100), default="default", index=True)  # 自定义考试名称
-    exam_date = db.Column(db.Date, default=datetime.utcnow().date())
+    exam_date = db.Column(db.Date, default=lambda: datetime.now(timezone.utc).date())
     remarks = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(
+        db.DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     # 复合索引
     __table_args__ = (
@@ -224,7 +228,7 @@ class ExportJob(db.Model):
     progress = db.Column(db.Integer, default=0)
     file_path = db.Column(db.String(255))
     error = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     finished_at = db.Column(db.DateTime)
 
     user = db.relationship("User")
@@ -273,7 +277,7 @@ class GradeBandSet(db.Model):
     status = db.Column(db.String(20), nullable=False, default="draft")  # draft/published
     note = db.Column(db.String(255))
     rules_json = db.Column(db.Text, nullable=False)  # 存放 items 的JSON
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     published_at = db.Column(db.DateTime)
 
 
@@ -306,7 +310,11 @@ class ModuleSetting(db.Model):
         db.session.add(row)
         db.session.commit()
 
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class RolePermission(db.Model):
@@ -315,7 +323,11 @@ class RolePermission(db.Model):
     __tablename__ = "role_permissions"
     role = db.Column(db.String(20), primary_key=True)  # admin/teacher/student
     modules = db.Column(db.Text, nullable=True)  # JSON 数组，如 ["students","courses",...]
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class AuditLog(db.Model):
@@ -329,7 +341,7 @@ class AuditLog(db.Model):
     action = db.Column(db.String(50), nullable=False)
     resource = db.Column(db.String(100), nullable=False)
     details = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     user = db.relationship("User", backref="audit_logs")
 

@@ -22,7 +22,8 @@ RUN python -m pip install --upgrade pip \
 
 # Copy application
 COPY app ./app
-COPY run.py config.py ./
+COPY run.py config.py alembic.ini ./
+COPY migrations ./migrations
 
 # Non-root user
 RUN useradd -m appuser && chown -R appuser:appuser /app

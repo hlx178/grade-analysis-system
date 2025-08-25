@@ -248,8 +248,9 @@ def infer_grade_from_class_name(class_name: str | None) -> str | None:
 
     # 支持"七1班"、"八1班"等格式
     import re
+
     # 匹配"七1班"、"八1班"等格式
-    match = re.match(r'^(七|八|九)', s)
+    match = re.match(r"^(七|八|九)", s)
     if match:
         grade_char = match.group(1)
         return _CHINESE_NUM.get(grade_char)

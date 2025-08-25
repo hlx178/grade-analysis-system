@@ -160,7 +160,7 @@ def create_app(config_name="default"):
     def load_user(user_id):
         from app.models import User
 
-        return User.query.get(int(user_id))
+        return db.session.get(User, int(user_id))
 
     # 启动时加载品牌配置（数据库中的 key/value）
     with app.app_context():
@@ -273,8 +273,11 @@ def create_app(config_name="default"):
         try:
             if not app.config.get("TESTING", False):
                 import os as _os
+
                 from werkzeug.security import generate_password_hash
+
                 from app.models import User
+
                 if User.query.filter_by(username="admin").first() is None:
                     _pw = _os.environ.get("ADMIN_INITIAL_PASSWORD", "123456")
                     _u = User(username="admin", email="admin@example.com", role="admin")

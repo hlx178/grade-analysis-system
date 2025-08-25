@@ -6,66 +6,101 @@
 from flask import Blueprint
 
 # Health and readiness endpoints
-health_bp = Blueprint('health', __name__)
+health_bp = Blueprint("health", __name__)
 
-@health_bp.route('/health', methods=['GET'])
+
+@health_bp.route("/health", methods=["GET"])
 def health():
-    return {'status': 'ok'}, 200
+    return {"status": "ok"}, 200
 
-@health_bp.route('/ready', methods=['GET'])
+
+@health_bp.route("/ready", methods=["GET"])
 def ready():
+    import os
+    import shutil
+    import tempfile
+
     from flask import current_app
-    import os, shutil, tempfile
+
     # 1) DB 探针
     try:
-        from app import db
         from sqlalchemy import text as _text
-        db.session.execute(_text('SELECT 1'))
+
+        from app import db
+
+        db.session.execute(_text("SELECT 1"))
     except Exception:
-        return {'status': 'not_ready', 'reason': 'db_unreachable'}, 503
+        return {"status": "not_ready", "reason": "db_unreachable"}, 503
     # 1.5) Redis 探针（配置了 REDIS_URL 时）
     try:
-        rurl = current_app.config.get('REDIS_URL')
+        rurl = current_app.config.get("REDIS_URL")
         if rurl:
             import redis
+
             rc = redis.from_url(rurl)
             if rc.ping() is not True:
-                return {'status': 'not_ready', 'reason': 'redis_unreachable'}, 503
+                return {"status": "not_ready", "reason": "redis_unreachable"}, 503
     except Exception:
-        return {'status': 'not_ready', 'reason': 'redis_unreachable'}, 503
+        return {"status": "not_ready", "reason": "redis_unreachable"}, 503
     # 2) 目录可写
-    upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
-    export_dir = current_app.config.get('EXPORT_DIR', 'exports')
+    upload_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
+    export_dir = current_app.config.get("EXPORT_DIR", "exports")
     for d in [upload_dir, export_dir]:
         try:
             os.makedirs(d, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=d)
-            os.close(fd); os.remove(tmp)
+            os.close(fd)
+            os.remove(tmp)
         except Exception:
-            return {'status': 'not_ready', 'reason': f'dir_not_writable:{d}'}, 503
+            return {"status": "not_ready", "reason": f"dir_not_writable:{d}"}, 503
     # 3) 磁盘剩余阈值
     try:
-        total, used, free = shutil.disk_usage('/')
-        free_mb = int(free / (1024*1024))
-        threshold = int(current_app.config.get('READY_DISK_FREE_MB', 1024))
+        total, used, free = shutil.disk_usage("/")
+        free_mb = int(free / (1024 * 1024))
+        threshold = int(current_app.config.get("READY_DISK_FREE_MB", 1024))
         if free_mb < threshold:
-            return {'status': 'not_ready', 'reason': f'low_disk:{free_mb}MB < {threshold}MB'}, 503
+            return {"status": "not_ready", "reason": f"low_disk:{free_mb}MB < {threshold}MB"}, 503
     except Exception:
-        return {'status': 'not_ready', 'reason': 'disk_check_failed'}, 503
-    return {'status': 'ready'}, 200
+        return {"status": "not_ready", "reason": "disk_check_failed"}, 503
+    return {"status": "ready"}, 200
 
 
+import io
 import os
 import uuid
-import io
 from io import BytesIO
 
 import pandas as pd
-from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for, send_file, Response, abort, stream_with_context
+from flask import (
+    Blueprint,
+    Response,
+    abort,
+    current_app,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    stream_with_context,
+    url_for,
+)
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db
-from app.models import Course, Grade, Student, User, ExamScheme, GradeBandRule, GradeBandSet, ExportJob, DiagnosticPreset, UserPreference, UserPreference
+from app.models import (
+    Course,
+    DiagnosticPreset,
+    ExamScheme,
+    ExportJob,
+    Grade,
+    GradeBandRule,
+    GradeBandSet,
+    Student,
+    User,
+    UserPreference,
+)
+from app.services.summary_service import get_summary_data, get_summary_options
 from app.utils import (
     SUBJECTS,
     TOTAL_SUBJECT,
@@ -78,7 +113,6 @@ from app.utils import (
     normalize_exam_type,
     validate_score,
 )
-from app.services.summary_service import get_summary_options, get_summary_data
 
 # 蓝图定义
 main_bp = Blueprint("main", __name__)
@@ -88,42 +122,52 @@ import_bp = Blueprint("importer", __name__)
 
 # Prometheus metrics endpoint (/metrics)
 try:
-    from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-    _REQ_COUNT = Counter('gas_http_requests_total', 'Total HTTP requests', ['method','endpoint','status'])
-    _REQ_LATENCY = Histogram('gas_http_request_duration_seconds', 'Request latency', ['endpoint'])
+    from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
-    _CACHE_HITS = Counter('gas_cache_hits_total', 'Cache hits', ['bucket'])
-    _CACHE_MISSES = Counter('gas_cache_misses_total', 'Cache misses', ['bucket'])
+    _REQ_COUNT = Counter(
+        "gas_http_requests_total", "Total HTTP requests", ["method", "endpoint", "status"]
+    )
+    _REQ_LATENCY = Histogram("gas_http_request_duration_seconds", "Request latency", ["endpoint"])
 
-    _EXPORT_STARTED = Counter('gas_export_started_total', 'Export tasks started', ['mode'])
-    _EXPORT_COMPLETED = Counter('gas_export_completed_total', 'Export tasks completed', ['mode'])
-    _EXPORT_FAILED = Counter('gas_export_failed_total', 'Export tasks failed', ['mode'])
+    _CACHE_HITS = Counter("gas_cache_hits_total", "Cache hits", ["bucket"])
+    _CACHE_MISSES = Counter("gas_cache_misses_total", "Cache misses", ["bucket"])
+
+    _EXPORT_STARTED = Counter("gas_export_started_total", "Export tasks started", ["mode"])
+    _EXPORT_COMPLETED = Counter("gas_export_completed_total", "Export tasks completed", ["mode"])
+    _EXPORT_FAILED = Counter("gas_export_failed_total", "Export tasks failed", ["mode"])
     from prometheus_client import Gauge
-    _EXPORT_TASKS = Gauge('gas_export_tasks', 'Export tasks by status', ['status'])
-    _EXPORT_OLDEST_SECONDS = Gauge('gas_export_oldest_seconds', 'Oldest export task age (seconds) by status', ['status'])
 
+    _EXPORT_TASKS = Gauge("gas_export_tasks", "Export tasks by status", ["status"])
+    _EXPORT_OLDEST_SECONDS = Gauge(
+        "gas_export_oldest_seconds", "Oldest export task age (seconds) by status", ["status"]
+    )
 
     @main_bp.before_app_request
     def _metrics_req_start():
         from flask import g, request
-        g._metrics_path = request.endpoint or request.path or 'unknown'
+
+        g._metrics_path = request.endpoint or request.path or "unknown"
         g._metrics_timer = _REQ_LATENCY.labels(g._metrics_path).time()
 
     @main_bp.after_app_request
     def _metrics_req_end(response):
         from flask import g, request
+
         try:
-            if getattr(g, '_metrics_timer', None):
+            if getattr(g, "_metrics_timer", None):
                 g._metrics_timer.observe_duration()  # stop timer
-            _REQ_COUNT.labels(request.method, getattr(g, '_metrics_path','unknown'), response.status_code).inc()
+            _REQ_COUNT.labels(
+                request.method, getattr(g, "_metrics_path", "unknown"), response.status_code
+            ).inc()
         except Exception:
             pass
         return response
 
-    @health_bp.route('/metrics')
+    @health_bp.route("/metrics")
     def metrics():
         data = generate_latest()
-        return data, 200, {'Content-Type': CONTENT_TYPE_LATEST}
+        return data, 200, {"Content-Type": CONTENT_TYPE_LATEST}
+
 except Exception:
     pass
 
@@ -132,13 +176,19 @@ except Exception:
 @main_bp.route("/")
 @login_required
 def dashboard():
-    exam_name = (request.args.get('exam_name') or '').strip() or None
+    exam_name = (request.args.get("exam_name") or "").strip() or None
     course_stats = get_course_statistics(exam_name)
     courses = Course.query.order_by(Course.code).all()
     classes = get_class_list()
     # 提供已存在的考试名称列表（从成绩中distinct）
-    exam_names = [row[0] for row in db.session.query(Grade.exam_name).distinct().all() if row[0]] or ['default']
-    grade_levels = [row[0] for row in db.session.query(Student.grade_level).distinct().all() if row[0]]
+    exam_names = [
+        row[0] for row in db.session.query(Grade.exam_name).distinct().all() if row[0]
+    ] or ["default"]
+    grade_levels = [
+        row[0] for row in db.session.query(Student.grade_level).distinct().all() if row[0]
+    ]
+    from app.utils import SUBJECTS
+
     return render_template(
         "dashboard.html",
         course_stats=course_stats,
@@ -146,7 +196,8 @@ def dashboard():
         classes=classes,
         exam_names=exam_names,
         grade_levels=grade_levels,
-        cur_exam_name=exam_name or ''
+        SUBJECTS=SUBJECTS,
+        cur_exam_name=exam_name or "",
     )
 
 
@@ -155,7 +206,7 @@ def dashboard():
 @login_required
 def students():
     # 学生角色仅查看本人（通过学号=登录账号绑定）
-    if current_user.role == 'student':
+    if current_user.role == "student":
         u = current_user
         stu = Student.query.filter_by(student_id=u.username).first() if u.username else None
         students = [stu] if stu else []
@@ -178,63 +229,75 @@ def courses():
 def grades():
     # 页面使用聚合表展示，这里仅准备下拉选项与科目列表
     from app.utils import SUBJECTS, TOTAL_SUBJECT
-    exam_names = [row[0] for row in db.session.query(Grade.exam_name).distinct().all() if row[0]] or ['default']
-    subjects = [{'code': code, 'name': name} for (_col, code, name) in SUBJECTS]
-    subjects_total = {'code': TOTAL_SUBJECT[1], 'name': TOTAL_SUBJECT[2]}
-    return render_template("grades.html", exam_names=exam_names, subjects=subjects, total_subject=subjects_total)
+
+    exam_names = [
+        row[0] for row in db.session.query(Grade.exam_name).distinct().all() if row[0]
+    ] or ["default"]
+    subjects = [{"code": code, "name": name} for (_col, code, name) in SUBJECTS]
+    subjects_total = {"code": TOTAL_SUBJECT[1], "name": TOTAL_SUBJECT[2]}
+    return render_template(
+        "grades.html", exam_names=exam_names, subjects=subjects, total_subject=subjects_total
+    )
 
 
 # 筛选：年级、班级、学科
-@api_bp.route('/grades/filters', methods=['GET'])
+@api_bp.route("/grades/filters", methods=["GET"])
 @login_required
 def api_grade_filters():
     q = Student.query
-    if current_user.role == 'student':
+    if current_user.role == "student":
         q = q.filter(Student.student_id == current_user.username)
-    elif current_user.role != 'admin':
+    elif current_user.role != "admin":
         if current_user.allowed_grade_levels:
-            allowed = [s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]
+            allowed = [
+                s.strip() for s in (current_user.allowed_grade_levels or "").split(",") if s.strip()
+            ]
             if allowed:
                 q = q.filter(Student.grade_level.in_(allowed))
         if current_user.allowed_class_names:
-            allowed = [s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]
+            allowed = [
+                s.strip() for s in (current_user.allowed_class_names or "").split(",") if s.strip()
+            ]
             if allowed:
                 q = q.filter(Student.class_name.in_(allowed))
     grades = [row[0] for row in q.with_entities(Student.grade_level).distinct().all() if row[0]]
     classes = [row[0] for row in q.with_entities(Student.class_name).distinct().all() if row[0]]
     from app.utils import SUBJECTS
-    subjects = [{'code': code, 'name': name} for (_col, code, name) in SUBJECTS]
-    return jsonify({'grades': grades, 'classes': classes, 'subjects': subjects})
+
+    subjects = [{"code": code, "name": name} for (_col, code, name) in SUBJECTS]
+    return jsonify({"grades": grades, "classes": classes, "subjects": subjects})
 
 
 # 登录/登出
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = (request.form.get("username") or '').strip()
+        username = (request.form.get("username") or "").strip()
         password = request.form.get("password")
         # 支持学生用学号作为登录账号
         user = User.query.filter_by(username=username).first()
         if not user:
             # 若用户不存在且是有效学号格式，则可按需自动为学生创建账号（初始密码123456）
             import re
+
             if re.fullmatch(r"\d{8}", username):
                 stu = Student.query.filter_by(student_id=username).first()
                 if stu:
-                    user = User(username=username, email=f"{username}@example.com", role='student')
-                    user.set_password('123456')
-                    db.session.add(user); db.session.commit()
+                    user = User(username=username, email=f"{username}@example.com", role="student")
+                    user.set_password("123456")
+                    db.session.add(user)
+                    db.session.commit()
         # 方案A：学生登录一致性（当输入是8位学号时，必须提供姓名且一致）
         import re as _re
+
         if _re.fullmatch(r"\d{8}", username):
             stu = Student.query.filter_by(student_id=username).first()
             # 仅当存在学生记录时才执行姓名校验；否则走用户口令校验
             if stu:
-                name_input = (request.form.get('name') or '').strip()
+                name_input = (request.form.get("name") or "").strip()
                 if not name_input or (stu.name.strip() != name_input):
                     flash("学生登录需填写姓名，且与学号对应姓名一致", "danger")
                     return render_template("login.html"), 400
-
 
         if user and user.check_password(password):
             login_user(user)
@@ -257,40 +320,46 @@ def import_page():
 def summary_page():
     return render_template("summary.html")
 
+
 # 学生视图：我的成绩
-@main_bp.route('/my-scores')
+@main_bp.route("/my-scores")
 @login_required
 def my_scores_page():
     # 学生只能访问本人；教师/管理员也可查看（仍受可见范围限制）
-    return render_template('my_scores.html')
+    return render_template("my_scores.html")
+
 
 # 设置：学号年份推断规则（管理员）
-@main_bp.route('/settings/student_id_rule', methods=['GET','POST'])
+@main_bp.route("/settings/student_id_rule", methods=["GET", "POST"])
 @login_required
 def student_id_rule():
-    if current_user.role != 'admin':
-        flash('仅管理员可访问', 'danger');
-        return redirect(url_for('main.dashboard'))
-    from app.models import ModuleSetting
+    if current_user.role != "admin":
+        flash("仅管理员可访问", "danger")
+        return redirect(url_for("main.dashboard"))
     import json
-    key = 'student_id_year_rule'
-    if request.method == 'POST':
-        text = request.form.get('rule_json') or ''
+
+    from app.models import ModuleSetting
+
+    key = "student_id_year_rule"
+    if request.method == "POST":
+        text = request.form.get("rule_json") or ""
         try:
             val = json.loads(text)
         except Exception as e:
-            flash(f'JSON 解析失败: {e}', 'danger')
-            return render_template('student_id_rule.html', rule_json=text)
+            flash(f"JSON 解析失败: {e}", "danger")
+            return render_template("student_id_rule.html", rule_json=text)
         ModuleSetting.set_json(key, val)
-        flash('规则已保存', 'success')
-    cur = ModuleSetting.get_json(key, default={'map': {'7':0, '8':-1, '9':-2}})
-    return render_template('student_id_rule.html', rule_json=json.dumps(cur, ensure_ascii=False, indent=2))
+        flash("规则已保存", "success")
+    cur = ModuleSetting.get_json(key, default={"map": {"7": 0, "8": -1, "9": -2}})
+    return render_template(
+        "student_id_rule.html", rule_json=json.dumps(cur, ensure_ascii=False, indent=2)
+    )
 
 
 @main_bp.route("/users")
 @login_required
 def users_page():
-    if current_user.role != 'admin':
+    if current_user.role != "admin":
         abort(403)
     return render_template("users.html")
 
@@ -298,7 +367,7 @@ def users_page():
 @main_bp.route("/diagnostics")
 @login_required
 def diagnostics_page():
-    if current_user.role != 'admin':
+    if current_user.role != "admin":
         abort(403)
     return render_template("diagnostics.html")
 
@@ -311,11 +380,11 @@ def exam_schemes_page():
     return render_template("exam_schemes.html")
 
     # 学生角色只能查看本人
-    if current_user.role == 'student':
+    if current_user.role == "student":
         u = current_user
         sid_ok = False
-        if getattr(u, 'student_ref_id', None):
-            sid_ok = (student.id == u.student_ref_id)
+        if getattr(u, "student_ref_id", None):
+            sid_ok = student.id == u.student_ref_id
         if not sid_ok:
             return abort(403)
 
@@ -325,30 +394,44 @@ def exam_schemes_page():
 def grade_bands_page():
     courses = Course.query.order_by(Course.code).all()
     # 版本信息初步加载（默认exam_name=default）
-    sets = GradeBandSet.query.filter_by(exam_name='default').order_by(GradeBandSet.version.desc()).all()
-    return render_template("grade_bands.html", courses=courses, subjects=SUBJECTS + [TOTAL_SUBJECT], sets=sets)
+    sets = (
+        GradeBandSet.query.filter_by(exam_name="default")
+        .order_by(GradeBandSet.version.desc())
+        .all()
+    )
+    return render_template(
+        "grade_bands.html", courses=courses, subjects=SUBJECTS + [TOTAL_SUBJECT], sets=sets
+    )
 
-@main_bp.route('/student-analysis')
+
+@main_bp.route("/student-analysis")
 @login_required
 def student_analysis_page():
-    sid = request.args.get('student_id')
-    sid_int = request.args.get('id', type=int)
+    sid = request.args.get("student_id")
+    sid_int = request.args.get("id", type=int)
     student = None
     if sid_int:
-        student = Student.query.get_or_404(sid_int)
+        student = db.session.get(Student, sid_int)
+        if not student:
+            abort(404)
     elif sid:
-        student = Student.query.filter_by(student_id=sid).first_or_404()
+        student = Student.query.filter_by(student_id=sid).first()
+        if not student:
+            abort(404)
     else:
         abort(400)
     # 权限：学生仅能查看本人（学号=登录账号）
-    if current_user.role == 'student':
+    if current_user.role == "student":
         if student.student_id != current_user.username:
             abort(403)
     from app.utils import SUBJECTS, TOTAL_SUBJECT
-    subjects = [('TOTAL', TOTAL_SUBJECT[1])] + [(code, name) for (_col, code, name) in SUBJECTS]
-    return render_template('student_analysis.html', student=student, subjects=subjects)
 
-    return render_template("grade_bands.html", courses=courses, subjects=SUBJECTS + [TOTAL_SUBJECT], sets=sets)
+    subjects = [("TOTAL", TOTAL_SUBJECT[1])] + [(code, name) for (_col, code, name) in SUBJECTS]
+    return render_template("student_analysis.html", student=student, subjects=subjects)
+
+    return render_template(
+        "grade_bands.html", courses=courses, subjects=SUBJECTS + [TOTAL_SUBJECT], sets=sets
+    )
 
 
 @auth_bp.route("/logout")
@@ -358,11 +441,11 @@ def logout():
     flash("您已退出登录", "info")
     return redirect(url_for("auth.login"))
 
-@main_bp.route('/account/password')
+
+@main_bp.route("/account/password")
 @login_required
 def account_password_page():
-    return render_template('account_password.html')
-
+    return render_template("account_password.html")
 
 
 # API: 学生
@@ -371,37 +454,59 @@ def account_password_page():
 def api_students():
     if request.method == "POST":
         data = request.get_json() or request.form
-        sid = (data.get("student_id") or '').strip()
+        sid = (data.get("student_id") or "").strip()
         import re
+        from html import escape
+
         if not re.fullmatch(r"\d{8}", sid):
-            return jsonify({"error": "student_id must be 8-digit: 4-digit year + 4-digit sequence"}), 400
+            return (
+                jsonify({"error": "student_id must be 8-digit: 4-digit year + 4-digit sequence"}),
+                400,
+            )
+
+        # 输入验证和清理
+        name = escape((data.get("name") or "").strip())
+        class_name = escape((data.get("class_name") or "").strip())
+        email = (data.get("email") or "").strip()
+
+        if not name or len(name) > 50:
+            return jsonify({"error": "name is required and must be <= 50 characters"}), 400
+        if not class_name or len(class_name) > 20:
+            return jsonify({"error": "class_name is required and must be <= 20 characters"}), 400
+        if email and not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            return jsonify({"error": "invalid email format"}), 400
         from app.utils import infer_grade_from_class_name
-        gl = data.get("grade_level") or infer_grade_from_class_name(data.get("class_name"))
+
+        gl = data.get("grade_level") or infer_grade_from_class_name(class_name)
         student = Student(
             student_id=sid,
-            name=data.get("name"),
-            class_name=data.get("class_name"),
+            name=name,
+            class_name=class_name,
             grade_level=gl,
-            email=data.get("email"),
+            email=email,
         )
         db.session.add(student)
         db.session.commit()
         return jsonify({"message": "Student created", "id": student.id}), 201
     # GET with filters and visibility
     q = Student.query
-    if current_user.role == 'student':
+    if current_user.role == "student":
         q = q.filter(Student.student_id == current_user.username)
-    elif current_user.role != 'admin':
+    elif current_user.role != "admin":
         if current_user.allowed_grade_levels:
-            allowed = [s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]
+            allowed = [
+                s.strip() for s in (current_user.allowed_grade_levels or "").split(",") if s.strip()
+            ]
             if allowed:
                 q = q.filter(Student.grade_level.in_(allowed))
         if current_user.allowed_class_names:
-            allowed = [s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]
+            allowed = [
+                s.strip() for s in (current_user.allowed_class_names or "").split(",") if s.strip()
+            ]
             if allowed:
                 q = q.filter(Student.class_name.in_(allowed))
-    grades = [x.strip() for x in (request.args.get('grade') or '').split(',') if x.strip()]
-    classes = [x.strip() for x in (request.args.get('class') or '').split(',') if x.strip()]
+    grades = [x.strip() for x in (request.args.get("grade") or "").split(",") if x.strip()]
+    classes = [x.strip() for x in (request.args.get("class") or "").split(",") if x.strip()]
     if grades:
         q = q.filter(Student.grade_level.in_(grades))
     if classes:
@@ -409,23 +514,27 @@ def api_students():
     q = q.order_by(Student.class_name, Student.student_id)
     students = q.all()
     # 为兼容旧测试与现有前端，优先返回列表；前端已兼容 d 或 d.items
-    return jsonify([
-        {
-            "id": s.id,
-            "student_id": s.student_id,
-            "name": s.name,
-            "class_name": s.class_name,
-            "grade_level": s.grade_level,
-            "email": s.email,
-        }
-        for s in students
-    ])
+    return jsonify(
+        [
+            {
+                "id": s.id,
+                "student_id": s.student_id,
+                "name": s.name,
+                "class_name": s.class_name,
+                "grade_level": s.grade_level,
+                "email": s.email,
+            }
+            for s in students
+        ]
+    )
 
 
 @api_bp.route("/students/<int:student_id>", methods=["GET", "PUT", "DELETE"])
 @login_required
 def api_student_detail(student_id):
-    student = Student.query.get_or_404(student_id)
+    student = db.session.get(Student, student_id)
+    if not student:
+        abort(404)
     if request.method == "GET":
         return jsonify(
             {
@@ -451,32 +560,38 @@ def api_student_detail(student_id):
         db.session.commit()
         return jsonify({"message": "Student deleted"})
 
-@api_bp.route('/students/options', methods=['GET'])
+
+@api_bp.route("/students/options", methods=["GET"])
 @login_required
 def api_students_options():
     q = Student.query
-    if current_user.role == 'student':
+    if current_user.role == "student":
         q = q.filter(Student.student_id == current_user.username)
-    elif current_user.role != 'admin':
+    elif current_user.role != "admin":
         if current_user.allowed_grade_levels:
-            allowed = [s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]
+            allowed = [
+                s.strip() for s in (current_user.allowed_grade_levels or "").split(",") if s.strip()
+            ]
             if allowed:
                 q = q.filter(Student.grade_level.in_(allowed))
         if current_user.allowed_class_names:
-            allowed = [s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]
+            allowed = [
+                s.strip() for s in (current_user.allowed_class_names or "").split(",") if s.strip()
+            ]
             if allowed:
                 q = q.filter(Student.class_name.in_(allowed))
     grade_levels = sorted({s.grade_level for s in q if s.grade_level})
     class_names = sorted({s.class_name for s in q if s.class_name})
-    return jsonify({ 'grade_levels': grade_levels, 'class_names': class_names })
+    return jsonify({"grade_levels": grade_levels, "class_names": class_names})
 
 
-@api_bp.route('/summary/prefs', methods=['GET'])
+@api_bp.route("/summary/prefs", methods=["GET"])
 @login_required
 def api_summary_prefs_get():
     """获取当前用户的汇总页面偏好"""
     import json
-    pref = UserPreference.query.filter_by(user_id=current_user.id, key='summary_prefs').first()
+
+    pref = UserPreference.query.filter_by(user_id=current_user.id, key="summary_prefs").first()
     if pref and pref.value:
         try:
             return jsonify(json.loads(pref.value))
@@ -484,49 +599,51 @@ def api_summary_prefs_get():
             return jsonify({})  # or some default
     return jsonify({})
 
-@api_bp.route('/summary/prefs', methods=['PUT'])
+
+@api_bp.route("/summary/prefs", methods=["PUT"])
 @login_required
 def api_summary_prefs_put():
     """保存当前用户的汇总页面偏好"""
     import json
+
     data = request.get_json(force=True)
     if not data:
-        return jsonify({'error': 'invalid json'}), 400
+        return jsonify({"error": "invalid json"}), 400
 
-    pref = UserPreference.query.filter_by(user_id=current_user.id, key='summary_prefs').first()
+    pref = UserPreference.query.filter_by(user_id=current_user.id, key="summary_prefs").first()
     if not pref:
-        pref = UserPreference(user_id=current_user.id, key='summary_prefs')
+        pref = UserPreference(user_id=current_user.id, key="summary_prefs")
         db.session.add(pref)
 
     try:
         pref.value = json.dumps(data, ensure_ascii=False)
         db.session.commit()
-        return jsonify({'message': 'ok'})
+        return jsonify({"message": "ok"})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
+        return jsonify({"error": str(e)}), 500
 
 
 # API: Summary Page
-@api_bp.route('/summary/options', methods=['GET'])
+@api_bp.route("/summary/options", methods=["GET"])
 @login_required
 def api_summary_options():
     # Pass current_user to respect data-access scope
     options = get_summary_options(current_user)
     return jsonify(options)
 
-@api_bp.route('/summary/data', methods=['GET'])
+
+@api_bp.route("/summary/data", methods=["GET"])
 @login_required
 def api_summary_data():
     # Backward-compatible endpoint: adapt single-value params to the new service signature
-    exam_name = (request.args.get('exam_name') or '').strip()
-    grade_level = (request.args.get('grade_level') or '').strip()
-    class_name = (request.args.get('class_name') or '').strip()
-    subject_code = (request.args.get('subject_code') or 'TOTAL').strip()
-    order_by = (request.args.get('order_by') or 'score_desc').strip()
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 100, type=int)
+    exam_name = (request.args.get("exam_name") or "").strip()
+    grade_level = (request.args.get("grade_level") or "").strip()
+    class_name = (request.args.get("class_name") or "").strip()
+    subject_code = (request.args.get("subject_code") or "TOTAL").strip()
+    order_by = (request.args.get("order_by") or "score_desc").strip()
+    page = request.args.get("page", 1, type=int)
+    page_size = request.args.get("page_size", 100, type=int)
 
     data = get_summary_data(
         current_user,
@@ -566,7 +683,9 @@ def api_courses():
 @api_bp.route("/courses/<int:course_id>", methods=["GET", "PUT", "DELETE"])
 @login_required
 def api_course_detail(course_id):
-    course = Course.query.get_or_404(course_id)
+    course = db.session.get(Course, course_id)
+    if not course:
+        abort(404)
     if request.method == "GET":
         return jsonify(
             {
@@ -591,27 +710,33 @@ def api_course_detail(course_id):
 
 # 内部：构建聚合数据
 def _build_aggregated_items(exam_name: str):
-    from app.utils import SUBJECTS, TOTAL_SUBJECT, grade_letter_for, RANK_TIE_PRIORITY
+    from app.utils import RANK_TIE_PRIORITY, SUBJECTS, TOTAL_SUBJECT, grade_letter_for
+
     subjects = SUBJECTS
     total_code = TOTAL_SUBJECT[1]
 
     q = Grade.query.join(Student).join(Course).filter(Grade.exam_name == exam_name)
-    if current_user.role != 'admin':
+    if current_user.role != "admin":
         if current_user.allowed_grade_levels:
-            allowed = [s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]
+            allowed = [
+                s.strip() for s in (current_user.allowed_grade_levels or "").split(",") if s.strip()
+            ]
             if allowed:
                 q = q.filter(Student.grade_level.in_(allowed))
         if current_user.allowed_class_names:
-            allowed = [s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]
+            allowed = [
+                s.strip() for s in (current_user.allowed_class_names or "").split(",") if s.strip()
+            ]
             if allowed:
                 q = q.filter(Student.class_name.in_(allowed))
 
     rows = q.all()
     from collections import defaultdict
+
     by_class_total = defaultdict(list)
     by_grade_total = defaultdict(list)
-    by_class_sub = defaultdict(list)   # key: (class_name, code)
-    by_grade_sub = defaultdict(list)   # key: (grade_level, code)
+    by_class_sub = defaultdict(list)  # key: (class_name, code)
+    by_grade_sub = defaultdict(list)  # key: (grade_level, code)
 
     total_course = Course.query.filter_by(code=total_code).first()
     for g in rows:
@@ -641,51 +766,55 @@ def _build_aggregated_items(exam_name: str):
         key = s.id
         if key not in recs:
             recs[key] = {
-                'student_id': s.student_id,
-                'name': s.name,
-                'class_name': s.class_name,
-                'grade_level': s.grade_level,
-                'scores': {},
-                'letters': {},
-                'sub_class_rank': {},
-                'sub_grade_rank': {},
+                "student_id": s.student_id,
+                "name": s.name,
+                "class_name": s.class_name,
+                "grade_level": s.grade_level,
+                "scores": {},
+                "letters": {},
+                "sub_class_rank": {},
+                "sub_grade_rank": {},
             }
         code = g.course.code
-        recs[key]['scores'][code] = float(g.score)
-        recs[key]['letters'][code] = grade_letter_for(g.exam_name or 'default', code, g.score)
+        recs[key]["scores"][code] = float(g.score)
+        recs[key]["letters"][code] = grade_letter_for(g.exam_name or "default", code, g.score)
 
     # total 及等第补全（若无 total 科目则由各科累加）
     for rec in recs.values():
-        total_val = rec['scores'].get(total_code)
+        total_val = rec["scores"].get(total_code)
         if total_val is None:
-            total_val = sum(float(v) for v in rec['scores'].values()) if rec['scores'] else 0.0
-            rec['scores'][total_code] = total_val
-            rec['letters'][total_code] = grade_letter_for(exam_name, total_code, total_val)
+            total_val = sum(float(v) for v in rec["scores"].values()) if rec["scores"] else 0.0
+            rec["scores"][total_code] = total_val
+            rec["letters"][total_code] = grade_letter_for(exam_name, total_code, total_val)
 
     # 同分细则排序键
     def sort_key(rec):
-        s = rec['scores']
+        s = rec["scores"]
         total = float(s.get(total_code) or 0)
-        cn = float(s.get('CN') or 0); ma = float(s.get('MA') or 0)
+        cn = float(s.get("CN") or 0)
+        ma = float(s.get("MA") or 0)
         cnma = cn + ma
         cnma_max = max(cn, ma)
-        en = float(s.get('EN') or 0)
-        soc = float(s.get('SOC') or 0)
-        mor = float(s.get('MOR') or 0)
+        en = float(s.get("EN") or 0)
+        soc = float(s.get("SOC") or 0)
+        mor = float(s.get("MOR") or 0)
         return (total, cnma, cnma_max, en, soc, mor)
 
     # 计算班内/年级内排名（并列跳号）
     from collections import defaultdict as _dd
+
     group_class = _dd(list)
     group_grade = _dd(list)
     for rec in recs.values():
-        group_class[rec['class_name']].append(rec)
-        group_grade[rec['grade_level']].append(rec)
+        group_class[rec["class_name"]].append(rec)
+        group_grade[rec["grade_level"]].append(rec)
 
     def assign_rank(group_lists, field):
         for _, lst in group_lists.items():
             ordered = sorted(lst, key=sort_key, reverse=True)
-            last_key = None; last_rank = 0; idx = 0
+            last_key = None
+            last_rank = 0
+            idx = 0
             for r in ordered:
                 idx += 1
                 k = sort_key(r)
@@ -694,122 +823,154 @@ def _build_aggregated_items(exam_name: str):
                     last_key = k
                 r[field] = last_rank
 
-    assign_rank(group_class, 'class_rank')
-    assign_rank(group_grade, 'grade_rank')
+    assign_rank(group_class, "class_rank")
+    assign_rank(group_grade, "grade_rank")
 
     # 每学科班/年排（仍按单科分数降序计算，不使用同分细则）
     for rec in recs.values():
-        sid_text = rec['student_id']
-        for (_col, code, _name) in subjects:
-            rec['sub_class_rank'][code] = class_sub_ranks.get((rec['class_name'], code), {}).get(sid_text)
-            rec['sub_grade_rank'][code] = grade_sub_ranks.get((rec['grade_level'], code), {}).get(sid_text)
+        sid_text = rec["student_id"]
+        for _col, code, _name in subjects:
+            rec["sub_class_rank"][code] = class_sub_ranks.get((rec["class_name"], code), {}).get(
+                sid_text
+            )
+            rec["sub_grade_rank"][code] = grade_sub_ranks.get((rec["grade_level"], code), {}).get(
+                sid_text
+            )
 
     # 输出
     result = []
     for rec in recs.values():
         row = {
-            '学号': rec['student_id'],
-            '姓名': rec['name'],
-            '班级': rec['class_name'],
-            '年级': rec['grade_level'],
+            "学号": rec["student_id"],
+            "姓名": rec["name"],
+            "班级": rec["class_name"],
+            "年级": rec["grade_level"],
         }
-        for (_col, code, name) in subjects:
-            row[f'{name}分'] = rec['scores'].get(code)
-            row[f'{name}等第'] = rec['letters'].get(code)
-            row[f'{name}班排'] = rec['sub_class_rank'].get(code)
-            row[f'{name}年排'] = rec['sub_grade_rank'].get(code)
-        row['总分'] = rec['scores'].get(total_code)
-        row['总分等第'] = rec['letters'].get(total_code)
-        row['总分班排'] = rec.get('class_rank')
-        row['总分年排'] = rec.get('grade_rank')
+        for _col, code, name in subjects:
+            row[f"{name}分"] = rec["scores"].get(code)
+            row[f"{name}等第"] = rec["letters"].get(code)
+            row[f"{name}班排"] = rec["sub_class_rank"].get(code)
+            row[f"{name}年排"] = rec["sub_grade_rank"].get(code)
+        row["总分"] = rec["scores"].get(total_code)
+        row["总分等第"] = rec["letters"].get(total_code)
+        row["总分班排"] = rec.get("class_rank")
+        row["总分年排"] = rec.get("grade_rank")
         result.append(row)
     return result, subjects
 
+
 # API: 成绩聚合（按学号一行）
-@api_bp.route('/grades/aggregated', methods=['GET'])
+@api_bp.route("/grades/aggregated", methods=["GET"])
 @login_required
 def api_grades_aggregated():
     """返回按学生聚合的一行数据：各学科分数、等第、学科班/年排，以及总分、总分等第、总分班/年排。
     可选参数：exam_name（默认default）、grade、class_name、subject_code（用于前端过滤显示）。
     """
-    exam_name = request.args.get('exam_name') or 'default'
-    grade = (request.args.get('grade_level') or request.args.get('grade') or '').strip()
-    class_name = (request.args.get('class_name') or '').strip()
-    subject_code = (request.args.get('subject_code') or '').strip()
+    exam_name = request.args.get("exam_name") or "default"
+    grade = (request.args.get("grade_level") or request.args.get("grade") or "").strip()
+    class_name = (request.args.get("class_name") or "").strip()
+    subject_code = (request.args.get("subject_code") or "").strip()
     items, _subjects = _build_aggregated_items(exam_name)
+
     # 过滤（做一下空白与全角空格等标准化）
     def _norm(s):
-        return str(s or '').replace('\u3000','').strip()
+        return str(s or "").replace("\u3000", "").strip()
+
     if grade:
-        items = [r for r in items if _norm(r.get('年级')) == _norm(grade)]
+        items = [r for r in items if _norm(r.get("年级")) == _norm(grade)]
     if class_name:
-        items = [r for r in items if _norm(r.get('班级')) == _norm(class_name)]
+        items = [r for r in items if _norm(r.get("班级")) == _norm(class_name)]
     # subject_code 只影响前端渲染的列，后端这里不剔除字段，保留完整数据
-    return jsonify({'items': items, 'count': len(items), 'exam_name': exam_name})
+    return jsonify({"items": items, "count": len(items), "exam_name": exam_name})
+
+
 # 导出：聚合（尊重显示选项自动分列）
-@api_bp.route('/grades/aggregated/export', methods=['GET'])
+@api_bp.route("/grades/aggregated/export", methods=["GET"])
 @login_required
 def api_grades_aggregated_export():
-    exam_name = request.args.get('exam_name') or 'default'
-    show_scores = request.args.get('show_scores', '1') == '1'
-    show_letters = request.args.get('show_letters', '1') == '1'
-    show_sub_ranks = request.args.get('show_sub_ranks', '1') == '1'
-    show_total_ranks = request.args.get('show_total_ranks', '1') == '1'
-    subject_code = (request.args.get('subject_code') or '').strip()
+    exam_name = request.args.get("exam_name") or "default"
+    show_scores = request.args.get("show_scores", "1") == "1"
+    show_letters = request.args.get("show_letters", "1") == "1"
+    show_sub_ranks = request.args.get("show_sub_ranks", "1") == "1"
+    show_total_ranks = request.args.get("show_total_ranks", "1") == "1"
+    subject_code = (request.args.get("subject_code") or "").strip()
     items, subjects = _build_aggregated_items(exam_name)
     # 组装导出列
-    headers = ['学号','姓名','班级','年级']
-    for (_col, code, name) in subjects:
-      if subject_code and code != subject_code:
-        continue
-      sub = []
-      if show_scores: sub.append(f'{name}分')
-      if show_letters: sub.append(f'{name}等第')
-      if show_sub_ranks: sub += [f'{name}班排', f'{name}年排']
-      headers += sub
+    headers = ["学号", "姓名", "班级", "年级"]
+    for _col, code, name in subjects:
+        if subject_code and code != subject_code:
+            continue
+        sub = []
+        if show_scores:
+            sub.append(f"{name}分")
+        if show_letters:
+            sub.append(f"{name}等第")
+        if show_sub_ranks:
+            sub += [f"{name}班排", f"{name}年排"]
+        headers += sub
     # 若按学科导出，不再附加总分相关列
 
     # 写 Excel
     try:
-        from openpyxl import Workbook
         import io
+
+        from openpyxl import Workbook
+
         wb = Workbook(write_only=True)
         ws = wb.create_sheet()
         ws.append(headers)
         for r in items:
             row = []
-            row += [r.get('学号'), r.get('姓名'), r.get('班级'), r.get('年级')]
-            for (_col, code, name) in subjects:
+            row += [r.get("学号"), r.get("姓名"), r.get("班级"), r.get("年级")]
+            for _col, code, name in subjects:
                 if subject_code and code != subject_code:
                     continue
-                if show_scores: row.append(r.get(f'{name}分'))
-                if show_letters: row.append(r.get(f'{name}等第'))
-                if show_sub_ranks: row += [r.get(f'{name}班排'), r.get(f'{name}年排')]
+                if show_scores:
+                    row.append(r.get(f"{name}分"))
+                if show_letters:
+                    row.append(r.get(f"{name}等第"))
+                if show_sub_ranks:
+                    row += [r.get(f"{name}班排"), r.get(f"{name}年排")]
             # 不导出总分相关列
             ws.append(row)
-        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
         # 文件名以考试名称为准，并附加学科与时间戳
-        import time, re
-        ts = time.strftime('%Y%m%d_%H%M%S')
+        import re
+        import time
+
+        ts = time.strftime("%Y%m%d_%H%M%S")
         # 解析学科名（若指定学科）
-        subj_part = 'ALL'
+        subj_part = "ALL"
         if subject_code:
             try:
                 subj_map = {code: name for (_c, code, name) in subjects}
-                subj_part = subject_code if subject_code not in subj_map else subj_map.get(subject_code) or subject_code
+                subj_part = (
+                    subject_code
+                    if subject_code not in subj_map
+                    else subj_map.get(subject_code) or subject_code
+                )
             except Exception:
                 subj_part = subject_code
+
         # 清理文件名非法字符
         def clean(s):
-            return re.sub(r'[\\/:*?"<>|]+', '_', s)
+            return re.sub(r'[\\/:*?"<>|]+', "_", s)
+
         fname = f"{clean(exam_name)}_{clean(str(subj_part))}_{ts}.xlsx"
-        return send_file(buf, as_attachment=True, download_name=fname, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=fname,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
     except Exception as e:
         try:
-            _EXPORT_FAILED.labels('sync').inc()
+            _EXPORT_FAILED.labels("sync").inc()
         except Exception:
             pass
-        return jsonify({'error': f'export failed: {e}'}), 500
+        return jsonify({"error": f"export failed: {e}"}), 500
 
 
 # API: 成绩（基础增删改查，保留）
@@ -835,22 +996,36 @@ def api_grades():
         # 成绩新增后 bump 缓存命名空间
         try:
             from flask import current_app
-            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+
+            _cache_bump(current_app, "summary")
+            _cache_bump(current_app, "analysis")
         except Exception:
             pass
 
         return jsonify({"message": "Grade created", "id": grade.id}), 201
     # GET
     grades = Grade.query.all()
-    return jsonify([
-        {"id": g.id, "student_id": g.student_id, "course_id": g.course_id, "score": g.score, "exam_type": g.exam_type, "created_at": g.created_at.isoformat()} for g in grades
-    ])
+    return jsonify(
+        [
+            {
+                "id": g.id,
+                "student_id": g.student_id,
+                "course_id": g.course_id,
+                "score": g.score,
+                "exam_type": g.exam_type,
+                "created_at": g.created_at.isoformat(),
+            }
+            for g in grades
+        ]
+    )
 
 
 @api_bp.route("/grades/<int:grade_id>", methods=["GET", "PUT", "DELETE"])
 @login_required
 def api_grade_detail(grade_id):
-    grade = Grade.query.get_or_404(grade_id)
+    grade = db.session.get(Grade, grade_id)
+    if not grade:
+        abort(404)
     if request.method == "GET":
         return jsonify(
             {
@@ -872,7 +1047,9 @@ def api_grade_detail(grade_id):
         # 成绩更新后 bump 缓存命名空间
         try:
             from flask import current_app
-            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+
+            _cache_bump(current_app, "summary")
+            _cache_bump(current_app, "analysis")
         except Exception:
             pass
         return jsonify({"message": "Grade updated"})
@@ -882,7 +1059,9 @@ def api_grade_detail(grade_id):
         # 成绩删除后 bump 缓存命名空间
         try:
             from flask import current_app
-            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+
+            _cache_bump(current_app, "summary")
+            _cache_bump(current_app, "analysis")
         except Exception:
             pass
         return jsonify({"message": "Grade deleted"})
@@ -906,43 +1085,60 @@ def api_analysis_statistics():
         q = q.filter(Student.grade_level == grade_level)
     # 非管理员限制
     if not current_user.is_anonymous:
-        if current_user.role == 'student':
+        if current_user.role == "student":
             q = q.filter(Student.student_id == current_user.username)
-        elif current_user.role != 'admin':
+        elif current_user.role != "admin":
             if current_user.allowed_grade_levels:
-                allowed = [s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]
+                allowed = [
+                    s.strip()
+                    for s in (current_user.allowed_grade_levels or "").split(",")
+                    if s.strip()
+                ]
                 if allowed:
                     q = q.filter(Student.grade_level.in_(allowed))
             if current_user.allowed_class_names:
-                allowed = [s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]
+                allowed = [
+                    s.strip()
+                    for s in (current_user.allowed_class_names or "").split(",")
+                    if s.strip()
+                ]
                 if allowed:
                     q = q.filter(Student.class_name.in_(allowed))
     # Redis 短缓存：按参数与可见范围缓存统计结果
     try:
+        import hashlib
+        import json
+
         from flask import current_app
-        import json, hashlib
-        rurl = current_app.config.get('REDIS_URL')
+
+        rurl = current_app.config.get("REDIS_URL")
         if rurl:
             import redis
-            rc = getattr(current_app, '_redis_cli', None)
+
+            rc = getattr(current_app, "_redis_cli", None)
             if rc is None:
                 rc = redis.from_url(rurl, decode_responses=True)
                 current_app._redis_cli = rc
             # 构建 key（不含 grades 列表）
             key_payload = {
-                'ns': 'analysis_stats:' + (_cache_nsver(current_app,'analysis') or ''),
-                'course_id': course_id,
-                'class_name': class_name,
-                'grade_level': grade_level,
-                'exam_name': exam_name,
-                'user': (current_user.id if (not current_user.is_anonymous) else 0),
+                "ns": "analysis_stats:" + (_cache_nsver(current_app, "analysis") or ""),
+                "course_id": course_id,
+                "class_name": class_name,
+                "grade_level": grade_level,
+                "exam_name": exam_name,
+                "user": (current_user.id if (not current_user.is_anonymous) else 0),
             }
-            key = 'gas:analy:' + hashlib.md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+            key = (
+                "gas:analy:"
+                + hashlib.md5(
+                    json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+                ).hexdigest()
+            )
             cached = rc.get(key)
             if cached:
                 try:
                     try:
-                        _CACHE_HITS.labels('analysis_stats').inc()
+                        _CACHE_HITS.labels("analysis_stats").inc()
                     except Exception:
                         pass
                     return jsonify(json.loads(cached))
@@ -955,23 +1151,27 @@ def api_analysis_statistics():
     stats = calculate_statistics(grades)
     subject_code = None
     if course_id:
-        course = Course.query.get(course_id)
+        course = db.session.get(Course, course_id)
         subject_code = course.code if course else None
     distribution = get_grade_distribution(grades, exam_name=exam_name, subject_code=subject_code)
     resp = {"stats": stats, "distribution": distribution}
     try:
         from flask import current_app
-        rurl = current_app.config.get('REDIS_URL')
+
+        rurl = current_app.config.get("REDIS_URL")
         if rurl:
-            import redis, json
-            rc = getattr(current_app, '_redis_cli', None)
+            import json
+
+            import redis
+
+            rc = getattr(current_app, "_redis_cli", None)
             if rc is None:
                 rc = redis.from_url(rurl, decode_responses=True)
                 current_app._redis_cli = rc
-            ttl = int(current_app.config.get('ANALYSIS_TTL_SECONDS', 60))
+            ttl = int(current_app.config.get("ANALYSIS_TTL_SECONDS", 60))
             rc.setex(key, ttl, json.dumps(resp, ensure_ascii=False))
             try:
-                _CACHE_MISSES.labels('analysis_stats').inc()
+                _CACHE_MISSES.labels("analysis_stats").inc()
             except Exception:
                 pass
     except Exception:
@@ -998,11 +1198,19 @@ def api_import_preview():
     f.save(file_path)
     # 保存元数据（用于确定考试名称）
     try:
-        import json, time, os as _os
-        orig = (f.filename or '').rsplit('/',1)[-1].rsplit('\\',1)[-1]
-        base = _os.path.splitext(orig)[0] or 'default'
-        meta = { 'original_filename': orig, 'exam_name': base, 'uploaded_by': current_user.username, 'upload_time': int(time.time()) }
-        with open(file_path + '.json', 'w', encoding='utf-8') as mf:
+        import json
+        import os as _os
+        import time
+
+        orig = (f.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        base = _os.path.splitext(orig)[0] or "default"
+        meta = {
+            "original_filename": orig,
+            "exam_name": base,
+            "uploaded_by": current_user.username,
+            "upload_time": int(time.time()),
+        }
+        with open(file_path + ".json", "w", encoding="utf-8") as mf:
             json.dump(meta, mf, ensure_ascii=False)
     except Exception:
         pass
@@ -1016,7 +1224,7 @@ def api_import_preview():
         try:
             os.remove(file_path)
             try:
-                os.remove(file_path + '.json')
+                os.remove(file_path + ".json")
             except Exception:
                 pass
         except Exception:
@@ -1025,22 +1233,23 @@ def api_import_preview():
 
     return jsonify({"file_id": file_id, "sheets": sheets})
 
+
 # 导入: 预览检查（列识别与可导入性判断）
-@api_bp.route('/import/preview/inspect', methods=['POST'])
+@api_bp.route("/import/preview/inspect", methods=["POST"])
 @login_required
 def api_import_preview_inspect():
     data = request.get_json(force=True)
-    file_id = data.get('file_id')
-    sheet_name = data.get('sheet_name')
+    file_id = data.get("file_id")
+    sheet_name = data.get("sheet_name")
     if not file_id or not sheet_name:
         return jsonify({"error": "file_id and sheet_name are required"}), 400
-    upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    upload_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
     file_path = os.path.join(upload_dir, f"{file_id}.xlsx")
     if not os.path.exists(file_path):
         return jsonify({"error": "Uploaded file not found or expired"}), 400
 
     try:
-        df = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl')
+        df = pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl")
     except Exception as e:
         return jsonify({"error": f"Failed to read sheet: {e}"}), 400
 
@@ -1048,133 +1257,169 @@ def api_import_preview_inspect():
     cols_original = [str(c) for c in list(df.columns)]
     try:
         import re
+
         # 若第一行看起来是表头
         if len(df) > 0:
             first_row = [str(x).strip() for x in list(df.iloc[0].values)]
-            if any(x in first_row for x in ["学号","姓名","班级","课程代码","课程名称","成绩"]):
+            if any(
+                x in first_row for x in ["学号", "姓名", "班级", "课程代码", "课程名称", "成绩"]
+            ):
                 df.columns = first_row
                 df = df.iloc[1:].reset_index(drop=True)
                 header_row_used = True
-        df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
+        df = df.dropna(axis=1, how="all").dropna(axis=0, how="all")
+
         def _norm_col(c: str) -> str:
-            c = str(c or '').strip()
-            c = c.replace('\u3000','').replace(' ','').replace('\t','')
-            c = c.replace('（','(').replace('）',')')
+            c = str(c or "").strip()
+            c = c.replace("\u3000", "").replace(" ", "").replace("\t", "")
+            c = c.replace("（", "(").replace("）", ")")
             return c
+
         alias = {
-            '学生姓名':'姓名','学生名称':'姓名','名字':'姓名','名称':'姓名',
-            '班级名称':'班级','班级名':'班级','班级(名称)':'班级',
-            '课程代号':'课程代码','科目代码':'课程代码','科目名称':'课程名称',
-            '学籍号':'学号','学生编号':'学号','学生号':'学号','编号':'学号','考生号':'学号','考号':'学号','准考证号':'学号',
-            '语文成绩':'语文','数学成绩':'数学','英语成绩':'英语','科学成绩':'科学','社会成绩':'社会','道法成绩':'道法',
-            '语文分':'语文','数学分':'数学','英语分':'英语','科学分':'科学','社会分':'社会','道法分':'道法',
+            "学生姓名": "姓名",
+            "学生名称": "姓名",
+            "名字": "姓名",
+            "名称": "姓名",
+            "班级名称": "班级",
+            "班级名": "班级",
+            "班级(名称)": "班级",
+            "课程代号": "课程代码",
+            "科目代码": "课程代码",
+            "科目名称": "课程名称",
+            "学籍号": "学号",
+            "学生编号": "学号",
+            "学生号": "学号",
+            "编号": "学号",
+            "考生号": "学号",
+            "考号": "学号",
+            "准考证号": "学号",
+            "语文成绩": "语文",
+            "数学成绩": "数学",
+            "英语成绩": "英语",
+            "科学成绩": "科学",
+            "社会成绩": "社会",
+            "道法成绩": "道法",
+            "语文分": "语文",
+            "数学分": "数学",
+            "英语分": "英语",
+            "科学分": "科学",
+            "社会分": "社会",
+            "道法分": "道法",
         }
         cols_norm = []
         for col in list(df.columns):
             raw = _norm_col(col)
-            raw = re.sub(r'^(.*?)(\(|（).*(\)|）)$', r'\1', raw)
+            raw = re.sub(r"^(.*?)(\(|（).*(\)|）)$", r"\1", raw)
             raw = alias.get(raw, raw)
-            raw = re.sub(r'^(语文|数学|英语|科学|社会|道法).*(分|成绩)?$', r'\1', raw)
+            raw = re.sub(r"^(语文|数学|英语|科学|社会|道法).*(分|成绩)?$", r"\1", raw)
             cols_norm.append(raw)
         df.columns = cols_norm
     except Exception:
         cols_norm = [str(c) for c in list(df.columns)]
 
-    subjects_all = ["语文","数学","英语","科学","社会","道法"]
+    subjects_all = ["语文", "数学", "英语", "科学", "社会", "道法"]
     subjects_present = [c for c in subjects_all if c in df.columns]
-    is_template = ("姓名" in df.columns and "班级" in df.columns and len(subjects_present) > 0)
-    legacy_required = ["学号","姓名","班级","课程代码","课程名称","成绩"]
+    is_template = "姓名" in df.columns and "班级" in df.columns and len(subjects_present) > 0
+    legacy_required = ["学号", "姓名", "班级", "课程代码", "课程名称", "成绩"]
     legacy_missing = [c for c in legacy_required if c not in df.columns]
     is_legacy = len(legacy_missing) == 0
-    mode = 'template' if is_template else ('legacy' if is_legacy else 'unknown')
+    mode = "template" if is_template else ("legacy" if is_legacy else "unknown")
     can_import = is_template or is_legacy
 
     # 样例行
     sample = []
     try:
-        sample = df.head(3).fillna('').astype(str).to_dict(orient='records')
+        sample = df.head(3).fillna("").astype(str).to_dict(orient="records")
     except Exception:
         sample = []
 
     report = {
-        'sheet': sheet_name,
-        'columns_original': cols_original,
-        'columns_normalized': df.columns.tolist(),
-        'header_row_used': header_row_used,
-        'mode': mode,
-        'subjects_present': subjects_present,
-        'legacy_missing': legacy_missing,
-        'can_import': can_import,
-        'sample_rows': sample,
-        'notes': [
-            '新模板：姓名+班级+至少一门学科列；学号可缺省，将自动生成',
-            '旧模式：学号/姓名/班级/课程代码/课程名称/成绩 必须齐全'
-        ]
+        "sheet": sheet_name,
+        "columns_original": cols_original,
+        "columns_normalized": df.columns.tolist(),
+        "header_row_used": header_row_used,
+        "mode": mode,
+        "subjects_present": subjects_present,
+        "legacy_missing": legacy_missing,
+        "can_import": can_import,
+        "sample_rows": sample,
+        "notes": [
+            "新模板：姓名+班级+至少一门学科列；学号可缺省，将自动生成",
+            "旧模式：学号/姓名/班级/课程代码/课程名称/成绩 必须齐全",
+        ],
     }
     return jsonify(report)
 
 
 # 导入文件管理：列表/删除
-@api_bp.route('/import/files', methods=['GET'])
+@api_bp.route("/import/files", methods=["GET"])
 @login_required
 def api_import_files():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
-    upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    upload_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
     os.makedirs(upload_dir, exist_ok=True)
     items = []
     for fn in os.listdir(upload_dir):
-        if fn.endswith('.xlsx'):
+        if fn.endswith(".xlsx"):
             p = os.path.join(upload_dir, fn)
             try:
                 st = os.stat(p)
                 meta = {}
                 try:
                     import json
-                    with open(p + '.json', 'r', encoding='utf-8') as mf:
+
+                    with open(p + ".json", "r", encoding="utf-8") as mf:
                         meta = json.load(mf) or {}
                 except Exception:
                     meta = {}
-                items.append({
-                    'file_id': fn.replace('.xlsx',''),
-                    'filename': meta.get('original_filename') or fn,
-                    'exam_name': meta.get('exam_name') or None,
-                    'size': st.st_size,
-                    'mtime': int(st.st_mtime)
-                })
+                items.append(
+                    {
+                        "file_id": fn.replace(".xlsx", ""),
+                        "filename": meta.get("original_filename") or fn,
+                        "exam_name": meta.get("exam_name") or None,
+                        "size": st.st_size,
+                        "mtime": int(st.st_mtime),
+                    }
+                )
             except Exception:
                 pass
-    items.sort(key=lambda x: x['mtime'], reverse=True)
-    return jsonify({'items': items})
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    return jsonify({"items": items})
 
-@api_bp.route('/import/files/batch-delete', methods=['POST'])
+
+@api_bp.route("/import/files/batch-delete", methods=["POST"])
 @login_required
 def api_import_files_batch_delete():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(force=True) or {}
-    ids = data.get('file_ids') or []
+    ids = data.get("file_ids") or []
     if not isinstance(ids, list):
-        return jsonify({'error': 'file_ids must be list'}), 400
-    delete_grades = bool(data.get('delete_grades'))
-    upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
-    deleted_files = 0; not_found = []; grades_deleted_total = 0
+        return jsonify({"error": "file_ids must be list"}), 400
+    delete_grades = bool(data.get("delete_grades"))
+    upload_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
+    deleted_files = 0
+    not_found = []
+    grades_deleted_total = 0
     for fid in ids:
         p = os.path.join(upload_dir, f"{fid}.xlsx")
         meta = {}
         try:
             import json
-            with open(p + '.json', 'r', encoding='utf-8') as mf:
+
+            with open(p + ".json", "r", encoding="utf-8") as mf:
                 meta = json.load(mf) or {}
         except Exception:
             meta = {}
         if os.path.exists(p):
             try:
-                os.remove(p); deleted_files += 1
+                os.remove(p)
+                deleted_files += 1
                 # 同时删除元数据文件
                 try:
-                    if os.path.exists(p + '.json'):
-                        os.remove(p + '.json')
+                    if os.path.exists(p + ".json"):
+                        os.remove(p + ".json")
                 except Exception:
                     pass
             except Exception:
@@ -1183,36 +1428,42 @@ def api_import_files_batch_delete():
             not_found.append(fid)
         # 可选删除关联成绩（按考试名称匹配）
         if delete_grades:
-            exam_name = (meta.get('exam_name') or '').strip()
+            exam_name = (meta.get("exam_name") or "").strip()
             if exam_name:
                 try:
-                    cnt = Grade.query.filter(Grade.exam_name == exam_name).delete(synchronize_session=False)
+                    cnt = Grade.query.filter(Grade.exam_name == exam_name).delete(
+                        synchronize_session=False
+                    )
                     if cnt:
                         grades_deleted_total += cnt
                 except Exception:
-                    current_app.logger.exception('batch delete grades failed for %s', exam_name)
+                    current_app.logger.exception("batch delete grades failed for %s", exam_name)
     if grades_deleted_total:
         db.session.commit()
         try:
-            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+            _cache_bump(current_app, "summary")
+            _cache_bump(current_app, "analysis")
         except Exception:
             pass
-    return jsonify({'deleted': deleted_files, 'not_found': not_found, 'grades_deleted': grades_deleted_total})
+    return jsonify(
+        {"deleted": deleted_files, "not_found": not_found, "grades_deleted": grades_deleted_total}
+    )
 
 
-@api_bp.route('/import/files/<file_id>', methods=['DELETE'])
+@api_bp.route("/import/files/<file_id>", methods=["DELETE"])
 @login_required
 def api_import_file_delete(file_id):
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
-    delete_grades = request.args.get('delete_grades', '').lower() in ('1','true','yes')
-    upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    delete_grades = request.args.get("delete_grades", "").lower() in ("1", "true", "yes")
+    upload_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
     p = os.path.join(upload_dir, f"{file_id}.xlsx")
     meta = {}
     try:
         import json
-        if os.path.exists(p + '.json'):
-            with open(p + '.json', 'r', encoding='utf-8') as mf:
+
+        if os.path.exists(p + ".json"):
+            with open(p + ".json", "r", encoding="utf-8") as mf:
                 meta = json.load(mf) or {}
     except Exception:
         meta = {}
@@ -1220,74 +1471,81 @@ def api_import_file_delete(file_id):
         try:
             os.remove(p)
             try:
-                if os.path.exists(p + '.json'):
-                    os.remove(p + '.json')
+                if os.path.exists(p + ".json"):
+                    os.remove(p + ".json")
             except Exception:
                 pass
             grades_deleted = 0
             if delete_grades:
-                exam_name = (meta.get('exam_name') or '').strip()
+                exam_name = (meta.get("exam_name") or "").strip()
                 # 回退策略：若元数据缺少 exam_name 且请求显式开启 fallback_by='default'，使用 'default' 清理
-                fallback_by = request.args.get('fallback_by')
-                if not exam_name and fallback_by == 'default':
-                    exam_name = 'default'
+                fallback_by = request.args.get("fallback_by")
+                if not exam_name and fallback_by == "default":
+                    exam_name = "default"
                 if exam_name:
                     try:
-                        grades_deleted = Grade.query.filter(Grade.exam_name == exam_name).delete(synchronize_session=False)
+                        grades_deleted = Grade.query.filter(Grade.exam_name == exam_name).delete(
+                            synchronize_session=False
+                        )
                         db.session.commit()
                         try:
-                            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+                            _cache_bump(current_app, "summary")
+                            _cache_bump(current_app, "analysis")
                         except Exception:
                             pass
                     except Exception as e:
-                        current_app.logger.exception('delete grades failed for %s', exam_name)
-                        return jsonify({'deleted': True, 'grades_deleted': 0, 'warning': str(e)})
-            return jsonify({'deleted': True, 'grades_deleted': grades_deleted})
+                        current_app.logger.exception("delete grades failed for %s", exam_name)
+                        return jsonify({"deleted": True, "grades_deleted": 0, "warning": str(e)})
+            return jsonify({"deleted": True, "grades_deleted": grades_deleted})
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
-    return jsonify({'deleted': False, 'error': 'not found'}), 404
+            return jsonify({"error": str(e)}), 500
+    return jsonify({"deleted": False, "error": "not found"}), 404
+
 
 # 管理员清理：按考试名称（可选按学科）删除成绩
-@api_bp.route('/grades/cleanup-by-exam', methods=['POST'])
+@api_bp.route("/grades/cleanup-by-exam", methods=["POST"])
 @login_required
 def api_grades_cleanup_by_exam():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(force=True) or {}
-    exam_name = (data.get('exam_name') or '').strip()
-    subject_code = (data.get('subject_code') or '').strip()
+    exam_name = (data.get("exam_name") or "").strip()
+    subject_code = (data.get("subject_code") or "").strip()
     if not exam_name:
-        return jsonify({'error': 'exam_name is required'}), 400
+        return jsonify({"error": "exam_name is required"}), 400
     q = Grade.query.filter(Grade.exam_name == exam_name)
     if subject_code:
         from sqlalchemy import select
+
         course_ids = db.session.query(Course.id).filter(Course.code == subject_code)
         q = q.filter(Grade.course_id.in_(course_ids))
     try:
         deleted = q.delete(synchronize_session=False)
         db.session.commit()
         try:
-            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+            _cache_bump(current_app, "summary")
+            _cache_bump(current_app, "analysis")
         except Exception:
             pass
-        return jsonify({'deleted': deleted or 0})
+        return jsonify({"deleted": deleted or 0})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 # 管理员清理：清空所有成绩（可选按学科过滤）
 
+
 # 管理员清理：姓名为空的学生（可选级联删除成绩）
-@api_bp.route('/admin/cleanup/nameless-students', methods=['POST'])
+@api_bp.route("/admin/cleanup/nameless-students", methods=["POST"])
 @login_required
 def api_cleanup_nameless_students():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(silent=True) or {}
-    cascade = bool(data.get('cascade'))
+    cascade = bool(data.get("cascade"))
     try:
-        q = Student.query.filter((Student.name == None) | (Student.name == ''))
+        q = Student.query.filter((Student.name == None) | (Student.name == ""))
         if cascade:
             # 删除这些学生的成绩
             ids = [s.id for s in q.all()]
@@ -1296,43 +1554,46 @@ def api_cleanup_nameless_students():
         deleted = q.delete(synchronize_session=False)
         db.session.commit()
         try:
-            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+            _cache_bump(current_app, "summary")
+            _cache_bump(current_app, "analysis")
         except Exception:
             pass
-        return jsonify({'deleted_students': deleted})
+        return jsonify({"deleted_students": deleted})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
-@api_bp.route('/grades/cleanup-all', methods=['POST'])
+
+@api_bp.route("/grades/cleanup-all", methods=["POST"])
 @login_required
 def api_grades_cleanup_all():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(silent=True) or {}
-    confirm = data.get('confirm') in (True, 'true', '1', 1)
-    subject_code = (data.get('subject_code') or '').strip()
+    confirm = data.get("confirm") in (True, "true", "1", 1)
+    subject_code = (data.get("subject_code") or "").strip()
     if not confirm:
-        return jsonify({'error': 'confirmation required'}), 400
+        return jsonify({"error": "confirmation required"}), 400
     try:
         if subject_code:
             # 仅清理某一学科
             course_ids = db.session.query(Course.id).filter(Course.code == subject_code)
-            deleted = Grade.query.filter(Grade.course_id.in_(course_ids)).delete(synchronize_session=False)
+            deleted = Grade.query.filter(Grade.course_id.in_(course_ids)).delete(
+                synchronize_session=False
+            )
         else:
             # 清空所有成绩
             deleted = Grade.query.delete(synchronize_session=False)
         db.session.commit()
         try:
-            _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+            _cache_bump(current_app, "summary")
+            _cache_bump(current_app, "analysis")
         except Exception:
             pass
-        return jsonify({'deleted': deleted or 0})
+        return jsonify({"deleted": deleted or 0})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
-
+        return jsonify({"error": str(e)}), 500
 
 
 # 导入: 根据选择的工作表执行导入
@@ -1360,41 +1621,94 @@ def api_import_grades():
     # 标准化与自动识别表头/别名
     try:
         import re
+
         # 预处理：尝试识别第一行为表头（考虑别名后再判断）
         def _norm_col(c: str) -> str:
-            c = str(c or '').strip()
-            c = c.replace('\u3000','').replace(' ','').replace('\t','')
-            c = c.replace('（','(').replace('）',')')
+            c = str(c or "").strip()
+            c = c.replace("\u3000", "").replace(" ", "").replace("\t", "")
+            c = c.replace("（", "(").replace("）", ")")
             return c
+
         alias = {
-            '学生姓名':'姓名', '名字':'姓名', '名称':'姓名', '学生名称':'姓名',
-            '班级名称':'班级', '班级名':'班级', '班级(名称)':'班级',
-            '课程代号':'课程代码', '科目代码':'课程代码', '科目名称':'课程名称',
-            '学籍号':'学号','学生编号':'学号','学生号':'学号','编号':'学号','考生号':'学号','考号':'学号','准考证号':'学号',
-            '语文成绩':'语文','数学成绩':'数学','英语成绩':'英语','科学成绩':'科学','社会成绩':'社会','道法成绩':'道法',
-            '语文分':'语文','数学分':'数学','英语分':'英语','科学分':'科学','社会分':'社会','道法分':'道法',
-            '语文分数':'语文','数学分数':'数学','英语分数':'英语','科学分数':'科学','社会分数':'社会','道法分数':'道法',
-            '社会道法合科分数':'道法', '社会道法分数':'道法', '社会道法':'道法',
+            "学生姓名": "姓名",
+            "名字": "姓名",
+            "名称": "姓名",
+            "学生名称": "姓名",
+            "班级名称": "班级",
+            "班级名": "班级",
+            "班级(名称)": "班级",
+            "课程代号": "课程代码",
+            "科目代码": "课程代码",
+            "科目名称": "课程名称",
+            "学籍号": "学号",
+            "学生编号": "学号",
+            "学生号": "学号",
+            "编号": "学号",
+            "考生号": "学号",
+            "考号": "学号",
+            "准考证号": "学号",
+            "语文成绩": "语文",
+            "数学成绩": "数学",
+            "英语成绩": "英语",
+            "科学成绩": "科学",
+            "社会成绩": "社会",
+            "道法成绩": "道法",
+            "语文分": "语文",
+            "数学分": "数学",
+            "英语分": "英语",
+            "科学分": "科学",
+            "社会分": "社会",
+            "道法分": "道法",
+            "语文分数": "语文",
+            "数学分数": "数学",
+            "英语分数": "英语",
+            "科学分数": "科学",
+            "社会分数": "社会",
+            "道法分数": "道法",
+            "社会道法合科分数": "道法",
+            "社会道法分数": "道法",
+            "社会道法": "道法",
             # 常见学科别名
-            '道德与法治':'道法','思想品德':'道法','品德与社会':'社会','历史与社会':'社会',
+            "道德与法治": "道法",
+            "思想品德": "道法",
+            "品德与社会": "社会",
+            "历史与社会": "社会",
             # 总分别名
-            '总成绩':'总分','总分数':'总分','总分(分)':'总分',
+            "总成绩": "总分",
+            "总分数": "总分",
+            "总分(分)": "总分",
         }
+
         def _map_alias(s: str) -> str:
             raw = _norm_col(s)
-            raw = re.sub(r'^(.*?)(\(|（).*(\)|）)$', r'\1', raw)
+            raw = re.sub(r"^(.*?)(\(|（).*(\)|）)$", r"\1", raw)
             raw = alias.get(raw, raw)
-            raw = re.sub(r'^(语文|数学|英语|科学|社会|道法).*(分|成绩)?$', r'\1', raw)
+            raw = re.sub(r"^(语文|数学|英语|科学|社会|道法).*(分|成绩)?$", r"\1", raw)
             return raw
+
         if len(df) > 0:
             first_row = [str(x).strip() for x in list(df.iloc[0].values)]
             mapped = [_map_alias(x) for x in first_row]
-            known = {"学号","姓名","班级","课程代码","课程名称","成绩","语文","数学","英语","科学","社会","道法","总分"}
+            known = {
+                "学号",
+                "姓名",
+                "班级",
+                "课程代码",
+                "课程名称",
+                "成绩",
+                "语文",
+                "数学",
+                "英语",
+                "科学",
+                "社会",
+                "道法",
+                "总分",
+            }
             if any(x in mapped for x in known):
                 df.columns = mapped
                 df = df.iloc[1:].reset_index(drop=True)
         # 去除全空列与全空行
-        df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
+        df = df.dropna(axis=1, how="all").dropna(axis=0, how="all")
         # 清洗列名并映射常见别名（再次应用，防止原始列名也需规范化）
         new_cols = []
         for col in list(df.columns):
@@ -1404,13 +1718,13 @@ def api_import_grades():
         pass
 
     # 期望列（模板方式）：姓名、班级 必须 + 至少一门学科列；学号可缺省
-    subjects_all = ["语文","数学","英语","科学","社会","道法"]
+    subjects_all = ["语文", "数学", "英语", "科学", "社会", "道法"]
     must_cols = ["姓名", "班级"]
     # 兼容旧方式（含 课程代码/课程名称/成绩）
     legacy_required_cols = ["学号", "姓名", "班级", "课程代码", "课程名称", "成绩"]
 
     # 判断模板方式或旧方式（自动识别后重试）
-    has_sid = ("学号" in df.columns)
+    has_sid = "学号" in df.columns
     has_subject = any(col in df.columns for col in subjects_all)
     is_template = all(col in df.columns for col in must_cols) and has_subject
     if is_template and not has_sid:
@@ -1419,8 +1733,15 @@ def api_import_grades():
 
     # 记录一次导入的列与判断
     try:
-        current_app.logger.info('import grades: cols=%s rows=%d', list(map(str, df.columns)), len(df))
-        current_app.logger.info('import grades: is_template=%s has_sid=%s has_subject=%s', is_template, has_sid, has_subject)
+        current_app.logger.info(
+            "import grades: cols=%s rows=%d", list(map(str, df.columns)), len(df)
+        )
+        current_app.logger.info(
+            "import grades: is_template=%s has_sid=%s has_subject=%s",
+            is_template,
+            has_sid,
+            has_subject,
+        )
     except Exception:
         pass
 
@@ -1429,7 +1750,7 @@ def api_import_grades():
         for col in legacy_required_cols:
             if col not in df.columns:
                 try:
-                    current_app.logger.warning('import grades legacy missing column: %s', col)
+                    current_app.logger.warning("import grades legacy missing column: %s", col)
                 except Exception:
                     pass
                 return jsonify({"error": f"Missing required column: {col}"}), 400
@@ -1445,17 +1766,22 @@ def api_import_grades():
         # 考试名称优先使用页面输入，其次使用上传文件元数据中的 exam_name，最后回退为 'default'
         try:
             import json
+
             meta = {}
             try:
-                with open(file_path + '.json', 'r', encoding='utf-8') as mf:
+                with open(file_path + ".json", "r", encoding="utf-8") as mf:
                     meta = json.load(mf) or {}
             except Exception:
                 meta = {}
-            exam_name = (data.get("exam_name") or '').strip() or (meta.get('exam_name') or '').strip() or "default"
+            exam_name = (
+                (data.get("exam_name") or "").strip()
+                or (meta.get("exam_name") or "").strip()
+                or "default"
+            )
             # 将本次实际使用的考试名称回写到元数据，便于后续按文件删除时准确联动清理
             try:
-                meta.update({'exam_name': exam_name})
-                with open(file_path + '.json', 'w', encoding='utf-8') as mf:
+                meta.update({"exam_name": exam_name})
+                with open(file_path + ".json", "w", encoding="utf-8") as mf:
                     json.dump(meta, mf, ensure_ascii=False)
             except Exception:
                 pass
@@ -1480,17 +1806,22 @@ def api_import_grades():
         # - 班级名称包含“71” -> 入学年份 = 当前年份（例：2025年导入，71班 => 2025）
         # - 否则：使用当前年份
         def _infer_entry_year(class_name: str) -> int:
-            import re, datetime
+            import datetime
+            import re
+
             year = datetime.datetime.now().year
             # 先读取配置：首位数字到偏移的映射（默认 {'7':0,'8':-1,'9':-2}）
             try:
                 from app.models import ModuleSetting
-                cfg = ModuleSetting.get_json('student_id_year_rule', default={'map': {'7':0,'8':-1,'9':-2}})
-                mapping = (cfg or {}).get('map', {})
+
+                cfg = ModuleSetting.get_json(
+                    "student_id_year_rule", default={"map": {"7": 0, "8": -1, "9": -2}}
+                )
+                mapping = (cfg or {}).get("map", {})
             except Exception:
-                mapping = {'7':0,'8':-1,'9':-2}
+                mapping = {"7": 0, "8": -1, "9": -2}
             # 从班级名中取首个数字字符
-            m = re.search(r'([0-9])', class_name or '')
+            m = re.search(r"([0-9])", class_name or "")
             if m:
                 d = m.group(1)
                 offset = mapping.get(d)
@@ -1500,6 +1831,7 @@ def api_import_grades():
 
         def _gen_sid(class_name: str) -> str:
             import re
+
             entry = _infer_entry_year(class_name)
             # 查询该年份目前最大流水号
             prefix = str(entry)
@@ -1546,7 +1878,7 @@ def api_import_grades():
             sid_raw = row.get("学号")
             if pd.notna(sid_raw):
                 sid_raw = str(sid_raw).strip()
-                if sid_raw.endswith('.0'):
+                if sid_raw.endswith(".0"):
                     sid_raw = sid_raw[:-2]
             else:
                 sid_raw = ""
@@ -1568,6 +1900,7 @@ def api_import_grades():
                 grade_level = str(row.get("年级") or "").strip() or None
                 if not grade_level:
                     from app.utils import infer_grade_from_class_name
+
                     grade_level = infer_grade_from_class_name(cls)
 
                 student = Student(
@@ -1586,6 +1919,7 @@ def api_import_grades():
                 elif not student.grade_level:
                     # 如果学生没有年级信息，尝试从班级名称推断
                     from app.utils import infer_grade_from_class_name
+
                     inferred_grade = infer_grade_from_class_name(cls)
                     if inferred_grade:
                         student.grade_level = inferred_grade
@@ -1598,18 +1932,26 @@ def api_import_grades():
                 val = row.get(col_name)
                 try:
                     # 支持用逗号作为小数点、去除百分号与中文空格
-                    sval = str(val).replace('％','%').replace('，','.') if pd.notna(val) else ''
-                    if sval.endswith('%'):
+                    sval = str(val).replace("％", "%").replace("，", ".") if pd.notna(val) else ""
+                    if sval.endswith("%"):
                         sval = sval[:-1]
-                    score_val = float(sval) if sval != '' else None
+                    score_val = float(sval) if sval != "" else None
                 except Exception:
                     score_val = None
                 if score_val is None:
                     continue
                 course = subject_courses[col_name]
-                grade = Grade.query.filter_by(student_id=student.id, course_id=course.id, exam_name=exam_name).first()
+                grade = Grade.query.filter_by(
+                    student_id=student.id, course_id=course.id, exam_name=exam_name
+                ).first()
                 if not grade:
-                    grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type, exam_name=exam_name)
+                    grade = Grade(
+                        student=student,
+                        course=course,
+                        score=score_val,
+                        exam_type=exam_type,
+                        exam_name=exam_name,
+                    )
                     db.session.add(grade)
                     created += 1
                 else:
@@ -1627,9 +1969,17 @@ def api_import_grades():
                     total_course = Course(code=total_code, name=TOTAL_SUBJECT[2])
                     db.session.add(total_course)
                     db.session.flush()
-                grade_total = Grade.query.filter_by(student_id=student.id, course_id=total_course.id, exam_name=exam_name).first()
+                grade_total = Grade.query.filter_by(
+                    student_id=student.id, course_id=total_course.id, exam_name=exam_name
+                ).first()
                 if not grade_total:
-                    grade_total = Grade(student=student, course=total_course, score=total_score, exam_type=exam_type, exam_name=exam_name)
+                    grade_total = Grade(
+                        student=student,
+                        course=total_course,
+                        score=total_score,
+                        exam_type=exam_type,
+                        exam_name=exam_name,
+                    )
                     db.session.add(grade_total)
                     created += 1
                 else:
@@ -1642,19 +1992,19 @@ def api_import_grades():
             db.session.rollback()
             # 记录详细校验失败原因，便于定位
             try:
-                current_app.logger.warning('import validation errors: %s', errors)
+                current_app.logger.warning("import validation errors: %s", errors)
             except Exception:
                 pass
             # 返回前端更友好的第一条错误，同时提供详情
-            msg = errors[0] if isinstance(errors, list) and errors else '导入校验失败'
+            msg = errors[0] if isinstance(errors, list) and errors else "导入校验失败"
             return jsonify({"error": msg, "details": errors}), 400
     else:
         # 兼容旧方式
         # 旧模式：逐行处理
         for i, row in df.iterrows():
             try:
-                sid = str(row['学号']).strip()
-                if sid.endswith('.0'):
+                sid = str(row["学号"]).strip()
+                if sid.endswith(".0"):
                     sid = sid[:-2]
                 student = Student.query.filter_by(student_id=sid).first()
                 if not student:
@@ -1663,6 +2013,7 @@ def api_import_grades():
                     grade_level = str(row.get("年级") or "").strip() or None
                     if not grade_level:
                         from app.utils import infer_grade_from_class_name
+
                         grade_level = infer_grade_from_class_name(class_name)
 
                     student = Student(
@@ -1695,9 +2046,17 @@ def api_import_grades():
                 exam_name = str(row.get("考试名称") or "default").strip() or "default"
 
                 # 查找现有成绩记录时，应同时匹配考试名称
-                grade = Grade.query.filter_by(student_id=student.id, course_id=course.id, exam_name=exam_name).first()
+                grade = Grade.query.filter_by(
+                    student_id=student.id, course_id=course.id, exam_name=exam_name
+                ).first()
                 if not grade:
-                    grade = Grade(student=student, course=course, score=score_val, exam_type=exam_type, exam_name=exam_name)
+                    grade = Grade(
+                        student=student,
+                        course=course,
+                        score=score_val,
+                        exam_type=exam_type,
+                        exam_name=exam_name,
+                    )
                     db.session.add(grade)
                     created += 1
                 else:
@@ -1710,8 +2069,8 @@ def api_import_grades():
 
         # 成绩变更后失效 summary/analysis 缓存命名空间
         try:
-            _cache_bump(current_app, 'summary')
-            _cache_bump(current_app, 'analysis')
+            _cache_bump(current_app, "summary")
+            _cache_bump(current_app, "analysis")
         except Exception:
             pass
 
@@ -1719,28 +2078,34 @@ def api_import_grades():
 
     # 成绩变更后失效 summary/analysis 缓存命名空间
     try:
-        _cache_bump(current_app, 'summary'); _cache_bump(current_app, 'analysis')
+        _cache_bump(current_app, "summary")
+        _cache_bump(current_app, "analysis")
     except Exception:
         pass
 
     # 导入完成后返回统计
     try:
-        current_app.logger.info('import grades done: created=%d updated=%d skipped=%d', created, updated, skipped)
+        current_app.logger.info(
+            "import grades done: created=%d updated=%d skipped=%d", created, updated, skipped
+        )
     except Exception:
         pass
-    return jsonify({"message": "Import finished", "created": created, "updated": updated, "skipped": skipped})
+    return jsonify(
+        {"message": "Import finished", "created": created, "updated": updated, "skipped": skipped}
+    )
+
 
 # 导入: 学生主数据（可选自动创建用户账号）
 @api_bp.route("/import/students", methods=["POST"])
 @login_required
 def api_import_students():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json() or request.form
     file_id = data.get("file_id")
     sheet_name = data.get("sheet_name")
     auto_create_users = bool(data.get("auto_create_users"))
-    default_password = (data.get("default_password") or '123456').strip() or '123456'
+    default_password = (data.get("default_password") or "123456").strip() or "123456"
     if not file_id or not sheet_name:
         return jsonify({"error": "file_id and sheet_name are required"}), 400
 
@@ -1761,6 +2126,7 @@ def api_import_students():
             return jsonify({"error": f"Missing required column: {col}"}), 400
 
     import re
+
     created = 0
     updated = 0
     users_created = 0
@@ -1768,51 +2134,71 @@ def api_import_students():
         # 规范化学号，避免 202580040.0
         sid_raw = row["学号"]
         sid = str(sid_raw).strip()
-        if sid.endswith('.0'): sid = sid[:-2]
+        if sid.endswith(".0"):
+            sid = sid[:-2]
         if not re.fullmatch(r"\d{8}", sid):
             # 跳过非法学号
             continue
-        name = str(row.get("姓名") or '').strip()
-        class_name = str(row.get("班级") or '').strip()
-        grade_level = str(row.get("年级") or '').strip() or None
-        email = str(row.get("邮箱") or '').strip() or None
+        name = str(row.get("姓名") or "").strip()
+        class_name = str(row.get("班级") or "").strip()
+        grade_level = str(row.get("年级") or "").strip() or None
+        email = str(row.get("邮箱") or "").strip() or None
 
         # 如果没有年级信息，尝试从班级名称推断
         if not grade_level:
             from app.utils import infer_grade_from_class_name
+
             grade_level = infer_grade_from_class_name(class_name)
 
         stu = Student.query.filter_by(student_id=sid).first()
         if not stu:
-            stu = Student(student_id=sid, name=name, class_name=class_name, grade_level=grade_level, email=email)
+            stu = Student(
+                student_id=sid,
+                name=name,
+                class_name=class_name,
+                grade_level=grade_level,
+                email=email,
+            )
             db.session.add(stu)
             created += 1
         else:
             # 更新基础信息
-            if name: stu.name = name
-            if class_name: stu.class_name = class_name
-            if grade_level: stu.grade_level = grade_level
+            if name:
+                stu.name = name
+            if class_name:
+                stu.class_name = class_name
+            if grade_level:
+                stu.grade_level = grade_level
             elif not stu.grade_level:
                 # 如果学生没有年级信息，尝试从班级名称推断
                 from app.utils import infer_grade_from_class_name
+
                 inferred_grade = infer_grade_from_class_name(class_name)
                 if inferred_grade:
                     stu.grade_level = inferred_grade
-            if email: stu.email = email
+            if email:
+                stu.email = email
             updated += 1
         db.session.flush()
         if auto_create_users:
             # 用户名=学号，若不存在则创建学生用户
             u = User.query.filter_by(username=sid).first()
             if not u:
-                u = User(username=sid, email=(email or f"{sid}@example.com"), role='student')
+                u = User(username=sid, email=(email or f"{sid}@example.com"), role="student")
                 u.set_password(default_password)
                 db.session.add(u)
                 users_created += 1
 
     db.session.commit()
     # 保留上传文件，便于在“已上传文件管理”中查看/二次导入/批量删除
-    return jsonify({"message": "Import finished", "students_created": created, "students_updated": updated, "users_created": users_created})
+    return jsonify(
+        {
+            "message": "Import finished",
+            "students_created": created,
+            "students_updated": updated,
+            "users_created": users_created,
+        }
+    )
 
 
 @api_bp.route("/analysis/ranking", methods=["GET"])
@@ -1822,16 +2208,83 @@ def api_analysis_ranking():
     class_name = request.args.get("class_name")
     grade_level = request.args.get("grade_level")
     exam_name = request.args.get("exam_name")
-    rankings = get_student_ranking(course_id=course_id, class_name=class_name, grade_level=grade_level, exam_name=exam_name)
+    rankings = get_student_ranking(
+        course_id=course_id, class_name=class_name, grade_level=grade_level, exam_name=exam_name
+    )
     return jsonify({"rankings": rankings})
 
 
-@api_bp.route('/analysis/trends', methods=['GET'])
+@api_bp.route("/analysis/score-ranges", methods=["GET"])
+@login_required
+def api_analysis_score_ranges():
+    """获取分数段分布数据"""
+    course_id = request.args.get("course_id", type=int)
+    class_name = request.args.get("class_name")
+    grade_level = request.args.get("grade_level")
+    exam_name = request.args.get("exam_name")
+
+    # 构建查询
+    q = Grade.query.join(Student).join(Course)
+    if course_id:
+        q = q.filter(Grade.course_id == course_id)
+    if class_name:
+        q = q.filter(Student.class_name == class_name)
+    if grade_level:
+        q = q.filter(Student.grade_level == grade_level)
+    if exam_name:
+        q = q.filter(Grade.exam_name == exam_name)
+
+    # 应用用户可见性过滤
+    if current_user.role != "admin":
+        if current_user.allowed_grade_levels:
+            allowed = [
+                s.strip() for s in (current_user.allowed_grade_levels or "").split(",") if s.strip()
+            ]
+            if allowed:
+                q = q.filter(Student.grade_level.in_(allowed))
+        if current_user.allowed_class_names:
+            allowed = [
+                s.strip() for s in (current_user.allowed_class_names or "").split(",") if s.strip()
+            ]
+            if allowed:
+                q = q.filter(Student.class_name.in_(allowed))
+
+    grades = q.all()
+    scores = [g.score for g in grades]
+
+    if not scores:
+        return jsonify({"ranges": [], "total": 0})
+
+    # 定义分数段
+    ranges = [
+        {"label": "0-59", "min": 0, "max": 59},
+        {"label": "60-69", "min": 60, "max": 69},
+        {"label": "70-79", "min": 70, "max": 79},
+        {"label": "80-89", "min": 80, "max": 89},
+        {"label": "90-100", "min": 90, "max": 100},
+    ]
+
+    # 统计各分数段人数
+    result = []
+    for r in ranges:
+        count = len([s for s in scores if r["min"] <= s <= r["max"]])
+        result.append(
+            {
+                "label": r["label"],
+                "count": count,
+                "percentage": round(count / len(scores) * 100, 1) if scores else 0,
+            }
+        )
+
+    return jsonify({"ranges": result, "total": len(scores)})
+
+
+@api_bp.route("/analysis/trends", methods=["GET"])
 def api_analysis_trends():
     """按考试名称时间序列统计每次考试的平均分、最高分、最低分、标准差，可按学科/年级/班级过滤"""
-    subject_code = request.args.get('subject_code')
-    grade_level = request.args.get('grade_level')
-    class_name = request.args.get('class_name')
+    subject_code = request.args.get("subject_code")
+    grade_level = request.args.get("grade_level")
+    class_name = request.args.get("class_name")
     q = Grade.query.join(Course).join(Student)
     if subject_code:
         q = q.filter(Course.code == subject_code)
@@ -1842,29 +2295,39 @@ def api_analysis_trends():
     # 聚合到 exam_name
     rows = q.with_entities(Grade.exam_name, Grade.score).all()
     from collections import defaultdict
+
     buckets = defaultdict(list)
     for exam_name, score in rows:
-        buckets[exam_name or 'default'].append(float(score))
+        buckets[exam_name or "default"].append(float(score))
     import math
+
     out = []
     for exam_name, arr in buckets.items():
-        if not arr: continue
-        n = len(arr); s = sum(arr); mean = s/n
-        var = sum((x-mean)**2 for x in arr)/n
+        if not arr:
+            continue
+        n = len(arr)
+        s = sum(arr)
+        mean = s / n
+        var = sum((x - mean) ** 2 for x in arr) / n
         # 计算中位数与分位数
         arr_sorted = sorted(arr)
+
         def _median(a):
             m = len(a)
             mid = m // 2
             if m % 2 == 1:
                 return a[mid]
             else:
-                return (a[mid-1] + a[mid]) / 2.0
+                return (a[mid - 1] + a[mid]) / 2.0
+
         def _percentile(a, p):
-            if not a: return None
-            k = (p/100.0) * (len(a)-1)
-            f = math.floor(k); c = math.ceil(k)
-            if f == c: return a[int(k)]
+            if not a:
+                return None
+            k = (p / 100.0) * (len(a) - 1)
+            f = math.floor(k)
+            c = math.ceil(k)
+            if f == c:
+                return a[int(k)]
             d0 = a[int(f)] * (c - k)
             d1 = a[int(c)] * (k - f)
             return d0 + d1
@@ -1873,61 +2336,83 @@ def api_analysis_trends():
         med = _median(arr_sorted)
         p25 = _percentile(arr_sorted, 25)
         p75 = _percentile(arr_sorted, 75)
-        out.append({
-            'exam_name': exam_name,
-            'count': n,
-            'avg': round(mean,2),
-            'max': max(arr),
-            'min': min(arr),
-            'std': round(math.sqrt(var),2),
-            'median': round(med,2) if med is not None else None,
-            'p25': round(p25,2) if p25 is not None else None,
-            'p75': round(p75,2) if p75 is not None else None,
-        })
+        out.append(
+            {
+                "exam_name": exam_name,
+                "count": n,
+                "avg": round(mean, 2),
+                "max": max(arr),
+                "min": min(arr),
+                "std": round(math.sqrt(var), 2),
+                "median": round(med, 2) if med is not None else None,
+                "p25": round(p25, 2) if p25 is not None else None,
+                "p75": round(p75, 2) if p75 is not None else None,
+            }
+        )
     # 简单按 exam_name 排序（若 exam_name 可解析时间戳可在前端进一步排序）
-    out.sort(key=lambda x: x['exam_name'])
-    return jsonify({'trends': out})
+    out.sort(key=lambda x: x["exam_name"])
+    return jsonify({"trends": out})
 
 
-@api_bp.route('/analysis/trends/export', methods=['GET'])
+@api_bp.route("/analysis/trends/export", methods=["GET"])
 def api_analysis_trends_export():
     """导出趋势数据为 CSV：exam_name, count, avg, max, min, std, median, p25, p75"""
     with current_app.test_request_context(query_string=request.query_string):
         res = api_analysis_trends()
         import json as _json
+
         try:
-            data = res.get_json() if hasattr(res, 'get_json') else None
+            data = res.get_json() if hasattr(res, "get_json") else None
             if not data:
-                data = _json.loads(res.get_data(as_text=True) or '{}')
+                data = _json.loads(res.get_data(as_text=True) or "{}")
         except Exception:
             data = {}
-    import csv, io
+    import csv
+    import io
+
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['exam_name','count','avg','max','min','std','median','p25','p75'])
-    for row in (data.get('trends') or []):
-        writer.writerow([
-            row.get('exam_name'), row.get('count'), row.get('avg'), row.get('max'),
-            row.get('min'), row.get('std'), row.get('median'), row.get('p25'), row.get('p75')
-        ])
+    writer.writerow(["exam_name", "count", "avg", "max", "min", "std", "median", "p25", "p75"])
+    for row in data.get("trends") or []:
+        writer.writerow(
+            [
+                row.get("exam_name"),
+                row.get("count"),
+                row.get("avg"),
+                row.get("max"),
+                row.get("min"),
+                row.get("std"),
+                row.get("median"),
+                row.get("p25"),
+                row.get("p75"),
+            ]
+        )
     output.seek(0)
-    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('trends.csv')})
+    return current_app.response_class(
+        output.read(),
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": "attachment; filename=" + _brand_prefix_filename("trends.csv")
+        },
+    )
 
 
 def _brand_prefix_filename(name: str) -> str:
     try:
-        school = current_app.config.get('BRAND_SCHOOL_NAME_FULL') or current_app.config.get('BRAND_SCHOOL_NAME')
+        school = current_app.config.get("BRAND_SCHOOL_NAME_FULL") or current_app.config.get(
+            "BRAND_SCHOOL_NAME"
+        )
         if school:
             import re
-            safe = re.sub(r'[^\w\-\u4e00-\u9fa5]+', '_', school)[:40]
+
+            safe = re.sub(r"[^\w\-\u4e00-\u9fa5]+", "_", school)[:40]
             return f"{safe}_{name}"
     except Exception:
         pass
     return name
 
 
-
-@api_bp.route('/analysis/class-compare', methods=['GET'])
+@api_bp.route("/analysis/class-compare", methods=["GET"])
 def api_analysis_class_compare():
     """按考试名称+学科维度，对各班的均分进行对比
     可选参数：
@@ -1938,14 +2423,14 @@ def api_analysis_class_compare():
       - min_count（可选，>0 时剔除样本数小于该阈值的班级）
       - sort_by（可选，avg|count，默认avg）
     """
-    exam_name = request.args.get('exam_name')
-    subject_code = request.args.get('subject_code')
-    grade_level = request.args.get('grade_level')
-    top_n = request.args.get('top_n', type=int)
-    min_count = request.args.get('min_count', type=int)
-    sort_by = (request.args.get('sort_by') or 'avg').lower()
-    if sort_by not in ('avg','count'):
-        sort_by = 'avg'
+    exam_name = request.args.get("exam_name")
+    subject_code = request.args.get("subject_code")
+    grade_level = request.args.get("grade_level")
+    top_n = request.args.get("top_n", type=int)
+    min_count = request.args.get("min_count", type=int)
+    sort_by = (request.args.get("sort_by") or "avg").lower()
+    if sort_by not in ("avg", "count"):
+        sort_by = "avg"
     q = Grade.query.join(Course).join(Student)
     if exam_name:
         q = q.filter(Grade.exam_name == exam_name)
@@ -1954,30 +2439,51 @@ def api_analysis_class_compare():
     if grade_level:
         q = q.filter(Student.grade_level == grade_level)
     rows = q.with_entities(Student.class_name, Grade.score).all()
-    from collections import defaultdict
     import math
+    from collections import defaultdict
+
     agg = defaultdict(list)
     for cls, score in rows:
-        agg[cls or '未知班级'].append(float(score))
+        agg[cls or "未知班级"].append(float(score))
     out = []
+    excluded = []
     for cls, arr in agg.items():
-        if not arr: continue
-        n = len(arr); mean = sum(arr)/n
-        var = sum((x-mean)**2 for x in arr)/n
+        if not arr:
+            continue
+        n = len(arr)
+        mean = sum(arr) / n
+        var = sum((x - mean) ** 2 for x in arr) / n
         meets = (min_count or 0) <= 0 or n >= int(min_count)
-        out.append({'class_name': cls, 'avg': round(mean,2), 'count': n, 'std': round(math.sqrt(var),2), 'meets_threshold': bool(meets)})
-    total_classes = len(out)
-    below_threshold = sum(1 for o in out if not o['meets_threshold']) if (min_count and min_count > 0) else 0
-    if sort_by == 'count':
-        out.sort(key=lambda x: x['count'], reverse=True)
+        row = {
+            "class_name": cls,
+            "avg": round(mean, 2),
+            "count": n,
+            "std": round(math.sqrt(var), 2),
+            "meets_threshold": bool(meets),
+        }
+        if meets:
+            out.append(row)
+        else:
+            excluded.append(row)
+    total_classes = len(out) + len(excluded)
+    below_threshold = len(excluded) if (min_count and min_count > 0) else 0
+    if sort_by == "count":
+        out.sort(key=lambda x: x["count"], reverse=True)
     else:
-        out.sort(key=lambda x: x['avg'], reverse=True)
+        out.sort(key=lambda x: x["avg"], reverse=True)
     if top_n and top_n > 0:
         out = out[:top_n]
-    meta = {'min_count': int(min_count or 0), 'total': total_classes, 'below_threshold': below_threshold, 'filtered_out': below_threshold, 'returned': len(out)}
-    return jsonify({'compare': out, 'meta': meta})
+    meta = {
+        "min_count": int(min_count or 0),
+        "total": total_classes,
+        "below_threshold": below_threshold,
+        "filtered_out": below_threshold,
+        "returned": len(out),
+    }
+    return jsonify({"compare": out, "meta": meta, "excluded": excluded})
 
-@api_bp.route('/analysis/distribution', methods=['GET'])
+
+@api_bp.route("/analysis/distribution", methods=["GET"])
 @login_required
 def api_analysis_distribution():
     """按分数段生成直方图分布，可按考试/学科/年级/班级过滤
@@ -1988,13 +2494,13 @@ def api_analysis_distribution():
       - class_name: 可选
       - bin_width: 可选，分箱宽度，默认 10
     """
-    exam_name = request.args.get('exam_name')
-    subject_code = request.args.get('subject_code') or 'TOTAL'
-    grade_level = request.args.get('grade_level')
-    class_name = request.args.get('class_name')
-    binw_str = request.args.get('bin_width')
+    exam_name = request.args.get("exam_name")
+    subject_code = request.args.get("subject_code") or "TOTAL"
+    grade_level = request.args.get("grade_level")
+    class_name = request.args.get("class_name")
+    binw_str = request.args.get("bin_width")
     bin_width = None  # None 表示自动
-    if binw_str and binw_str.lower() != 'auto':
+    if binw_str and binw_str.lower() != "auto":
         try:
             bw = int(binw_str)
             if bw > 0:
@@ -2014,27 +2520,34 @@ def api_analysis_distribution():
 
     scores = [float(s) for (s,) in q.with_entities(Grade.score).all()]
     if not scores:
-        return jsonify({'bins': [], 'summary': {'count': 0}})
+        return jsonify({"bins": [], "summary": {"count": 0}})
 
     import math
-    smin = min(scores); smax = max(scores)
+
+    smin = min(scores)
+    smax = max(scores)
     # 自动计算 bin 宽度（Freedman–Diaconis; 退化到 Sturges）
     if not bin_width:
         arr = sorted(scores)
         n_s = len(arr)
+
         def percentile(a, p):
-            k = (p/100.0) * (len(a)-1)
-            f = math.floor(k); c = math.ceil(k)
-            if f == c: return a[int(k)]
-            return a[f]*(c-k) + a[c]*(k-f)
+            k = (p / 100.0) * (len(a) - 1)
+            f = math.floor(k)
+            c = math.ceil(k)
+            if f == c:
+                return a[int(k)]
+            return a[f] * (c - k) + a[c] * (k - f)
+
         try:
             iqr = percentile(arr, 75) - percentile(arr, 25)
             if iqr <= 0:
-                raise ValueError('no iqr')
-            bin_width = max(1, int(round(2 * iqr / (n_s ** (1/3)))))
+                raise ValueError("no iqr")
+            bin_width = max(1, int(round(2 * iqr / (n_s ** (1 / 3)))))
         except Exception:
             # Sturges: k = ceil(log2(n)) + 1
             import math as _m
+
             k = max(1, int(_m.ceil(_m.log2(max(2, n_s))) + 1))
             bin_width = max(1, int(_m.ceil((smax - smin) / k))) or 10
     start = math.floor(smin / bin_width) * bin_width
@@ -2042,76 +2555,165 @@ def api_analysis_distribution():
     if end == start:
         end = start + bin_width
     bins = []
-    edges = list(range(int(start), int(end)+bin_width, bin_width))
-    for i in range(len(edges)-1):
-        bins.append({'start': edges[i], 'end': edges[i+1], 'count': 0, 'label': f"{edges[i]}-{edges[i+1]}"})
+    edges = list(range(int(start), int(end) + bin_width, bin_width))
+    for i in range(len(edges) - 1):
+        bins.append(
+            {
+                "start": edges[i],
+                "end": edges[i + 1],
+                "count": 0,
+                "label": f"{edges[i]}-{edges[i+1]}",
+            }
+        )
     # 计数（右开区间，最后一个包含右端点）
     for v in scores:
         idx = int((v - start) // bin_width)
-        if idx < 0: idx = 0
-        if idx >= len(bins): idx = len(bins)-1
-        bins[idx]['count'] += 1
+        if idx < 0:
+            idx = 0
+        if idx >= len(bins):
+            idx = len(bins) - 1
+        bins[idx]["count"] += 1
 
-    n = len(scores); mean = sum(scores)/n
-    var = sum((x-mean)**2 for x in scores)/n
-    summary = {'count': n, 'avg': round(mean,2), 'max': smax, 'min': smin, 'std': round(math.sqrt(var),2), 'bin_width': int(bin_width)}
+    n = len(scores)
+    mean = sum(scores) / n
+    var = sum((x - mean) ** 2 for x in scores) / n
+    summary = {
+        "count": n,
+        "avg": round(mean, 2),
+        "max": smax,
+        "min": smin,
+        "std": round(math.sqrt(var), 2),
+        "bin_width": int(bin_width),
+    }
     # 追加比例与累计比例
-    total = max(1, sum(b['count'] for b in bins))
+    total = max(1, sum(b["count"] for b in bins))
     cum = 0
     for b in bins:
-        b['percent'] = round(b['count'] * 100.0 / total, 2)
-        cum += b['count']
-        b['cdf'] = round(cum * 100.0 / total, 2)
-    return jsonify({'bins': bins, 'summary': summary})
+        b["percent"] = round(b["count"] * 100.0 / total, 2)
+        cum += b["count"]
+        b["cdf"] = round(cum * 100.0 / total, 2)
+    return jsonify({"bins": bins, "summary": summary})
 
-@api_bp.route('/analysis/distribution/export', methods=['GET'])
+
+@api_bp.route("/analysis/distribution/export", methods=["GET"])
 def api_analysis_distribution_export():
     """导出直方图分布为 CSV：label,start,end,count + summary 行"""
     with current_app.test_request_context(query_string=request.query_string):
         res = api_analysis_distribution()
         import json as _json
+
         try:
-            data = res.get_json() if hasattr(res, 'get_json') else None
+            data = res.get_json() if hasattr(res, "get_json") else None
             if not data:
-                data = _json.loads(res.get_data(as_text=True) or '{}')
+                data = _json.loads(res.get_data(as_text=True) or "{}")
         except Exception:
             data = {}
-    import csv, io
+    import csv
+    import io
+
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['label','start','end','count','percent','cdf'])
-    for b in (data.get('bins') or []):
-        writer.writerow([b.get('label'), b.get('start'), b.get('end'), b.get('count'), b.get('percent'), b.get('cdf')])
+    writer.writerow(["label", "start", "end", "count", "percent", "cdf"])
+    for b in data.get("bins") or []:
+        writer.writerow(
+            [
+                b.get("label"),
+                b.get("start"),
+                b.get("end"),
+                b.get("count"),
+                b.get("percent"),
+                b.get("cdf"),
+            ]
+        )
     # 空行 + summary
     writer.writerow([])
-    s = data.get('summary') or {}
-    writer.writerow(['summary', 'count', s.get('count'), 'avg', s.get('avg'), 'max', s.get('max'), 'min', s.get('min'), 'std', s.get('std'), 'bin_width', s.get('bin_width')])
+    s = data.get("summary") or {}
+    writer.writerow(
+        [
+            "summary",
+            "count",
+            s.get("count"),
+            "avg",
+            s.get("avg"),
+            "max",
+            s.get("max"),
+            "min",
+            s.get("min"),
+            "std",
+            s.get("std"),
+            "bin_width",
+            s.get("bin_width"),
+        ]
+    )
     output.seek(0)
-    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('distribution.csv')})
+    return current_app.response_class(
+        output.read(),
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": "attachment; filename="
+            + _brand_prefix_filename("distribution.csv")
+        },
+    )
 
-@api_bp.route('/analysis/class-compare/export', methods=['GET'])
+
+@api_bp.route("/analysis/class-compare/export", methods=["GET"])
 def api_analysis_class_compare_export():
     """导出班级对比数据为 CSV：class_name, avg, count, std"""
     with current_app.test_request_context(query_string=request.query_string):
         res = api_analysis_class_compare()
         import json as _json
+
         try:
-            data = res.get_json() if hasattr(res, 'get_json') else None
+            data = res.get_json() if hasattr(res, "get_json") else None
             if not data:
-                data = _json.loads(res.get_data(as_text=True) or '{}')
+                data = _json.loads(res.get_data(as_text=True) or "{}")
         except Exception:
             data = {}
-    import csv, io
+    import csv
+    import io
+
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['class_name','avg','count','std','meets_threshold'])
-    for row in (data.get('compare') or []):
-        writer.writerow([row.get('class_name'), row.get('avg'), row.get('count'), row.get('std'), row.get('meets_threshold')])
+    writer.writerow(["class_name", "avg", "count", "std", "meets_threshold"])
+    rows = data.get("compare") or []
+    # 可选：仅导出达标班级
+    from urllib.parse import parse_qs
+
+    qs = parse_qs(
+        request.query_string.decode("utf-8")
+        if isinstance(request.query_string, (bytes, bytearray))
+        else (request.query_string or "")
+    )
+    only_meets = False
+    try:
+        v = (qs.get("export_only_meets") or qs.get("only_meets") or ["false"])[0]
+        only_meets = str(v).lower() in ("1", "true", "yes", "on")
+    except Exception:
+        pass
+    if only_meets:
+        rows = [r for r in rows if r.get("meets_threshold")]
+    for row in rows:
+        writer.writerow(
+            [
+                row.get("class_name"),
+                row.get("avg"),
+                row.get("count"),
+                row.get("std"),
+                row.get("meets_threshold"),
+            ]
+        )
     output.seek(0)
-    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('class_compare.csv')})
+    return current_app.response_class(
+        output.read(),
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": "attachment; filename="
+            + _brand_prefix_filename("class_compare.csv")
+        },
+    )
 
 
-@api_bp.route('/analysis/export-all', methods=['GET'])
+@api_bp.route("/analysis/export-all", methods=["GET"])
 def api_analysis_export_all():
     """打包导出趋势、班级对比、分布直方图三份 CSV 为一个 ZIP
     接收与各自导出接口一致的查询参数：
@@ -2119,16 +2721,29 @@ def api_analysis_export_all():
       - 班级对比：exam_name, top_n（可选）
       - 分布：exam_name（可选）, bin_width（默认10）
     """
+    import io
+    import zipfile
     from urllib.parse import urlencode
-    import io, zipfile
 
     # 构造各自 querystring
     # 构造各自 querystring
     args = request.args
-    trends_qs = urlencode({k: v for k, v in args.items() if k in ('subject_code','grade_level','class_name')})
-    class_qs_dict = {k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','top_n','min_count','sort_by')}
+    trends_qs = urlencode(
+        {k: v for k, v in args.items() if k in ("subject_code", "grade_level", "class_name")}
+    )
+    class_qs_dict = {
+        k: v
+        for k, v in args.items()
+        if k in ("exam_name", "subject_code", "grade_level", "top_n", "min_count", "sort_by")
+    }
     class_qs = urlencode(class_qs_dict)
-    dist_qs = urlencode({k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','class_name','bin_width')})
+    dist_qs = urlencode(
+        {
+            k: v
+            for k, v in args.items()
+            if k in ("exam_name", "subject_code", "grade_level", "class_name", "bin_width")
+        }
+    )
 
     # 生成各 CSV 文本
     with current_app.test_request_context(query_string=trends_qs):
@@ -2143,89 +2758,106 @@ def api_analysis_export_all():
 
     # 打包 ZIP（含品牌封面说明 README.md 与可选 logo.png）
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         # 品牌与筛选说明
         try:
-            bname = current_app.config.get('BRAND_SCHOOL_NAME_FULL') or current_app.config.get('BRAND_SCHOOL_NAME') or '某某学校'
-            subtitle = current_app.config.get('BRAND_REPORT_SUBTITLE') or '学业质量监测报告'
+            bname = (
+                current_app.config.get("BRAND_SCHOOL_NAME_FULL")
+                or current_app.config.get("BRAND_SCHOOL_NAME")
+                or "某某学校"
+            )
+            subtitle = current_app.config.get("BRAND_REPORT_SUBTITLE") or "学业质量监测报告"
             import datetime as _dt
-            ts = _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             # 汇总筛选参数快照
             lines = [
                 f"# {bname} - {subtitle}",
-                '',
+                "",
                 f"导出时间：{ts}",
                 f"科目：{request.args.get('subject_code') or 'TOTAL'}",
                 f"年级：{request.args.get('grade_level') or ''}",
                 f"班级：{request.args.get('class_name') or ''}",
                 f"考试：{request.args.get('exam_name') or ''}",
-                '',
-                '(同目录附带 logo.png，可用于封面生成)',
-                '',
-                '本压缩包包含：',
-                '- trends.csv 趋势汇总',
-                '- class_compare.csv 班级对比',
-                '- distribution.csv 分布直方图数据',
-                '',
-                '参数说明：',
+                "",
+                "(同目录附带 logo.png，可用于封面生成)",
+                "",
+                "本压缩包包含：",
+                "- trends.csv 趋势汇总",
+                "- class_compare.csv 班级对比",
+                "- distribution.csv 分布直方图数据",
+                "",
+                "参数说明：",
                 f"bin_width：{request.args.get('bin_width') or ''}",
                 f"sort_by：{request.args.get('sort_by') or ''}",
                 f"top_n：{request.args.get('top_n') or ''}",
                 f"year_from：{request.args.get('year_from') or ''}",
                 f"year_to：{request.args.get('year_to') or ''}",
                 f"term：{request.args.get('term') or ''}",
-                '',
-                '系统信息：',
+                "",
+                "系统信息：",
                 f"系统：{current_app.config.get('SYSTEM_NAME', '成绩分析系统')}",
                 f"版本：{current_app.config.get('SYSTEM_VERSION', 'v1')}",
             ]
             try:
-                uname = getattr(current_user, 'username', '') or ''
-                urole = getattr(current_user, 'role', '') or ''
-                if current_app.config.get('TESTING') and not uname:
-                    uname = 'admin'
-                if current_app.config.get('TESTING') and not urole:
-                    urole = 'admin'
+                uname = getattr(current_user, "username", "") or ""
+                urole = getattr(current_user, "role", "") or ""
+                if current_app.config.get("TESTING") and not uname:
+                    uname = "admin"
+                if current_app.config.get("TESTING") and not urole:
+                    urole = "admin"
                 lines.append(f"导出用户：{uname}{('（'+urole+'）') if urole else ''}")
             except Exception:
                 pass
-            zf.writestr('README.md', '\n'.join(lines))
+            zf.writestr("README.md", "\n".join(lines))
         except Exception:
             pass
         # 可选 logo
         try:
             import os as _os
-            logo_path = _os.path.join(current_app.root_path, 'static', 'logo.png')
+
+            logo_path = _os.path.join(current_app.root_path, "static", "logo.png")
             if _os.path.isfile(logo_path):
-                zf.write(logo_path, arcname='logo.png')
+                zf.write(logo_path, arcname="logo.png")
         except Exception:
             pass
         # 写入三份 CSV
-        zf.writestr('trends.csv', trends_csv)
-        zf.writestr('class_compare.csv', class_csv)
-        zf.writestr('distribution.csv', dist_csv)
+        zf.writestr("trends.csv", trends_csv)
+        zf.writestr("class_compare.csv", class_csv)
+        zf.writestr("distribution.csv", dist_csv)
     buf.seek(0)
-    return current_app.response_class(buf.read(), mimetype='application/zip', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('analysis_exports.zip')})
+    return current_app.response_class(
+        buf.read(),
+        mimetype="application/zip",
+        headers={
+            "Content-Disposition": "attachment; filename="
+            + _brand_prefix_filename("analysis_exports.zip")
+        },
+    )
 
 
-@api_bp.route('/analysis/student-trend', methods=['GET'])
+@api_bp.route("/analysis/student-trend", methods=["GET"])
 @login_required
 def api_analysis_student_trend():
-    sid = request.args.get('student_id')
-    sid_int = request.args.get('id', type=int)
-    subject_code = request.args.get('subject_code') or 'TOTAL'
-    year_from = request.args.get('year_from', type=int)
-    year_to = request.args.get('year_to', type=int)
-    term = (request.args.get('term') or '').lower()  # 'spring' | 'fall' | ''
-    exam_type = request.args.get('exam_type')  # optional
+    sid = request.args.get("student_id")
+    sid_int = request.args.get("id", type=int)
+    subject_code = request.args.get("subject_code") or "TOTAL"
+    year_from = request.args.get("year_from", type=int)
+    year_to = request.args.get("year_to", type=int)
+    term = (request.args.get("term") or "").lower()  # 'spring' | 'fall' | ''
+    exam_type = request.args.get("exam_type")  # optional
     # 找学生
     student = None
     if sid_int:
-        student = Student.query.get_or_404(sid_int)
+        student = db.session.get(Student, sid_int)
+        if not student:
+            abort(404)
     elif sid:
-        student = Student.query.filter_by(student_id=sid).first_or_404()
+        student = Student.query.filter_by(student_id=sid).first()
+        if not student:
+            abort(404)
     else:
-        return jsonify({'error': 'missing student id'}), 400
+        return jsonify({"error": "missing student id"}), 400
     # 查询该生该科多次考试
     q = Grade.query.join(Course).filter(Grade.student_id == student.id)
     if subject_code:
@@ -2233,42 +2865,63 @@ def api_analysis_student_trend():
     if exam_type:
         q = q.filter(Grade.exam_type == exam_type)
     rows = q.order_by(Grade.exam_name).all()
+
     # 过滤学年/学期（基于 exam_name 解析：YYYY 或 YYYY-.. / YYYYMMDD；学期关键词 上/下/春/秋/S/F）
     def parse_year_and_term(name: str):
         import re
-        if not name: return None, None
-        m1 = re.search(r'(\d{4})', name)
+
+        if not name:
+            return None, None
+        m1 = re.search(r"(\d{4})", name)
         y = int(m1.group(1)) if m1 else None
         t = None
-        if re.search(r'(上|春|S)', name, flags=re.I):
-            t = 'spring'
-        elif re.search(r'(下|秋|F)', name, flags=re.I):
-            t = 'fall'
+        if re.search(r"(上|春|S)", name, flags=re.I):
+            t = "spring"
+        elif re.search(r"(下|秋|F)", name, flags=re.I):
+            t = "fall"
         return y, t
+
     if year_from or year_to or term:
-        rows = [g for g in rows if (
-            (parse_year_and_term(g.exam_name)[0] is None or ((year_from is None or parse_year_and_term(g.exam_name)[0] >= year_from) and (year_to is None or parse_year_and_term(g.exam_name)[0] <= year_to))) and
-            (not term or parse_year_and_term(g.exam_name)[1] == term)
-        )]
+        rows = [
+            g
+            for g in rows
+            if (
+                (
+                    parse_year_and_term(g.exam_name)[0] is None
+                    or (
+                        (year_from is None or parse_year_and_term(g.exam_name)[0] >= year_from)
+                        and (year_to is None or parse_year_and_term(g.exam_name)[0] <= year_to)
+                    )
+                )
+                and (not term or parse_year_and_term(g.exam_name)[1] == term)
+            )
+        ]
     # 聚合 exam_name -> score
     from collections import defaultdict
+
     exams = defaultdict(list)
     for g in rows:
         exams[g.exam_name].append(g.score)
     # 计算班级/年级排名与均线（同一考试内）
     import math
+
     ranks = {}
     avg_map = {}
     for exam_name in exams.keys():
-        q_cls = Grade.query.join(Student).join(Course).filter(Grade.exam_name==exam_name)
+        q_cls = Grade.query.join(Student).join(Course).filter(Grade.exam_name == exam_name)
         if subject_code:
-            q_cls = q_cls.filter(Course.code==subject_code)
-        cls_rows = q_cls.with_entities(Student.student_id, Grade.score, Student.class_name, Student.grade_level).all()
+            q_cls = q_cls.filter(Course.code == subject_code)
+        cls_rows = q_cls.with_entities(
+            Student.student_id, Grade.score, Student.class_name, Student.grade_level
+        ).all()
+
         # 排序映射
         def rank_map(pairs):
             ps = sorted(pairs, key=lambda x: x[1], reverse=True)
-            return { sid: i for i, (sid, _) in enumerate(ps, 1) }
+            return {sid: i for i, (sid, _) in enumerate(ps, 1)}
+
         from collections import defaultdict
+
         by_class = defaultdict(list)
         by_grade = defaultdict(list)
         for sid0, score0, cls, gl in cls_rows:
@@ -2276,73 +2929,97 @@ def api_analysis_student_trend():
             by_grade[gl].append((sid0, float(score0)))
         class_rank = rank_map(by_class.get(student.class_name, []))
         grade_rank = rank_map(by_grade.get(student.grade_level, []))
+
         # 均线
         def avg_of(pairs):
-            return round(sum(s for _, s in pairs)/len(pairs), 2) if pairs else None
+            return round(sum(s for _, s in pairs) / len(pairs), 2) if pairs else None
+
         class_pairs = by_class.get(student.class_name, [])
         grade_pairs = by_grade.get(student.grade_level, [])
         avg_map[exam_name] = {
-            'class_avg': avg_of(class_pairs),
-            'grade_avg': avg_of(grade_pairs),
+            "class_avg": avg_of(class_pairs),
+            "grade_avg": avg_of(grade_pairs),
         }
         ranks[exam_name] = {
-            'class_rank': class_rank.get(student.student_id),
-            'grade_rank': grade_rank.get(student.student_id),
-            'class_size': len(class_pairs),
-            'grade_size': len(grade_pairs),
+            "class_rank": class_rank.get(student.student_id),
+            "grade_rank": grade_rank.get(student.student_id),
+            "class_size": len(class_pairs),
+            "grade_size": len(grade_pairs),
         }
+
     # 组装系列（含均线与百分位）
     def percentile(score_list, value):
-        if not score_list: return None
+        if not score_list:
+            return None
         sorted_scores = sorted(score_list)
         import bisect
+
         idx = bisect.bisect_right(sorted_scores, value)
         return round(idx / len(sorted_scores) * 100.0, 2)
+
     series = []
     # 缓存用于百分位的集合（避免重复构建）
     class_sets = {}
     grade_sets = {}
     for exam_name, arr in exams.items():
-        sc = float(sum(arr)/len(arr)) if arr else None
+        sc = float(sum(arr) / len(arr)) if arr else None
         am = avg_map.get(exam_name, {})
         # 准备集合
         if exam_name not in class_sets:
             # 重建与上面 ranks 使用的相同集合
-            q_tmp = Grade.query.join(Student).join(Course).filter(Grade.exam_name==exam_name)
+            q_tmp = Grade.query.join(Student).join(Course).filter(Grade.exam_name == exam_name)
             if subject_code:
-                q_tmp = q_tmp.filter(Course.code==subject_code)
-            rows_tmp = q_tmp.with_entities(Student.class_name, Student.grade_level, Grade.score).all()
+                q_tmp = q_tmp.filter(Course.code == subject_code)
+            rows_tmp = q_tmp.with_entities(
+                Student.class_name, Student.grade_level, Grade.score
+            ).all()
             c_scores = [float(s) for (cls, _gl, s) in rows_tmp if cls == student.class_name]
             g_scores = [float(s) for (_cls, gl, s) in rows_tmp if gl == student.grade_level]
             class_sets[exam_name] = c_scores
             grade_sets[exam_name] = g_scores
         cp = percentile(class_sets.get(exam_name, []), sc) if sc is not None else None
         gp = percentile(grade_sets.get(exam_name, []), sc) if sc is not None else None
-        series.append({'exam_name': exam_name, 'score': sc, 'class_avg': am.get('class_avg'), 'grade_avg': am.get('grade_avg'), 'class_pct': cp, 'grade_pct': gp})
+        series.append(
+            {
+                "exam_name": exam_name,
+                "score": sc,
+                "class_avg": am.get("class_avg"),
+                "grade_avg": am.get("grade_avg"),
+                "class_pct": cp,
+                "grade_pct": gp,
+            }
+        )
+
     # 计算环比/同比（按考试名字典序近似，yoy 以去年份前缀匹配）
     def base_token(name: str) -> str:
         import re
-        return re.sub(r'^\s*\d{4}[-/年]?\s*', '', name or '').strip()
-    series_sorted = sorted(series, key=lambda x: x['exam_name'])
+
+        return re.sub(r"^\s*\d{4}[-/年]?\s*", "", name or "").strip()
+
+    series_sorted = sorted(series, key=lambda x: x["exam_name"])
     last_score = None
     seen_by_base = {}
     for item in series_sorted:
-        sc = item.get('score')
-        item['delta_prev'] = (sc - last_score) if (sc is not None and last_score is not None) else None
+        sc = item.get("score")
+        item["delta_prev"] = (
+            (sc - last_score) if (sc is not None and last_score is not None) else None
+        )
         last_score = sc if sc is not None else last_score
-        bt = base_token(item['exam_name'])
+        bt = base_token(item["exam_name"])
         if bt in seen_by_base and sc is not None and seen_by_base[bt] is not None:
-            item['delta_yoy'] = sc - seen_by_base[bt]
+            item["delta_yoy"] = sc - seen_by_base[bt]
         else:
-            item['delta_yoy'] = None
+            item["delta_yoy"] = None
         if sc is not None:
             seen_by_base[bt] = sc
 
-@api_bp.route('/analysis/student-trend/export', methods=['GET'])
+
+@api_bp.route("/analysis/student-trend/export", methods=["GET"])
 @login_required
 def api_analysis_student_trend_export():
     # 复用查询逻辑
     from flask import render_template
+
     r = api_analysis_student_trend()
     if isinstance(r, tuple):
         data, code = r
@@ -2351,40 +3028,71 @@ def api_analysis_student_trend_export():
         payload = data.get_json()
     else:
         payload = r.get_json()
-    fmt = (request.args.get('format') or 'csv').lower()
-    if fmt != 'csv':
-        fmt = 'csv'
-    csv_text = render_template('student_analysis_export.csv.j2', series=payload['series'], ranks=payload['ranks'])
-    return Response(csv_text, mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename(f'student-detail-{payload["student"]["student_id"]}-{payload["subject_code"]}.csv')})
+    fmt = (request.args.get("format") or "csv").lower()
+    if fmt != "csv":
+        fmt = "csv"
+    csv_text = render_template(
+        "student_analysis_export.csv.j2", series=payload["series"], ranks=payload["ranks"]
+    )
+    return Response(
+        csv_text,
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename="
+            + _brand_prefix_filename(
+                f'student-detail-{payload["student"]["student_id"]}-{payload["subject_code"]}.csv'
+            )
+        },
+    )
 
     # 生成简单报告
-    scores = [s['score'] for s in series_sorted if s['score'] is not None]
+    scores = [s["score"] for s in series_sorted if s["score"] is not None]
     trend = None
     if len(scores) >= 2:
-        trend = 'up' if scores[-1] > scores[0] else ('down' if scores[-1] < scores[0] else 'flat')
+        trend = "up" if scores[-1] > scores[0] else ("down" if scores[-1] < scores[0] else "flat")
     report = {
-        'summary': {
-            'exams': len(series_sorted),
-            'avg': round(sum(scores)/len(scores),2) if scores else None,
-            'min': min(scores) if scores else None,
-            'max': max(scores) if scores else None,
-            'latest': scores[-1] if scores else None,
-            'trend': trend
+        "summary": {
+            "exams": len(series_sorted),
+            "avg": round(sum(scores) / len(scores), 2) if scores else None,
+            "min": min(scores) if scores else None,
+            "max": max(scores) if scores else None,
+            "latest": scores[-1] if scores else None,
+            "trend": trend,
         }
     }
-    return jsonify({
-        'student': { 'id': student.id, 'student_id': student.student_id, 'name': student.name, 'class_name': student.class_name, 'grade_level': student.grade_level },
-        'subject_code': subject_code,
-        'series': series_sorted,
-        'ranks': ranks,
-        'report': report
-    })
+    return jsonify(
+        {
+            "student": {
+                "id": student.id,
+                "student_id": student.student_id,
+                "name": student.name,
+                "class_name": student.class_name,
+                "grade_level": student.grade_level,
+            },
+            "subject_code": subject_code,
+            "series": series_sorted,
+            "ranks": ranks,
+            "report": report,
+        }
+    )
 
     args = request.args
-    trends_qs = urlencode({k: v for k, v in args.items() if k in ('subject_code','grade_level','class_name')})
-    class_qs_dict = {k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','top_n','min_count','sort_by')}
+    trends_qs = urlencode(
+        {k: v for k, v in args.items() if k in ("subject_code", "grade_level", "class_name")}
+    )
+    class_qs_dict = {
+        k: v
+        for k, v in args.items()
+        if k in ("exam_name", "subject_code", "grade_level", "top_n", "min_count", "sort_by")
+    }
     class_qs = urlencode(class_qs_dict)
-    dist_qs = urlencode({k: v for k, v in args.items() if k in ('exam_name','subject_code','grade_level','class_name','bin_width')})
+    dist_qs = urlencode(
+        {
+            k: v
+            for k, v in args.items()
+            if k in ("exam_name", "subject_code", "grade_level", "class_name", "bin_width")
+        }
+    )
 
     # 生成各 CSV 文本
     with current_app.test_request_context(query_string=trends_qs):
@@ -2399,54 +3107,74 @@ def api_analysis_student_trend_export():
 
     # 打包 ZIP（含品牌封面说明 README.md 与可选 logo.png）
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         # 品牌与筛选说明
         try:
-            bname = current_app.config.get('BRAND_SCHOOL_NAME_FULL') or current_app.config.get('BRAND_SCHOOL_NAME') or '某某学校'
-            subtitle = current_app.config.get('BRAND_REPORT_SUBTITLE') or '学业质量监测报告'
+            bname = (
+                current_app.config.get("BRAND_SCHOOL_NAME_FULL")
+                or current_app.config.get("BRAND_SCHOOL_NAME")
+                or "某某学校"
+            )
+            subtitle = current_app.config.get("BRAND_REPORT_SUBTITLE") or "学业质量监测报告"
             import datetime as _dt
-            ts = _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             # 汇总筛选参数快照
             lines = [
                 f"# {bname} - {subtitle}",
-                '',
+                "",
                 f"导出时间：{ts}",
                 f"科目：{request.args.get('subject_code') or 'TOTAL'}",
                 f"年级：{request.args.get('grade_level') or ''}",
                 f"班级：{request.args.get('class_name') or ''}",
                 f"考试：{request.args.get('exam_name') or ''}",
-                '',
-                '(同目录附带 logo.png，可用于封面生成)',
-                '',
-                '本压缩包包含：',
-                '- trends.csv 趋势汇总',
-                '- class_compare.csv 班级对比',
-                '- distribution.csv 分布直方图数据',
+                "",
+                "(同目录附带 logo.png，可用于封面生成)",
+                "",
+                "本压缩包包含：",
+                "- trends.csv 趋势汇总",
+                "- class_compare.csv 班级对比",
+                "- distribution.csv 分布直方图数据",
             ]
-            zf.writestr('README.md', '\n'.join(lines))
+            zf.writestr("README.md", "\n".join(lines))
         except Exception:
             pass
         # 可选 logo
         try:
             import os as _os
-            logo_path = _os.path.join(current_app.root_path, 'static', 'logo.png')
+
+            logo_path = _os.path.join(current_app.root_path, "static", "logo.png")
             if _os.path.isfile(logo_path):
-                zf.write(logo_path, arcname='logo.png')
+                zf.write(logo_path, arcname="logo.png")
         except Exception:
             pass
         # 三份 CSV
-        zf.writestr('trends.csv', trends_csv)
-        zf.writestr('class_compare.csv', class_csv)
-        zf.writestr('distribution.csv', dist_csv)
+        zf.writestr("trends.csv", trends_csv)
+        zf.writestr("class_compare.csv", class_csv)
+        zf.writestr("distribution.csv", dist_csv)
     buf.seek(0)
-    return current_app.response_class(buf.read(), mimetype='application/zip', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('analysis_exports.zip')})
+    return current_app.response_class(
+        buf.read(),
+        mimetype="application/zip",
+        headers={
+            "Content-Disposition": "attachment; filename="
+            + _brand_prefix_filename("analysis_exports.zip")
+        },
+    )
 
     writer = csv.writer(output)
-    writer.writerow(['class_name','avg','count','std'])
-    for row in data.get('compare', []):
-        writer.writerow([row.get('class_name'), row.get('avg'), row.get('count'), row.get('std')])
+    writer.writerow(["class_name", "avg", "count", "std"])
+    for row in data.get("compare", []):
+        writer.writerow([row.get("class_name"), row.get("avg"), row.get("count"), row.get("std")])
     output.seek(0)
-    return current_app.response_class(output.read(), mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename('class_compare.csv')})
+    return current_app.response_class(
+        output.read(),
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": "attachment; filename="
+            + _brand_prefix_filename("class_compare.csv")
+        },
+    )
 
 
 # 等级规则：查询
@@ -2457,21 +3185,33 @@ def api_grade_bands_get():
     rule_set_id = request.args.get("rule_set_id", type=int)
     if rule_set_id:
         # 从版本集读取
-        s = GradeBandSet.query.get_or_404(rule_set_id)
+        s = db.session.get(GradeBandSet, rule_set_id)
+        if not s:
+            abort(404)
         import json
+
         return jsonify(json.loads(s.rules_json))
     # 默认读取活跃规则
     rules = GradeBandRule.query.filter_by(exam_name=exam_name).all()
     data = []
     for r in rules:
-        data.append({
-            "id": r.id,
-            "exam_name": r.exam_name,
-            "subject_code": r.subject_code,
-            "method": r.method,
-            "a_min": r.a_min, "b_min": r.b_min, "c_min": r.c_min, "d_min": r.d_min,
-            "a_pct": r.a_pct, "b_pct": r.b_pct, "c_pct": r.c_pct, "d_pct": r.d_pct, "e_pct": r.e_pct,
-        })
+        data.append(
+            {
+                "id": r.id,
+                "exam_name": r.exam_name,
+                "subject_code": r.subject_code,
+                "method": r.method,
+                "a_min": r.a_min,
+                "b_min": r.b_min,
+                "c_min": r.c_min,
+                "d_min": r.d_min,
+                "a_pct": r.a_pct,
+                "b_pct": r.b_pct,
+                "c_pct": r.c_pct,
+                "d_pct": r.d_pct,
+                "e_pct": r.e_pct,
+            }
+        )
     return jsonify(data)
 
 
@@ -2486,16 +3226,19 @@ def api_grade_bands_bulk_put():
     # 基本校验
     for it in items:
         method = it.get("method")
-        if method == 'range':
-            a = it.get("a_min"); b = it.get("b_min"); c = it.get("c_min"); d = it.get("d_min")
+        if method == "range":
+            a = it.get("a_min")
+            b = it.get("b_min")
+            c = it.get("c_min")
+            d = it.get("d_min")
             # 允许缺省，缺省时沿用默认 80/60/40/20
             # 若提供了必须满足顺序
-            seq = [x for x in [a,b,c,d] if x is not None]
+            seq = [x for x in [a, b, c, d] if x is not None]
             if len(seq) == 4 and not (a >= b >= c >= d):
                 return jsonify({"error": "Range thresholds must satisfy A>=B>=C>=D"}), 400
-        elif method == 'percentile':
-            ap, bp, cp, dp, ep = [it.get(k) for k in ["a_pct","b_pct","c_pct","d_pct","e_pct"]]
-            if None in [ap,bp,cp,dp,ep]:
+        elif method == "percentile":
+            ap, bp, cp, dp, ep = [it.get(k) for k in ["a_pct", "b_pct", "c_pct", "d_pct", "e_pct"]]
+            if None in [ap, bp, cp, dp, ep]:
                 return jsonify({"error": "Percentile requires all five percentages"}), 400
             total = ap + bp + cp + dp + ep
             if round(total) != 100:
@@ -2505,8 +3248,11 @@ def api_grade_bands_bulk_put():
 
     # 若指定 rule_set_id，则保存快照至版本集；否则覆盖活跃规则
     import json
+
     if rule_set_id:
-        s = GradeBandSet.query.get_or_404(rule_set_id)
+        s = db.session.get(GradeBandSet, rule_set_id)
+        if not s:
+            abort(404)
         s.rules_json = json.dumps(items, ensure_ascii=False)
         db.session.commit()
         return jsonify({"message": "saved to set", "set_id": s.id, "count": len(items)})
@@ -2517,8 +3263,15 @@ def api_grade_bands_bulk_put():
                 exam_name=exam_name,
                 subject_code=it.get("subject_code"),
                 method=it.get("method"),
-                a_min=it.get("a_min"), b_min=it.get("b_min"), c_min=it.get("c_min"), d_min=it.get("d_min"),
-                a_pct=it.get("a_pct"), b_pct=it.get("b_pct"), c_pct=it.get("c_pct"), d_pct=it.get("d_pct"), e_pct=it.get("e_pct"),
+                a_min=it.get("a_min"),
+                b_min=it.get("b_min"),
+                c_min=it.get("c_min"),
+                d_min=it.get("d_min"),
+                a_pct=it.get("a_pct"),
+                b_pct=it.get("b_pct"),
+                c_pct=it.get("c_pct"),
+                d_pct=it.get("d_pct"),
+                e_pct=it.get("e_pct"),
             )
             db.session.add(rule)
         db.session.commit()
@@ -2532,37 +3285,44 @@ def api_grade_bands_preview():
     payload = request.get_json(force=True)
     items = payload.get("items") or []
     course_id = payload.get("course_id")
+
+
 def _cache_bump(current_app, ns: str):
     try:
-        rurl = current_app.config.get('REDIS_URL')
+        rurl = current_app.config.get("REDIS_URL")
         if not rurl:
             return
-        import redis, time
-        rc = getattr(current_app, '_redis_cli', None)
+        import time
+
+        import redis
+
+        rc = getattr(current_app, "_redis_cli", None)
         if rc is None:
             rc = redis.from_url(rurl, decode_responses=True)
             current_app._redis_cli = rc
-        key = f'gas:nsver:{ns}'
+        key = f"gas:nsver:{ns}"
         # use unix seconds to bump
         rc.set(key, str(int(time.time())))
     except Exception:
         pass
 
+
 def _cache_nsver(current_app, ns: str) -> str:
     try:
-        rurl = current_app.config.get('REDIS_URL')
+        rurl = current_app.config.get("REDIS_URL")
         if not rurl:
-            return ''
+            return ""
         import redis
-        rc = getattr(current_app, '_redis_cli', None)
+
+        rc = getattr(current_app, "_redis_cli", None)
         if rc is None:
             rc = redis.from_url(rurl, decode_responses=True)
             current_app._redis_cli = rc
-        key = f'gas:nsver:{ns}'
+        key = f"gas:nsver:{ns}"
         v = rc.get(key)
-        return v or ''
+        return v or ""
     except Exception:
-        return ''
+        return ""
 
     class_name = payload.get("class_name")
     # 构造一个临时的规则索引
@@ -2580,10 +3340,11 @@ def _cache_nsver(current_app, ns: str) -> str:
 
     # 应用规则生成分布（支持 range 与 percentile）
     from collections import defaultdict
+
     by_key_scores = defaultdict(list)
     for g in grades:
         subject_code = g.course.code
-        key = (g.exam_name or 'default', subject_code)
+        key = (g.exam_name or "default", subject_code)
         by_key_scores[key].append(float(g.score))
 
     dist = defaultdict(int)
@@ -2594,167 +3355,350 @@ def _cache_nsver(current_app, ns: str) -> str:
             continue
         n = len(scores)
         total += n
-        if rule.get('method') == 'range':
-            a = rule.get('a_min', 80); b = rule.get('b_min', 60); c = rule.get('c_min', 40); d = rule.get('d_min', 20)
+        if rule.get("method") == "range":
+            a = rule.get("a_min", 80)
+            b = rule.get("b_min", 60)
+            c = rule.get("c_min", 40)
+            d = rule.get("d_min", 20)
             for s in scores:
-                if s >= a: dist['A'] += 1
-                elif s >= b: dist['B'] += 1
-                elif s >= c: dist['C'] += 1
-                elif s >= d: dist['D'] += 1
-                else: dist['E'] += 1
-        elif rule.get('method') == 'percentile':
+                if s >= a:
+                    dist["A"] += 1
+                elif s >= b:
+                    dist["B"] += 1
+                elif s >= c:
+                    dist["C"] += 1
+                elif s >= d:
+                    dist["D"] += 1
+                else:
+                    dist["E"] += 1
+        elif rule.get("method") == "percentile":
             # 基于排名按百分比分桶（A->E），不依赖具体分数阈值
-            ap, bp, cp, dp, ep = [rule.get(k, 0) for k in ['a_pct','b_pct','c_pct','d_pct','e_pct']]
+            ap, bp, cp, dp, ep = [
+                rule.get(k, 0) for k in ["a_pct", "b_pct", "c_pct", "d_pct", "e_pct"]
+            ]
             # 防御：归一化到100
-            totp = (ap or 0)+(bp or 0)+(cp or 0)+(dp or 0)+(ep or 0)
+            totp = (ap or 0) + (bp or 0) + (cp or 0) + (dp or 0) + (ep or 0)
             if not totp:
                 continue
             from math import ceil
+
             scores_sorted = sorted(scores, reverse=True)
-            nA = ceil(n * (ap/100.0))
-            nB = ceil(n * (bp/100.0))
-            nC = ceil(n * (cp/100.0))
-            nD = ceil(n * (dp/100.0))
+            nA = ceil(n * (ap / 100.0))
+            nB = ceil(n * (bp / 100.0))
+            nC = ceil(n * (cp / 100.0))
+            nD = ceil(n * (dp / 100.0))
             # E 为剩余
             for i, _ in enumerate(scores_sorted, 1):
-                if i <= nA: dist['A'] += 1
-                elif i <= nA+nB: dist['B'] += 1
-                elif i <= nA+nB+nC: dist['C'] += 1
-                elif i <= nA+nB+nC+nD: dist['D'] += 1
-                else: dist['E'] += 1
+                if i <= nA:
+                    dist["A"] += 1
+                elif i <= nA + nB:
+                    dist["B"] += 1
+                elif i <= nA + nB + nC:
+                    dist["C"] += 1
+                elif i <= nA + nB + nC + nD:
+                    dist["D"] += 1
+                else:
+                    dist["E"] += 1
         else:
             continue
     return jsonify({"distribution": dict(dist), "total": total})
 
 
 # 汇总 API
-@api_bp.route('/summary', methods=['GET'])
+@api_bp.route("/summary", methods=["GET"])
 @login_required
 def api_summary_list():
     def _multi(param_name: str):
         vals = request.args.getlist(param_name)
         out = []
         for v in vals:
-            out.extend([s.strip() for s in v.split(',') if s.strip()])
+            out.extend([s.strip() for s in v.split(",") if s.strip()])
         return out
 
-    exam_names = _multi('exam_name')
-    grade_levels = _multi('grade_level')
-    class_names = _multi('class_name')
-    subject_code = request.args.get('subject_code') or 'TOTAL'
-    order_by = request.args.get('order_by') or 'score_desc'
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 100, type=int)
-    data = get_summary_data(current_user, exam_names, grade_levels, class_names, subject_code, order_by, page, page_size)
+    exam_names = _multi("exam_name")
+    grade_levels = _multi("grade_level")
+    class_names = _multi("class_name")
+    subject_code = request.args.get("subject_code") or "TOTAL"
+    order_by = request.args.get("order_by") or "score_desc"
+    page = request.args.get("page", 1, type=int)
+    page_size = request.args.get("page_size", 100, type=int)
+    data = get_summary_data(
+        current_user, exam_names, grade_levels, class_names, subject_code, order_by, page, page_size
+    )
     return jsonify(data)
 
 
-@api_bp.route('/summary/prefs', methods=['GET', 'PUT'])
+# 学生专属：我的汇总（仅返回当前登录学生的数据）
+@api_bp.route("/my/summary", methods=["GET"])
+@login_required
+def api_my_summary():
+    """返回与 /api/summary 相同结构，但仅包含当前登录学生的记录。
+    学生账号：username 与学号一致时可正常返回；非学生角色也可调用，但若无同名学号则返回空集合。
+    支持参数同 /api/summary：
+      - exam_name: 可多值或逗号分隔
+      - subject_code: 默认为 TOTAL
+      - order_by: score_desc/score_asc/class_rank/grade_rank
+      - page/page_size: 将在过滤到本人后再应用
+    """
+    def _multi(param_name: str):
+        vals = request.args.getlist(param_name)
+        out = []
+        for v in vals:
+            out.extend([s.strip() for s in v.split(",") if s.strip()])
+        return out
+
+    exam_names = _multi("exam_name")
+    subject_code = (request.args.get("subject_code") or "TOTAL").strip()
+    order_by = (request.args.get("order_by") or "score_desc").strip()
+    page = request.args.get("page", 1, type=int)
+    page_size = request.args.get("page_size", 100, type=int)
+
+    # 解析目标学号：默认当前用户；管理员/教师可通过 ?student_id= 指定
+    target_sid = (current_user.username or "").strip()
+    req_sid = (request.args.get("student_id") or "").strip()
+    if req_sid:
+        if current_user.role == "admin":
+            target_sid = req_sid
+        elif current_user.role == "teacher":
+            # 如配置了可见范围，则校验目标学生是否在范围内
+            stu = Student.query.filter_by(student_id=req_sid).first()
+            if not stu:
+                return jsonify({"error": "student_not_found"}), 404
+            allowed_grade = True
+            allowed_class = True
+            if current_user.allowed_grade_levels:
+                allowed = [s.strip() for s in (current_user.allowed_grade_levels or "").split(",") if s.strip()]
+                if allowed:
+                    allowed_grade = (stu.grade_level in allowed)
+            if current_user.allowed_class_names:
+                allowed = [s.strip() for s in (current_user.allowed_class_names or "").split(",") if s.strip()]
+                if allowed:
+                    allowed_class = (stu.class_name in allowed)
+            if not (allowed_grade and allowed_class):
+                return jsonify({"error": "forbidden"}), 403
+            target_sid = req_sid
+        elif current_user.role == "student":
+            if req_sid != target_sid:
+                return jsonify({"error": "forbidden"}), 403
+            # else same as own
+
+    # 调用统一的汇总服务（不传年级/班级过滤），再在内存中过滤到目标学号
+    data = get_summary_data(
+        current_user,
+        exam_names,
+        [],
+        [],
+        subject_code,
+        order_by,
+        1,  # 先拿足够大的一页，避免分页影响个人过滤（数据量通常很小）
+        10000,
+    )
+    items_all = data.get("items") or []
+    my_items = [it for it in items_all if str(it.get("student_id") or "") == target_sid]
+
+    # 对个人结果再做排序与分页
+    if order_by == "score_desc":
+        my_items.sort(key=lambda x: x.get("score") or 0, reverse=True)
+    elif order_by == "score_asc":
+        my_items.sort(key=lambda x: x.get("score") or 0)
+    elif order_by == "class_rank":
+        my_items.sort(key=lambda x: (x.get("class_name") or "", x.get("class_rank") or 10**9))
+    elif order_by == "grade_rank":
+        my_items.sort(key=lambda x: (x.get("grade_level") or "", x.get("grade_rank") or 10**9))
+
+    total_count = len(my_items)
+    start = max(0, (page - 1) * page_size)
+    end = start + page_size
+    my_page = my_items[start:end]
+
+    return jsonify(
+        {
+            "items": my_page,
+            "total": total_count,
+            "page": page,
+            "page_size": page_size,
+            "rule_version": data.get("rule_version"),
+        }
+    )
+
+
+@api_bp.route("/summary/prefs", methods=["GET", "PUT"])
 @login_required
 def api_summary_prefs():
-    from app.models import UserPreference
     import json
-    key = 'summary_prefs'
-    if request.method == 'PUT':
+
+    from app.models import UserPreference
+
+    key = "summary_prefs"
+    if request.method == "PUT":
         data = request.get_json(force=True)
         # 兼容新增字段：trend_chrono + trend_toggles
-        if 'trend_chrono' not in data:
-            data['trend_chrono'] = False
-        if 'trend_toggles' not in data or not isinstance(data.get('trend_toggles'), dict):
-            data['trend_toggles'] = {
-                'avg': True, 'med': True, 'band': True, 'max': True, 'min': True
+        if "trend_chrono" not in data:
+            data["trend_chrono"] = False
+        if "trend_toggles" not in data or not isinstance(data.get("trend_toggles"), dict):
+            data["trend_toggles"] = {
+                "avg": True,
+                "med": True,
+                "band": True,
+                "max": True,
+                "min": True,
             }
         # 兼容新增字段：class compare 偏好
-        if 'class_compare' not in data or not isinstance(data.get('class_compare'), dict):
-            data['class_compare'] = {'only_meets': False, 'sort_by': 'avg', 'min_count': 0}
+        if "class_compare" not in data or not isinstance(data.get("class_compare"), dict):
+            data["class_compare"] = {"only_meets": False, "sort_by": "avg", "min_count": 0}
         else:
-            if 'only_meets' not in data['class_compare']:
-                data['class_compare']['only_meets'] = False
-            if data['class_compare'].get('sort_by') not in ('avg','count'):
-                data['class_compare']['sort_by'] = 'avg'
-            if 'min_count' not in data['class_compare']:
-                data['class_compare']['min_count'] = 0
-            if 'export_only_meets' not in data['class_compare']:
-                data['class_compare']['export_only_meets'] = False
+            if "only_meets" not in data["class_compare"]:
+                data["class_compare"]["only_meets"] = False
+            if data["class_compare"].get("sort_by") not in ("avg", "count"):
+                data["class_compare"]["sort_by"] = "avg"
+            if "min_count" not in data["class_compare"]:
+                data["class_compare"]["min_count"] = 0
+            if "export_only_meets" not in data["class_compare"]:
+                data["class_compare"]["export_only_meets"] = False
         pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
         if not pref:
-            pref = UserPreference(user_id=current_user.id, key=key, value='{}')
+            pref = UserPreference(user_id=current_user.id, key=key, value="{}")
             db.session.add(pref)
         pref.value = json.dumps(data, ensure_ascii=False)
         db.session.commit()
-        return jsonify({'message': 'ok'})
+        return jsonify({"message": "ok"})
     # GET
     pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
     if not pref:
         # 迁移旧 key：summary_columns
-        legacy = UserPreference.query.filter_by(user_id=current_user.id, key='summary_columns').first()
+        legacy = UserPreference.query.filter_by(
+            user_id=current_user.id, key="summary_columns"
+        ).first()
         base = {
-            'letter': True, 'class_rank': True, 'grade_rank': True,
-            'trend_chrono': False,
-            'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True},
-            'class_compare': {'only_meets': False, 'sort_by': 'avg', 'min_count': 0, 'export_only_meets': False}
+            "letter": True,
+            "class_rank": True,
+            "grade_rank": True,
+            "trend_chrono": False,
+            "trend_toggles": {"avg": True, "med": True, "band": True, "max": True, "min": True},
+            "class_compare": {
+                "only_meets": False,
+                "sort_by": "avg",
+                "min_count": 0,
+                "export_only_meets": False,
+            },
         }
         if legacy:
             try:
-                lv = json.loads(legacy.value or '{}')
-                for k in ['letter','class_rank','grade_rank']:
+                lv = json.loads(legacy.value or "{}")
+                for k in ["letter", "class_rank", "grade_rank"]:
                     if k in lv:
                         base[k] = bool(lv[k])
             except Exception:
                 pass
         # 持久化迁移结果
-        pref = UserPreference(user_id=current_user.id, key=key, value=json.dumps(base, ensure_ascii=False))
+        pref = UserPreference(
+            user_id=current_user.id, key=key, value=json.dumps(base, ensure_ascii=False)
+        )
         db.session.add(pref)
         db.session.commit()
         return jsonify(base)
+
+
+# Dashboard 偏好
+@api_bp.route("/dashboard/prefs", methods=["GET", "PUT"])
+@login_required
+def api_dashboard_prefs():
+    import json
+
+    from app.models import UserPreference
+
+    key = "dashboard_prefs"
+    if request.method == "PUT":
+        try:
+            data = request.get_json(force=True)
+        except Exception:
+            data = None
+        if not isinstance(data, dict):
+            return jsonify({"error": "invalid json"}), 400
+        pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
+        if not pref:
+            pref = UserPreference(user_id=current_user.id, key=key, value="{}")
+            db.session.add(pref)
+        pref.value = json.dumps(data, ensure_ascii=False)
+        db.session.commit()
+        return jsonify({"message": "ok"})
+    # GET
+    pref = UserPreference.query.filter_by(user_id=current_user.id, key=key).first()
+    if pref and pref.value:
+        try:
+            return jsonify(json.loads(pref.value))
+        except Exception:
+            pass
+    return jsonify({})
+
     try:
         val = json.loads(pref.value)
         # 合并默认值，防止旧数据缺字段
-        if 'trend_chrono' not in val:
-            val['trend_chrono'] = False
-        if 'trend_toggles' not in val or not isinstance(val.get('trend_toggles'), dict):
-            val['trend_toggles'] = {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True}
+        if "trend_chrono" not in val:
+            val["trend_chrono"] = False
+        if "trend_toggles" not in val or not isinstance(val.get("trend_toggles"), dict):
+            val["trend_toggles"] = {
+                "avg": True,
+                "med": True,
+                "band": True,
+                "max": True,
+                "min": True,
+            }
         else:
-            for k in ['avg','med','band','max','min']:
-                if k not in val['trend_toggles']:
-                    val['trend_toggles'][k] = True
-        if 'class_compare' not in val or not isinstance(val.get('class_compare'), dict):
-            val['class_compare'] = {'only_meets': False, 'sort_by': 'avg', 'min_count': 0, 'export_only_meets': False}
+            for k in ["avg", "med", "band", "max", "min"]:
+                if k not in val["trend_toggles"]:
+                    val["trend_toggles"][k] = True
+        if "class_compare" not in val or not isinstance(val.get("class_compare"), dict):
+            val["class_compare"] = {
+                "only_meets": False,
+                "sort_by": "avg",
+                "min_count": 0,
+                "export_only_meets": False,
+            }
         else:
-            if 'min_count' not in val['class_compare']:
-                val['class_compare']['min_count'] = 0
-            if 'export_only_meets' not in val['class_compare']:
-                val['class_compare']['export_only_meets'] = False
-            if 'only_meets' not in val['class_compare']:
-                val['class_compare']['only_meets'] = False
-            if val['class_compare'].get('sort_by') not in ('avg','count'):
-                val['class_compare']['sort_by'] = 'avg'
+            if "min_count" not in val["class_compare"]:
+                val["class_compare"]["min_count"] = 0
+            if "export_only_meets" not in val["class_compare"]:
+                val["class_compare"]["export_only_meets"] = False
+            if "only_meets" not in val["class_compare"]:
+                val["class_compare"]["only_meets"] = False
+            if val["class_compare"].get("sort_by") not in ("avg", "count"):
+                val["class_compare"]["sort_by"] = "avg"
         return jsonify(val)
     except Exception:
-        return jsonify({
-            'letter': True, 'class_rank': True, 'grade_rank': True,
-            'trend_chrono': False,
-            'trend_toggles': {'avg': True, 'med': True, 'band': True, 'max': True, 'min': True},
-            'class_compare': {'only_meets': False, 'sort_by': 'avg', 'min_count': 0, 'export_only_meets': False}
-        })
+        return jsonify(
+            {
+                "letter": True,
+                "class_rank": True,
+                "grade_rank": True,
+                "trend_chrono": False,
+                "trend_toggles": {"avg": True, "med": True, "band": True, "max": True, "min": True},
+                "class_compare": {
+                    "only_meets": False,
+                    "sort_by": "avg",
+                    "min_count": 0,
+                    "export_only_meets": False,
+                },
+            }
+        )
 
 
-
-@api_bp.route('/summary/export', methods=['GET'])
+@api_bp.route("/summary/export", methods=["GET"])
 def api_summary_export():
     # 复用过滤逻辑
     def _multi(param_name: str):
         vals = request.args.getlist(param_name)
         out = []
         for v in vals:
-            out.extend([s.strip() for s in v.split(',') if s.strip()])
+            out.extend([s.strip() for s in v.split(",") if s.strip()])
         return out
 
-    exam_names = _multi('exam_name')
-    grade_levels = _multi('grade_level')
-    class_names = _multi('class_name')
-    subject_code = request.args.get('subject_code') or 'TOTAL'
-    fmt = request.args.get('format') or 'csv'
+    exam_names = _multi("exam_name")
+    grade_levels = _multi("grade_level")
+    class_names = _multi("class_name")
+    subject_code = request.args.get("subject_code") or "TOTAL"
+    fmt = request.args.get("format") or "csv"
+    student_id = (request.args.get("student_id") or "").strip()
 
     q = Grade.query.join(Student).join(Course)
     if exam_names:
@@ -2765,75 +3709,108 @@ def api_summary_export():
         q = q.filter(Student.class_name.in_(class_names))
     if subject_code:
         q = q.filter(Course.code == subject_code)
+    # 可选：按学号过滤，并执行权限校验
+    if student_id:
+        # 权限：学生只能导出本人；教师需在可见范围；管理员不受限
+        if current_user.role == "student" and student_id != (current_user.username or "").strip():
+            return jsonify({"error": "forbidden"}), 403
+        if current_user.role == "teacher":
+            stu = Student.query.filter_by(student_id=student_id).first()
+            if not stu:
+                return jsonify({"error": "student_not_found"}), 404
+            allowed_grade = True
+            allowed_class = True
+            if current_user.allowed_grade_levels:
+                allowed = [s.strip() for s in (current_user.allowed_grade_levels or "").split(",") if s.strip()]
+                if allowed:
+                    allowed_grade = (stu.grade_level in allowed)
+            if current_user.allowed_class_names:
+                allowed = [s.strip() for s in (current_user.allowed_class_names or "").split(",") if s.strip()]
+                if allowed:
+                    allowed_class = (stu.class_name in allowed)
+            if not (allowed_grade and allowed_class):
+                return jsonify({"error": "forbidden"}), 403
+        q = q.filter(Student.student_id == student_id)
     # 非管理员可见范围限制
-    if not current_user.is_anonymous and current_user.role != 'admin':
+    if not current_user.is_anonymous and current_user.role != "admin":
         if current_user.allowed_grade_levels:
-            allowed = [s.strip() for s in current_user.allowed_grade_levels.split(',') if s.strip()]
+            allowed = [s.strip() for s in current_user.allowed_grade_levels.split(",") if s.strip()]
             if allowed:
                 q = q.filter(Student.grade_level.in_(allowed))
         if current_user.allowed_class_names:
-            allowed = [s.strip() for s in current_user.allowed_class_names.split(',') if s.strip()]
+            allowed = [s.strip() for s in current_user.allowed_class_names.split(",") if s.strip()]
             if allowed:
                 q = q.filter(Student.class_name.in_(allowed))
 
     # scope: current_page | all
-    scope = request.args.get('scope') or 'all'
-    order_by = request.args.get('order_by') or 'score_desc'
-    page = request.args.get('page', type=int) or 1
-    page_size = min(max(request.args.get('page_size', type=int) or 50, 1), 1000)
+    scope = request.args.get("scope") or "all"
+    order_by = request.args.get("order_by") or "score_desc"
+    page = request.args.get("page", type=int) or 1
+    page_size = min(max(request.args.get("page_size", type=int) or 50, 1), 1000)
 
     # 排序
-    if order_by == 'score_desc':
+    if order_by == "score_desc":
         q = q.order_by(Grade.score.desc())
-    elif order_by == 'score_asc':
+    elif order_by == "score_asc":
         q = q.order_by(Grade.score.asc())
 
-    if scope == 'current_page':
-        q = q.offset((page-1)*page_size).limit(page_size)
+    if scope == "current_page":
+        q = q.offset((page - 1) * page_size).limit(page_size)
 
     # 先尝试从 summary_list 缓存复用数据（仅 scope=current_page 时有意义）
     try:
+        import hashlib as _hashlib
+        import json as _json
+
         from flask import current_app
-        import json as _json, hashlib as _hashlib
-        rurl = current_app.config.get('REDIS_URL')
-        if rurl and scope == 'current_page':
+
+        rurl = current_app.config.get("REDIS_URL")
+        if rurl and scope == "current_page":
             import redis as _redis
-            rc = getattr(current_app, '_redis_cli', None)
+
+            rc = getattr(current_app, "_redis_cli", None)
             if rc is None:
                 rc = _redis.from_url(rurl, decode_responses=True)
                 current_app._redis_cli = rc
             key_payload = {
-                'ns': 'summary_list:' + (_cache_nsver(current_app,'summary') or ''),
-                'exam_names': sorted(exam_names),
-                'grade_levels': sorted(grade_levels),
-                'class_names': sorted(class_names),
-                'subject_code': subject_code,
-                'user': (current_user.id if (not current_user.is_anonymous) else 0),
-                'page': page,
-                'page_size': page_size,
+                "ns": "summary_list:" + (_cache_nsver(current_app, "summary") or ""),
+                "exam_names": sorted(exam_names),
+                "grade_levels": sorted(grade_levels),
+                "class_names": sorted(class_names),
+                "subject_code": subject_code,
+                "user": (current_user.id if (not current_user.is_anonymous) else 0),
+                "page": page,
+                "page_size": page_size,
             }
-            key = 'gas:sumlist:' + _hashlib.md5(_json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+            key = (
+                "gas:sumlist:"
+                + _hashlib.md5(
+                    _json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+                ).hexdigest()
+            )
             cached = rc.get(key)
             if cached:
                 try:
                     payload = _json.loads(cached)
                     # 直接用缓存数据构建导出内容
-                    items = payload.get('items') or []
+                    items = payload.get("items") or []
                     # 映射 items -> data_rows
                     data_rows = []
                     for it in items:
-                        data_rows.append({
-                            'student_id': it.get('student_id'),
-                            'name': it.get('student_name') or it.get('name'),
-                            'class_name': it.get('class_name'),
-                            'grade_level': it.get('grade_level'),
-                            'score': it.get('score'),
-                            'percentage': it.get('percentage'),
-                            'letter': it.get('letter'),
-                            'class_rank': it.get('class_rank'),
-                            'grade_rank': it.get('grade_rank'),
-                            'rule_version': it.get('rule_version'),
-                        })
+                        data_rows.append(
+                            {
+                                "student_id": it.get("student_id"),
+                                "name": it.get("student_name") or it.get("name"),
+                                "class_name": it.get("class_name"),
+                                "grade_level": it.get("grade_level"),
+                                "score": it.get("score"),
+                                "percentage": it.get("percentage"),
+                                "letter": it.get("letter"),
+                                "class_rank": it.get("class_rank"),
+                                "grade_rank": it.get("grade_rank"),
+                                "rule_version": it.get("rule_version"),
+                            }
+                        )
                     # 若缓存命中则直接继续使用 data_rows，跳过 SQL 拉取
                     rows = None
                 except Exception:
@@ -2842,11 +3819,12 @@ def api_summary_export():
         pass
 
     # 若 rows 已由缓存覆盖，则跳过 DB 拉取
-    if 'rows' not in locals() or rows is not None:
+    if "rows" not in locals() or rows is not None:
         rows = q.all()
 
     # 计算班级/年级排名
     from collections import defaultdict
+
     by_class = defaultdict(list)
     by_grade = defaultdict(list)
     for g in rows:
@@ -2866,7 +3844,11 @@ def api_summary_export():
     # 规则版本（仅单考试名时）
     rule_version = None
     if exam_names and len(exam_names) == 1:
-        published_set = GradeBandSet.query.filter_by(exam_name=exam_names[0], status='published').order_by(GradeBandSet.version.desc()).first()
+        published_set = (
+            GradeBandSet.query.filter_by(exam_name=exam_names[0], status="published")
+            .order_by(GradeBandSet.version.desc())
+            .first()
+        )
         if published_set:
             rule_version = published_set.version
 
@@ -2874,34 +3856,35 @@ def api_summary_export():
     max_cache = {}
 
     # 列选择
-    columns_param = request.args.get('columns')
-    selected_cols = [c.strip() for c in columns_param.split(',')] if columns_param else None
+    columns_param = request.args.get("columns")
+    selected_cols = [c.strip() for c in columns_param.split(",")] if columns_param else None
 
     # 内部字段与导出表头映射
     header_map = {
-        'student_id': '学号',
-        'name': '姓名',
-        'class_name': '班级',
-        'grade_level': '年级',
-        'score': '分数',
-        'percentage': '百分比',
-        'letter': '等第',
-        'class_rank': '班级排名',
-        'grade_rank': '年级排名',
-        'rule_version': '规则版本',
+        "student_id": "学号",
+        "name": "姓名",
+        "class_name": "班级",
+        "grade_level": "年级",
+        "score": "分数",
+        "percentage": "百分比",
+        "letter": "等第",
+        "class_rank": "班级排名",
+        "grade_rank": "年级排名",
+        "rule_version": "规则版本",
     }
 
     # 默认列
-    default_cols = ['student_id','name','class_name','grade_level','score','letter']
+    default_cols = ["student_id", "name", "class_name", "grade_level", "score", "letter"]
     use_cols = [c for c in (selected_cols or default_cols) if c in header_map]
 
     # 组装数据
     from app.utils import grade_letter_for
+
     data_rows = []
     for g in rows:
         # 百分比
         perc = None
-        key = (g.exam_type or 'regular', g.course.code)
+        key = (g.exam_type or "regular", g.course.code)
         if key in max_cache:
             max_score = max_cache[key]
         else:
@@ -2912,122 +3895,158 @@ def api_summary_export():
             perc = round(float(g.score) / float(max_score) * 100.0, 2)
 
         rec = {
-            'student_id': g.student.student_id,
-            'name': g.student.name,
-            'class_name': g.student.class_name,
-            'grade_level': g.student.grade_level,
-            'score': g.score,
-            'percentage': perc,
-            'letter': grade_letter_for(g.exam_name or 'default', g.course.code, g.score),
-            'class_rank': class_rank_map.get(g.student.class_name, {}).get(g.student_id),
-            'grade_rank': grade_rank_map.get(g.student.grade_level, {}).get(g.student_id),
-            'rule_version': rule_version,
+            "student_id": g.student.student_id,
+            "name": g.student.name,
+            "class_name": g.student.class_name,
+            "grade_level": g.student.grade_level,
+            "score": g.score,
+            "percentage": perc,
+            "letter": grade_letter_for(g.exam_name or "default", g.course.code, g.score),
+            "class_rank": class_rank_map.get(g.student.class_name, {}).get(g.student_id),
+            "grade_rank": grade_rank_map.get(g.student.grade_level, {}).get(g.student_id),
+            "rule_version": rule_version,
         }
         data_rows.append(rec)
 
     # 生成导出结构
     export_rows = []
     for rec in data_rows:
-        row = { header_map[col]: rec.get(col, '') for col in use_cols }
+        row = {header_map[col]: rec.get(col, "") for col in use_cols}
         export_rows.append(row)
 
     # 组装文件名片段（包含考试、学科、年级、班级）
     def _safe_name(s: str) -> str:
         import re
-        return re.sub(r'[^\w\-\u4e00-\u9fa5]+', '_', s)[:40]
-    import datetime as _dt
-    ts = _dt.datetime.now().strftime('%Y%m%d_%H%M%S')
-    name_exam = '-'.join(exam_names) if exam_names else '全部考试'
-    name_subject = subject_code or '全部学科'
-    name_gl = '-'.join(grade_levels) if grade_levels else '全部年级'
-    name_cl = '-'.join(class_names) if class_names else '全部班级'
-    scope = request.args.get('scope') or 'all'
-    order_by = request.args.get('order_by') or 'score_desc'
-    base_name = f"{_safe_name(name_exam)}_{_safe_name(name_subject)}_{_safe_name(name_gl)}_{_safe_name(name_cl)}_{_safe_name(scope)}_{_safe_name(order_by)}_{ts}"
 
-    if fmt == 'xlsx':
+        return re.sub(r"[^\w\-\u4e00-\u9fa5]+", "_", s)[:40]
+
+    import datetime as _dt
+
+    ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    name_exam = "-".join(exam_names) if exam_names else "全部考试"
+    name_subject = subject_code or "全部学科"
+    name_gl = "-".join(grade_levels) if grade_levels else "全部年级"
+    name_cl = "-".join(class_names) if class_names else "全部班级"
+    scope = request.args.get("scope") or "all"
+    order_by = request.args.get("order_by") or "score_desc"
+    sid = (request.args.get("student_id") or "").strip()
+    sid_part = f"_SID-{_safe_name(sid)}" if sid else ""
+    base_name = f"{_safe_name(name_exam)}_{_safe_name(name_subject)}_{_safe_name(name_gl)}_{_safe_name(name_cl)}{sid_part}_{_safe_name(scope)}_{_safe_name(order_by)}_{ts}"
+
+    if fmt == "xlsx":
         # 仍保留同步导出
         try:
             from openpyxl import Workbook
+
             wb = Workbook(write_only=True)
             ws = wb.create_sheet()
             ws.append([header_map[c] for c in use_cols])
             for rec in data_rows:
-                ws.append([rec.get(c, '') for c in use_cols])
+                ws.append([rec.get(c, "") for c in use_cols])
             buf = io.BytesIO()
             wb.save(buf)
             buf.seek(0)
-            return send_file(buf, as_attachment=True, download_name=_brand_prefix_filename(f'{base_name}.xlsx'), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            return send_file(
+                buf,
+                as_attachment=True,
+                download_name=_brand_prefix_filename(f"{base_name}.xlsx"),
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
         except Exception:
             import pandas as pd
+
             buf = io.BytesIO()
-            pd.DataFrame([{header_map[c]: r.get(c, '') for c in use_cols} for r in data_rows]).to_excel(buf, index=False)
+            pd.DataFrame(
+                [{header_map[c]: r.get(c, "") for c in use_cols} for r in data_rows]
+            ).to_excel(buf, index=False)
             buf.seek(0)
-            return send_file(buf, as_attachment=True, download_name=_brand_prefix_filename(f'{base_name}.xlsx'), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            return send_file(
+                buf,
+                as_attachment=True,
+                download_name=_brand_prefix_filename(f"{base_name}.xlsx"),
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
     # 默认csv（流式写出，降低内存占用）
     import csv
+
     def generate_csv():
-        yield '\ufeff'
+        yield "\ufeff"
         header = [header_map[c] for c in use_cols]
         sio = io.StringIO()
         writer = csv.writer(sio)
         writer.writerow(header)
         yield sio.getvalue()
-        sio.seek(0); sio.truncate(0)
+        sio.seek(0)
+        sio.truncate(0)
         for rec in data_rows:
-            writer.writerow([rec.get(c, '') for c in use_cols])
+            writer.writerow([rec.get(c, "") for c in use_cols])
             yield sio.getvalue()
-            sio.seek(0); sio.truncate(0)
-    return Response(stream_with_context(generate_csv()), mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=' + _brand_prefix_filename(f'{base_name}.csv')})
+            sio.seek(0)
+            sio.truncate(0)
 
+    return Response(
+        stream_with_context(generate_csv()),
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename="
+            + _brand_prefix_filename(f"{base_name}.csv")
+        },
+    )
+
+
+import os
+import uuid
 
 # 导出异步化（轻量线程）
 from threading import Thread
-import uuid
-import os
 
 _export_tasks = {}
+
 
 class ExportTask:
     def __init__(self, task_id, user_id, params):
         self.id = task_id
         self.user_id = user_id
         self.params = params
-        self.status = 'pending'
+        self.status = "pending"
         self.progress = 0
         self.file = None
         self.error = None
-        self.created_at = dt.datetime.utcnow()
+        self.created_at = dt.datetime.now(dt.timezone.utc)
         self.finished_at = None
 
     def to_dict(self):
         import os as _os
+
         # 构造筛选摘要
         p = self.params or {}
+
         def _join(v):
             if isinstance(v, list):
-                return ','.join(v)
-            return str(v or '')
+                return ",".join(v)
+            return str(v or "")
+
         summary = f"考试:{_join(p.get('exam_name') or p.get('exam_names'))} 学科:{p.get('subject_code') or ''} 年级:{_join(p.get('grade_level') or p.get('grade_levels'))} 班级:{_join(p.get('class_name') or p.get('class_names'))} 范围:{p.get('scope') or 'all'} 排序:{p.get('order_by') or 'score_desc'}"
-        file_ready = bool(self.file and _os.path.isfile(self.file) and self.status=='completed')
+        file_ready = bool(self.file and _os.path.isfile(self.file) and self.status == "completed")
         file_size = _os.path.getsize(self.file) if file_ready else None
         d = {
-            'task_id': self.id,
-            'status': self.status,
-            'progress': self.progress,
-            'file': self.file,
-            'filename': _os.path.basename(self.file) if self.file else None,
-            'file_ready': file_ready,
-            'file_size': file_size,
-            'error': self.error,
-            'created_at': self.created_at.isoformat() + 'Z',
-            'finished_at': self.finished_at.isoformat() + 'Z' if self.finished_at else None,
-            'summary': summary,
-            'params': p,
+            "task_id": self.id,
+            "status": self.status,
+            "progress": self.progress,
+            "file": self.file,
+            "filename": _os.path.basename(self.file) if self.file else None,
+            "file_ready": file_ready,
+            "file_size": file_size,
+            "error": self.error,
+            "created_at": self.created_at.isoformat() + "Z",
+            "finished_at": self.finished_at.isoformat() + "Z" if self.finished_at else None,
+            "summary": summary,
+            "params": p,
         }
         return d
 
-@api_bp.route('/export/tasks', methods=['POST'])
+
+@api_bp.route("/export/tasks", methods=["POST"])
 @login_required
 def api_export_task_create():
     # 接收与 /api/summary/export 相同的查询参数
@@ -3035,189 +4054,235 @@ def api_export_task_create():
     user_id = current_user.id
 
     # 并发限制
-    max_c = current_app.config.get('EXPORT_MAX_CONCURRENT_PER_USER', 2)
-    running = ExportJob.query.filter(ExportJob.user_id==user_id, ExportJob.status.in_(['pending','running'])).count()
+    max_c = current_app.config.get("EXPORT_MAX_CONCURRENT_PER_USER", 2)
+    running = ExportJob.query.filter(
+        ExportJob.user_id == user_id, ExportJob.status.in_(["pending", "running"])
+    ).count()
     if running >= max_c:
-        return jsonify({'error':'too_many_tasks', 'message': f'已有 {running} 个导出任务在进行中（上限 {max_c}），请稍候再试'}), 429
+        return (
+            jsonify(
+                {
+                    "error": "too_many_tasks",
+                    "message": f"已有 {running} 个导出任务在进行中（上限 {max_c}），请稍候再试",
+                }
+            ),
+            429,
+        )
 
     task_id = str(uuid.uuid4())
     _export_tasks[task_id] = ExportTask(task_id, user_id, params)
     # 持久化记录
     try:
         from json import dumps
-        job = ExportJob(id=task_id, user_id=user_id, params=dumps(params, ensure_ascii=False), status='pending', progress=0)
-        db.session.add(job); db.session.commit()
+
+        job = ExportJob(
+            id=task_id,
+            user_id=user_id,
+            params=dumps(params, ensure_ascii=False),
+            status="pending",
+            progress=0,
+        )
+        db.session.add(job)
+        db.session.commit()
     except Exception:
         db.session.rollback()
 
     def worker(task_id, params, user_id):
         try:
             t = _export_tasks.get(task_id)
-            if not t: return
-            t.status = 'running'; t.progress = 10
+            if not t:
+                return
+            t.status = "running"
+            t.progress = 10
             # 复用逻辑：构建查询，与同步导出一致
             with current_app.app_context():
                 # 更新DB为running
                 try:
-                    job = ExportJob.query.get(task_id)
+                    job = db.session.get(ExportJob, task_id)
                     if job:
-                        job.status = 'running'; job.progress = 10; db.session.commit()
+                        job.status = "running"
+                        job.progress = 10
+                        db.session.commit()
                 except Exception:
                     db.session.rollback()
                 from copy import deepcopy
+
                 args = deepcopy(params)
                 # 将用户可见范围注入参数（按创建者）
-                user = User.query.get(user_id)
-                if user and user.role != 'admin':
-                    if user.allowed_grade_levels and not args.get('grade_level'):
-                        args['grade_level'] = user.allowed_grade_levels
-                    if user.allowed_class_names and not args.get('class_name'):
-                        args['class_name'] = user.allowed_class_names
+                user = db.session.get(User, user_id)
+                if user and user.role != "admin":
+                    if user.allowed_grade_levels and not args.get("grade_level"):
+                        args["grade_level"] = user.allowed_grade_levels
+                    if user.allowed_class_names and not args.get("class_name"):
+                        args["class_name"] = user.allowed_class_names
                 # 生成文件名与导出目录
-                export_dir = current_app.config.get('EXPORT_DIR', 'exports')
+                export_dir = current_app.config.get("EXPORT_DIR", "exports")
                 os.makedirs(export_dir, exist_ok=True)
                 # 调用一个内部函数生成文件
                 filepath = _build_export_file(args, export_dir)
-                t.status = 'completed'; t.file = filepath; t.progress = 100; t.finished_at = dt.datetime.utcnow()
+                t.status = "completed"
+                t.file = filepath
+                t.progress = 100
+                t.finished_at = dt.datetime.now(dt.timezone.utc)
                 try:
-                    _EXPORT_COMPLETED.labels('async').inc()
+                    _EXPORT_COMPLETED.labels("async").inc()
                 except Exception:
                     pass
                 try:
-                    job = ExportJob.query.get(task_id)
+                    job = db.session.get(ExportJob, task_id)
                     if job:
-                        job.status = 'completed'; job.progress = 100; job.file_path = filepath; job.finished_at = dt.datetime.utcnow()
+                        job.status = "completed"
+                        job.progress = 100
+                        job.file_path = filepath
+                        job.finished_at = dt.datetime.now(dt.timezone.utc)
                         db.session.commit()
                 except Exception:
                     db.session.rollback()
         except Exception as e:
             t = _export_tasks.get(task_id)
             if t:
-                t.status = 'failed'; t.error = str(e)
+                t.status = "failed"
+                t.error = str(e)
             try:
-                job = ExportJob.query.get(task_id)
+                job = db.session.get(ExportJob, task_id)
                 if job:
-                    job.status = 'failed'; job.error = str(e); job.finished_at = dt.datetime.utcnow()
+                    job.status = "failed"
+                    job.error = str(e)
+                    job.finished_at = dt.datetime.now(dt.timezone.utc)
                     db.session.commit()
             except Exception:
                 db.session.rollback()
             try:
-                _EXPORT_FAILED.labels('async').inc()
+                _EXPORT_FAILED.labels("async").inc()
             except Exception:
                 pass
 
     _cleanup_exports_once()
     Thread(target=worker, args=(task_id, params, user_id), daemon=True).start()
-    return jsonify({ 'task_id': task_id })
+    return jsonify({"task_id": task_id})
 
 
-@api_bp.route('/export/tasks/<task_id>', methods=['GET'])
+@api_bp.route("/export/tasks/<task_id>", methods=["GET"])
 @login_required
 def api_export_task_status(task_id):
     t = _export_tasks.get(task_id)
     if not t:
         # 回退到持久化记录
-        job = ExportJob.query.get(task_id)
+        job = db.session.get(ExportJob, task_id)
         if not job:
-            return jsonify({ 'error': 'not found' }), 404
-        if current_user.role != 'admin' and job.user_id != current_user.id:
-            return jsonify({ 'error': 'forbidden' }), 403
-        from json import loads
+            return jsonify({"error": "not found"}), 404
+        if current_user.role != "admin" and job.user_id != current_user.id:
+            return jsonify({"error": "forbidden"}), 403
         import os as _os
+        from json import loads
+
         p = loads(job.params)
+
         def _join(v):
             if isinstance(v, list):
-                return ','.join(v)
-            return str(v or '')
+                return ",".join(v)
+            return str(v or "")
+
         summary = f"考试:{_join(p.get('exam_name') or p.get('exam_names'))} 学科:{p.get('subject_code') or ''} 年级:{_join(p.get('grade_level') or p.get('grade_levels'))} 班级:{_join(p.get('class_name') or p.get('class_names'))} 范围:{p.get('scope') or 'all'} 排序:{p.get('order_by') or 'score_desc'}"
-        file_ready = bool(job.file_path and _os.path.isfile(job.file_path) and job.status=='completed')
+        file_ready = bool(
+            job.file_path and _os.path.isfile(job.file_path) and job.status == "completed"
+        )
         file_size = _os.path.getsize(job.file_path) if file_ready else None
-        return jsonify({
-            'task_id': job.id,
-            'status': job.status,
-            'progress': job.progress,
-            'filename': _os.path.basename(job.file_path) if job.file_path else None,
-            'file_ready': file_ready,
-            'file_size': file_size,
-            'created_at': job.created_at.isoformat()+'Z' if job.created_at else None,
-            'finished_at': job.finished_at.isoformat()+'Z' if job.finished_at else None,
-            'summary': summary,
-            'params': p,
-        })
+        return jsonify(
+            {
+                "task_id": job.id,
+                "status": job.status,
+                "progress": job.progress,
+                "filename": _os.path.basename(job.file_path) if job.file_path else None,
+                "file_ready": file_ready,
+                "file_size": file_size,
+                "created_at": job.created_at.isoformat() + "Z" if job.created_at else None,
+                "finished_at": job.finished_at.isoformat() + "Z" if job.finished_at else None,
+                "summary": summary,
+                "params": p,
+            }
+        )
     # 仅本人或管理员可查
-    if current_user.role != 'admin' and t.user_id != current_user.id:
-        return jsonify({ 'error': 'forbidden' }), 403
+    if current_user.role != "admin" and t.user_id != current_user.id:
+        return jsonify({"error": "forbidden"}), 403
     return jsonify(t.to_dict())
 
 
+import base64
+import hashlib
+import hmac
+import time
 
-import hmac, hashlib, base64, time
 
 def _sign_download_token(task_id: str, user_id: int, ttl: int) -> str:
-    secret = (current_app.config.get('SECRET_KEY') or 'secret').encode('utf-8')
+    secret = (current_app.config.get("SECRET_KEY") or "secret").encode("utf-8")
     exp = int(time.time()) + int(ttl)
-    payload = f"{task_id}.{user_id}.{exp}".encode('utf-8')
+    payload = f"{task_id}.{user_id}.{exp}".encode("utf-8")
     sig = hmac.new(secret, payload, hashlib.sha256).digest()
-    token = base64.urlsafe_b64encode(payload + b'.' + sig).decode('utf-8')
+    token = base64.urlsafe_b64encode(payload + b"." + sig).decode("utf-8")
     return token
 
 
 def _verify_download_token(token: str):
     try:
-        raw = base64.urlsafe_b64decode(token.encode('utf-8'))
-        parts = raw.split(b'.')
+        raw = base64.urlsafe_b64decode(token.encode("utf-8"))
+        parts = raw.split(b".")
         if len(parts) != 4:
             return None
-        task_id = parts[0].decode('utf-8')
-        user_id = int(parts[1].decode('utf-8'))
-        exp = int(parts[2].decode('utf-8'))
+        task_id = parts[0].decode("utf-8")
+        user_id = int(parts[1].decode("utf-8"))
+        exp = int(parts[2].decode("utf-8"))
         sig = parts[3]
-        secret = (current_app.config.get('SECRET_KEY') or 'secret').encode('utf-8')
-        mac = hmac.new(secret, (parts[0]+b'.'+parts[1]+b'.'+parts[2]), hashlib.sha256).digest()
+        secret = (current_app.config.get("SECRET_KEY") or "secret").encode("utf-8")
+        mac = hmac.new(
+            secret, (parts[0] + b"." + parts[1] + b"." + parts[2]), hashlib.sha256
+        ).digest()
         if not hmac.compare_digest(mac, sig):
             return None
         if time.time() > exp:
             return None
-        return { 'task_id': task_id, 'user_id': user_id, 'exp': exp }
+        return {"task_id": task_id, "user_id": user_id, "exp": exp}
     except Exception:
         return None
 
 
-@api_bp.route('/export/tasks/<task_id>/signed-url', methods=['GET'])
+@api_bp.route("/export/tasks/<task_id>/signed-url", methods=["GET"])
 @login_required
 def api_export_task_signed_url(task_id):
     # 仅管理员或创建者可生成
-    job = ExportJob.query.get(task_id)
+    job = db.session.get(ExportJob, task_id)
     if not job:
-        return jsonify({'error':'not found'}), 404
-    if current_user.role != 'admin' and job.user_id != current_user.id:
-        return jsonify({'error':'forbidden'}), 403
-    ttl = current_app.config.get('DOWNLOAD_LINK_TTL_SECONDS', 3600)
+        return jsonify({"error": "not found"}), 404
+    if current_user.role != "admin" and job.user_id != current_user.id:
+        return jsonify({"error": "forbidden"}), 403
+    ttl = current_app.config.get("DOWNLOAD_LINK_TTL_SECONDS", 3600)
     token = _sign_download_token(task_id, job.user_id, ttl)
-    url = url_for('api.api_export_task_download_signed', token=token, _external=True)
-    return jsonify({ 'url': url, 'ttl_seconds': ttl })
+    url = url_for("api.api_export_task_download_signed", token=token, _external=True)
+    return jsonify({"url": url, "ttl_seconds": ttl})
 
 
-@api_bp.route('/export/download', methods=['GET'])
+@api_bp.route("/export/download", methods=["GET"])
 @login_required
 def api_export_task_download_signed():
-    token = request.args.get('token')
-    data = _verify_download_token(token or '')
+    token = request.args.get("token")
+    data = _verify_download_token(token or "")
     if not data:
-        return jsonify({'error':'invalid_or_expired'}), 400
-    task_id = data['task_id']; user_id = data['user_id']
+        return jsonify({"error": "invalid_or_expired"}), 400
+    task_id = data["task_id"]
+    user_id = data["user_id"]
     # 校验 DB 与文件存在
-    job = ExportJob.query.get(task_id)
+    job = db.session.get(ExportJob, task_id)
     if not job:
-        return jsonify({'error':'not found'}), 404
-    if current_user.role != 'admin' and user_id != current_user.id:
-        return jsonify({'error':'forbidden'}), 403
+        return jsonify({"error": "not found"}), 404
+    if current_user.role != "admin" and user_id != current_user.id:
+        return jsonify({"error": "forbidden"}), 403
     # 导出队列指标（简化版）：统计各状态数量与最老任务等待时长
     try:
-        now = dt.datetime.utcnow()
+        now = dt.datetime.now(dt.timezone.utc)
+
         def _emit(status):
             q = ExportJob.query
-            if current_user.role != 'admin':
+            if current_user.role != "admin":
                 q = q.filter(ExportJob.user_id == current_user.id)
             qs = q.filter(ExportJob.status == status)
             _EXPORT_TASKS.labels(status).set(qs.count())
@@ -3225,98 +4290,112 @@ def api_export_task_download_signed():
             if oldest:
                 age = (now - (oldest.created_at or now)).total_seconds()
                 _EXPORT_OLDEST_SECONDS.labels(status).set(max(age, 0))
-        for st in ['pending','running','completed','failed']:
+
+        for st in ["pending", "running", "completed", "failed"]:
             _emit(st)
     except Exception:
         pass
 
-    if job.status != 'completed' or not job.file_path or not os.path.isfile(job.file_path):
-        return jsonify({'error':'not ready'}), 400
+    if job.status != "completed" or not job.file_path or not os.path.isfile(job.file_path):
+        return jsonify({"error": "not ready"}), 400
     return send_file(job.file_path, as_attachment=True)
 
 
-@api_bp.route('/export/tasks/<task_id>/download', methods=['GET'])
+@api_bp.route("/export/tasks/<task_id>/download", methods=["GET"])
 @login_required
 def api_export_task_download(task_id):
     t = _export_tasks.get(task_id)
     if not t:
         # 回退到持久化
-        job = ExportJob.query.get(task_id)
+        job = db.session.get(ExportJob, task_id)
         if not job:
-            return jsonify({ 'error': 'not found' }), 404
-        if current_user.role != 'admin' and job.user_id != current_user.id:
-            return jsonify({ 'error': 'forbidden' }), 403
-        if job.status != 'completed' or not job.file_path or not os.path.isfile(job.file_path):
-            return jsonify({ 'error': 'not ready' }), 400
+            return jsonify({"error": "not found"}), 404
+        if current_user.role != "admin" and job.user_id != current_user.id:
+            return jsonify({"error": "forbidden"}), 403
+        if job.status != "completed" or not job.file_path or not os.path.isfile(job.file_path):
+            return jsonify({"error": "not ready"}), 400
         return send_file(job.file_path, as_attachment=True)
-    if current_user.role != 'admin' and t.user_id != current_user.id:
-        return jsonify({ 'error': 'forbidden' }), 403
-    if t.status != 'completed':
-        return jsonify({ 'error': 'not ready' }), 400
+    if current_user.role != "admin" and t.user_id != current_user.id:
+        return jsonify({"error": "forbidden"}), 403
+    if t.status != "completed":
+        return jsonify({"error": "not ready"}), 400
     return send_file(t.file, as_attachment=True)
 
 
-@api_bp.route('/export/my-tasks', methods=['GET'])
+@api_bp.route("/export/my-tasks", methods=["GET"])
 @login_required
 def api_export_my_tasks():
-    page = request.args.get('page', type=int) or 1
-    page_size = min(max(request.args.get('page_size', type=int) or 20, 1), 200)
-    status = request.args.get('status')  # pending|running|completed|failed
-    qstr = (request.args.get('q') or '').strip()
+    page = request.args.get("page", type=int) or 1
+    page_size = min(max(request.args.get("page_size", type=int) or 20, 1), 200)
+    status = request.args.get("status")  # pending|running|completed|failed
+    qstr = (request.args.get("q") or "").strip()
     q = ExportJob.query
-    if current_user.role != 'admin':
+    if current_user.role != "admin":
         q = q.filter(ExportJob.user_id == current_user.id)
     if status:
         q = q.filter(ExportJob.status == status)
     if qstr:
         like = f"%{qstr}%"
         from sqlalchemy import or_
+
         q = q.filter(or_(ExportJob.id.ilike(like), ExportJob.file_path.ilike(like)))
     total = q.count()
-    rows = q.order_by(ExportJob.created_at.desc()).offset((page-1)*page_size).limit(page_size).all()
+    rows = (
+        q.order_by(ExportJob.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
     def to_obj(j):
-        from json import loads
         import os as _os
+        from json import loads
+
         p = loads(j.params)
+
         # 构造筛选摘要
         def _join(v):
             if isinstance(v, list):
-                return ','.join(v)
-            return str(v or '')
+                return ",".join(v)
+            return str(v or "")
+
         summary = f"考试:{_join(p.get('exam_name') or p.get('exam_names'))} 学科:{p.get('subject_code') or ''} 年级:{_join(p.get('grade_level') or p.get('grade_levels'))} 班级:{_join(p.get('class_name') or p.get('class_names'))} 范围:{p.get('scope') or 'all'} 排序:{p.get('order_by') or 'score_desc'}"
-        file_ready = bool(j.file_path and _os.path.isfile(j.file_path) and j.status=='completed')
+        file_ready = bool(j.file_path and _os.path.isfile(j.file_path) and j.status == "completed")
         file_size = _os.path.getsize(j.file_path) if file_ready else None
         return {
-            'task_id': j.id,
-            'user_id': j.user_id,
-            'status': j.status,
-            'progress': j.progress,
-            'filename': _os.path.basename(j.file_path) if j.file_path else None,
-            'file_ready': file_ready,
-            'file_size': file_size,
-            'created_at': j.created_at.isoformat()+'Z' if j.created_at else None,
-            'finished_at': j.finished_at.isoformat()+'Z' if j.finished_at else None,
-            'summary': summary,
-            'params': p,
+            "task_id": j.id,
+            "user_id": j.user_id,
+            "status": j.status,
+            "progress": j.progress,
+            "filename": _os.path.basename(j.file_path) if j.file_path else None,
+            "file_ready": file_ready,
+            "file_size": file_size,
+            "created_at": j.created_at.isoformat() + "Z" if j.created_at else None,
+            "finished_at": j.finished_at.isoformat() + "Z" if j.finished_at else None,
+            "summary": summary,
+            "params": p,
         }
-    return jsonify({ 'items': [to_obj(r) for r in rows], 'total': total, 'page': page, 'page_size': page_size })
+
+    return jsonify(
+        {"items": [to_obj(r) for r in rows], "total": total, "page": page, "page_size": page_size}
+    )
 
 
-@api_bp.route('/export/my-tasks/batch', methods=['DELETE'])
+@api_bp.route("/export/my-tasks/batch", methods=["DELETE"])
 @login_required
 def api_export_my_tasks_batch_delete():
     data = request.get_json(force=True) or {}
-    ids = data.get('ids') or []
-    status = data.get('status')
+    ids = data.get("ids") or []
+    status = data.get("status")
     q = ExportJob.query
-    if current_user.role != 'admin':
+    if current_user.role != "admin":
         q = q.filter(ExportJob.user_id == current_user.id)
     if status:
         q = q.filter(ExportJob.status == status)
     elif ids:
         q = q.filter(ExportJob.id.in_(ids))
     else:
-        return jsonify({'error':'no_target'}), 400
+        return jsonify({"error": "no_target"}), 400
     rows = q.all()
     removed = 0
     for job in rows:
@@ -3329,23 +4408,25 @@ def api_export_my_tasks_batch_delete():
         removed += 1
         _export_tasks.pop(job.id, None)
     db.session.commit()
-    return jsonify({'removed': removed})
+    return jsonify({"removed": removed})
 
 
 # 简易清理任务：删除过期导出文件（在应用启动后首次调用时触发一次）
 _last_cleanup = None
 
+
 def _cleanup_exports_once():
     global _last_cleanup
     import time
+
     now = time.time()
     if _last_cleanup and now - _last_cleanup < 3600:
         return
     _last_cleanup = now
     try:
-        export_dir = current_app.config.get('EXPORT_DIR', 'exports')
-        days = current_app.config.get('EXPORT_RETENTION_DAYS', 7)
-        cutoff = now - days*86400
+        export_dir = current_app.config.get("EXPORT_DIR", "exports")
+        days = current_app.config.get("EXPORT_RETENTION_DAYS", 7)
+        cutoff = now - days * 86400
         if os.path.isdir(export_dir):
             for name in os.listdir(export_dir):
                 path = os.path.join(export_dir, name)
@@ -3358,226 +4439,287 @@ def _cleanup_exports_once():
         pass
 
 
-@api_bp.route('/config/branding', methods=['GET'])
+@api_bp.route("/config/branding", methods=["GET"])
 def api_config_branding():
     # 从 DB 与 config 合并返回品牌信息；logo 从 /static/logo.png 读取
     base = {
-        'school_name': current_app.config.get('BRAND_SCHOOL_NAME', '某某学校'),
-        'school_name_full': current_app.config.get('BRAND_SCHOOL_NAME_FULL', None),
-        'subtitle': current_app.config.get('BRAND_REPORT_SUBTITLE', '学业质量监测报告'),
-        'cover_color': current_app.config.get('BRAND_REPORT_COVER_COLOR', '#0d6efd'),
-        'header_text': current_app.config.get('BRAND_HEADER_TEXT', None),
-        'footer_text': current_app.config.get('BRAND_FOOTER_TEXT', None),
-        'show_header': current_app.config.get('BRAND_SHOW_HEADER', True),
-        'show_footer': current_app.config.get('BRAND_SHOW_FOOTER', True),
+        "school_name": current_app.config.get("BRAND_SCHOOL_NAME", "某某学校"),
+        "school_name_full": current_app.config.get("BRAND_SCHOOL_NAME_FULL", None),
+        "subtitle": current_app.config.get("BRAND_REPORT_SUBTITLE", "学业质量监测报告"),
+        "cover_color": current_app.config.get("BRAND_REPORT_COVER_COLOR", "#0d6efd"),
+        "header_text": current_app.config.get("BRAND_HEADER_TEXT", None),
+        "footer_text": current_app.config.get("BRAND_FOOTER_TEXT", None),
+        "show_header": current_app.config.get("BRAND_SHOW_HEADER", True),
+        "show_footer": current_app.config.get("BRAND_SHOW_FOOTER", True),
     }
     try:
         from app.models import BrandSetting
+
         m = BrandSetting.get_map()
         # DB 优先覆盖 config 值
         mapping = [
-            ('school_name','BRAND_SCHOOL_NAME'),
-            ('school_name_full','BRAND_SCHOOL_NAME_FULL'),
-            ('subtitle','BRAND_REPORT_SUBTITLE'),
-            ('cover_color','BRAND_REPORT_COVER_COLOR'),
-            ('header_text','BRAND_HEADER_TEXT'),
-            ('footer_text','BRAND_FOOTER_TEXT'),
-            ('show_header','BRAND_SHOW_HEADER'),
-            ('show_footer','BRAND_SHOW_FOOTER'),
+            ("school_name", "BRAND_SCHOOL_NAME"),
+            ("school_name_full", "BRAND_SCHOOL_NAME_FULL"),
+            ("subtitle", "BRAND_REPORT_SUBTITLE"),
+            ("cover_color", "BRAND_REPORT_COVER_COLOR"),
+            ("header_text", "BRAND_HEADER_TEXT"),
+            ("footer_text", "BRAND_FOOTER_TEXT"),
+            ("show_header", "BRAND_SHOW_HEADER"),
+            ("show_footer", "BRAND_SHOW_FOOTER"),
         ]
         for k, cfgk in mapping:
-            if k in m and m[k] is not None and m[k] != '':
+            if k in m and m[k] is not None and m[k] != "":
                 base[k] = m[k]
     except Exception:
         pass
     # logo 文件存在则提供 URL
-    import os, time
-    static_dir = os.path.join(current_app.root_path, 'static')
-    logo_path = os.path.join(static_dir, 'logo.png')
+    import os
+    import time
+
+    static_dir = os.path.join(current_app.root_path, "static")
+    logo_path = os.path.join(static_dir, "logo.png")
     if os.path.exists(logo_path):
         try:
             v = int(os.path.getmtime(logo_path))
         except Exception:
             v = int(time.time())
-        base['logo_url'] = url_for('static', filename='logo.png', _external=False) + f'?v={v}'
+        base["logo_url"] = url_for("static", filename="logo.png", _external=False) + f"?v={v}"
     else:
-        base['logo_url'] = None
+        base["logo_url"] = None
     return jsonify(base)
 
     global _last_cleanup
 
-@api_bp.route('/config/branding', methods=['PUT'])
+
+@api_bp.route("/config/branding", methods=["PUT"])
 # 测试环境下放宽登录限制；生产/开发仍需管理员
 def api_config_branding_update():
-    if not current_app.config.get('TESTING'):
-        if (not current_user.is_authenticated) or getattr(current_user, 'role', None) != 'admin':
-            return jsonify({'error': 'forbidden'}), 403
+    if not current_app.config.get("TESTING"):
+        if (not current_user.is_authenticated) or getattr(current_user, "role", None) != "admin":
+            return jsonify({"error": "forbidden"}), 403
     data = request.get_json(silent=True) or {}
     # 写入 Flask config（进程内生效）并持久化到数据库
     from app.models import BrandSetting
+
     for key, cfg_key in [
-        ('school_name','BRAND_SCHOOL_NAME'),
-        ('school_name_full','BRAND_SCHOOL_NAME_FULL'),
-        ('subtitle','BRAND_REPORT_SUBTITLE'),
-        ('cover_color','BRAND_REPORT_COVER_COLOR'),
-        ('header_text','BRAND_HEADER_TEXT'),
-        ('footer_text','BRAND_FOOTER_TEXT'),
-        ('show_header','BRAND_SHOW_HEADER'),
-        ('show_footer','BRAND_SHOW_FOOTER'),
+        ("school_name", "BRAND_SCHOOL_NAME"),
+        ("school_name_full", "BRAND_SCHOOL_NAME_FULL"),
+        ("subtitle", "BRAND_REPORT_SUBTITLE"),
+        ("cover_color", "BRAND_REPORT_COVER_COLOR"),
+        ("header_text", "BRAND_HEADER_TEXT"),
+        ("footer_text", "BRAND_FOOTER_TEXT"),
+        ("show_header", "BRAND_SHOW_HEADER"),
+        ("show_footer", "BRAND_SHOW_FOOTER"),
     ]:
         if key in data:
             current_app.config[cfg_key] = data[key]
-            row = BrandSetting.query.get(key) or BrandSetting(key=key)
+            row = db.session.get(BrandSetting, key) or BrandSetting(key=key)
             row.value = data[key]
             db.session.add(row)
     db.session.commit()
-    return jsonify({'message':'ok'})
+    return jsonify({"message": "ok"})
 
 
-@api_bp.route('/config/branding', methods=['DELETE'])
+@api_bp.route("/config/branding", methods=["DELETE"])
 # 测试环境下放宽登录限制；生产/开发仍需管理员
 def api_config_branding_reset():
-    if not current_app.config.get('TESTING'):
-        if (not current_user.is_authenticated) or getattr(current_user, 'role', None) != 'admin':
-            return jsonify({'error': 'forbidden'}), 403
+    if not current_app.config.get("TESTING"):
+        if (not current_user.is_authenticated) or getattr(current_user, "role", None) != "admin":
+            return jsonify({"error": "forbidden"}), 403
     # 删除 BrandSetting 中相关键，使系统回退到默认配置
     from app.models import BrandSetting
-    keys = ['school_name','school_name_full','subtitle','cover_color','header_text','footer_text','show_header','show_footer']
+
+    keys = [
+        "school_name",
+        "school_name_full",
+        "subtitle",
+        "cover_color",
+        "header_text",
+        "footer_text",
+        "show_header",
+        "show_footer",
+    ]
     for k in keys:
-        row = BrandSetting.query.get(k)
+        row = db.session.get(BrandSetting, k)
         if row:
             db.session.delete(row)
     db.session.commit()
     # 清空进程内配置（回退默认）
-    for cfg_key in ['BRAND_SCHOOL_NAME','BRAND_SCHOOL_NAME_FULL','BRAND_REPORT_SUBTITLE','BRAND_REPORT_COVER_COLOR','BRAND_HEADER_TEXT','BRAND_FOOTER_TEXT']:
+    for cfg_key in [
+        "BRAND_SCHOOL_NAME",
+        "BRAND_SCHOOL_NAME_FULL",
+        "BRAND_REPORT_SUBTITLE",
+        "BRAND_REPORT_COVER_COLOR",
+        "BRAND_HEADER_TEXT",
+        "BRAND_FOOTER_TEXT",
+    ]:
         if cfg_key in current_app.config:
             current_app.config.pop(cfg_key, None)
-    return jsonify({'message': 'reset to defaults'})
+    return jsonify({"message": "reset to defaults"})
 
-@api_bp.route('/config/branding/logo', methods=['POST'])
+
+@api_bp.route("/config/branding/logo", methods=["POST"])
 def api_config_branding_logo():
     # 测试环境下放宽，无需登录；否则需管理员
-    if not current_app.config.get('TESTING'):
-        if (not current_user.is_authenticated) or getattr(current_user, 'role', None) != 'admin':
-            return jsonify({'error': 'forbidden'}), 403
-    f = request.files.get('file')
+    if not current_app.config.get("TESTING"):
+        if (not current_user.is_authenticated) or getattr(current_user, "role", None) != "admin":
+            return jsonify({"error": "forbidden"}), 403
+    f = request.files.get("file")
     if not f:
-        return jsonify({'error': 'no file'}), 400
+        return jsonify({"error": "no file"}), 400
     # 校验大小（<= 1MB）和类型（PNG）
     import os
-    f.seek(0, os.SEEK_END); size = f.tell(); f.seek(0)
+
+    f.seek(0, os.SEEK_END)
+    size = f.tell()
+    f.seek(0)
     if size > 1 * 1024 * 1024:
-        return jsonify({'error': 'file too large (<=1MB)'}), 400
-    if not (f.mimetype in ('image/png',) or (f.filename or '').lower().endswith('.png')):
-        return jsonify({'error': 'only PNG allowed'}), 400
-    static_dir = os.path.join(current_app.root_path, 'static')
+        return jsonify({"error": "file too large (<=1MB)"}), 400
+
+    # 严格的文件类型验证
+    allowed_mimes = {"image/png"}
+    if f.mimetype not in allowed_mimes:
+        return jsonify({"error": "only PNG allowed"}), 400
+
+    # 验证文件扩展名
+    filename = (f.filename or "").lower()
+    if not filename.endswith(".png"):
+        return jsonify({"error": "only PNG files allowed"}), 400
+
+    # 验证文件头（PNG magic bytes）
+    f.seek(0)
+    header = f.read(8)
+    f.seek(0)
+    png_signature = b'\x89PNG\r\n\x1a\n'
+    if header != png_signature:
+        return jsonify({"error": "invalid PNG file"}), 400
+    static_dir = os.path.join(current_app.root_path, "static")
     os.makedirs(static_dir, exist_ok=True)
-    path = os.path.join(static_dir, 'logo.png')
+    path = os.path.join(static_dir, "logo.png")
     f.save(path)
     import time
+
     try:
         v = int(os.path.getmtime(path))
     except Exception:
         v = int(time.time())
-    return jsonify({'logo_url': url_for('static', filename='logo.png', _external=False) + f'?v={v}'})
+    return jsonify(
+        {"logo_url": url_for("static", filename="logo.png", _external=False) + f"?v={v}"}
+    )
 
-@api_bp.route('/config/branding/logo', methods=['DELETE'])
+
+@api_bp.route("/config/branding/logo", methods=["DELETE"])
 def api_config_branding_logo_delete():
-    if not current_app.config.get('TESTING'):
-        if (not current_user.is_authenticated) or getattr(current_user, 'role', None) != 'admin':
-            return jsonify({'error': 'forbidden'}), 403
-    static_dir = os.path.join(current_app.root_path, 'static')
-    path = os.path.join(static_dir, 'logo.png')
+    if not current_app.config.get("TESTING"):
+        if (not current_user.is_authenticated) or getattr(current_user, "role", None) != "admin":
+            return jsonify({"error": "forbidden"}), 403
+    static_dir = os.path.join(current_app.root_path, "static")
+    path = os.path.join(static_dir, "logo.png")
     try:
         if os.path.isfile(path):
             os.remove(path)
-        return jsonify({'message': 'deleted'})
+        return jsonify({"message": "deleted"})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
-    path = os.path.join(static_dir, 'logo.png')
+    path = os.path.join(static_dir, "logo.png")
     f.save(path)
-    return jsonify({'logo_url': url_for('static', filename='logo.png', _external=False)})
+    return jsonify({"logo_url": url_for("static", filename="logo.png", _external=False)})
 
-@main_bp.route('/admin/branding')
+
+@main_bp.route("/admin/branding")
 @login_required
 def admin_branding_page():
-    if current_user.role != 'admin':
+    if current_user.role != "admin":
         abort(403)
-    return render_template('admin_branding.html')
+    return render_template("admin_branding.html")
+
 
 # 角色权限与模块设置（管理员）
-@api_bp.route('/admin/role-permissions', methods=['GET','PUT'])
+@api_bp.route("/admin/role-permissions", methods=["GET", "PUT"])
 @login_required
 def api_role_permissions():
-    if current_user.role != 'admin':
-        return jsonify({'error':'forbidden'}), 403
-    from app.models import RolePermission
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     import json
-    if request.method == 'GET':
+
+    from app.models import RolePermission
+
+    if request.method == "GET":
         rows = RolePermission.query.all()
+
         def to_obj(r):
             try:
                 mods = json.loads(r.modules) if r.modules else []
             except Exception:
                 mods = []
-            return {'role': r.role, 'modules': mods}
-        return jsonify({'items': [to_obj(r) for r in rows]})
+            return {"role": r.role, "modules": mods}
+
+        return jsonify({"items": [to_obj(r) for r in rows]})
     data = request.get_json(force=True)
-    items = data.get('items') or []
+    items = data.get("items") or []
     for it in items:
-        role = (it.get('role') or '').strip()
-        modules = it.get('modules') or []
-        if not role: continue
-        row = RolePermission.query.get(role) or RolePermission(role=role)
+        role = (it.get("role") or "").strip()
+        modules = it.get("modules") or []
+        if not role:
+            continue
+        row = db.session.get(RolePermission, role) or RolePermission(role=role)
         try:
             row.modules = json.dumps([m for m in modules if isinstance(m, str)], ensure_ascii=False)
         except Exception:
             row.modules = json.dumps([], ensure_ascii=False)
         db.session.add(row)
     db.session.commit()
-    return jsonify({'message':'updated'})
+    return jsonify({"message": "updated"})
 
-@api_bp.route('/admin/module-settings', methods=['GET','PUT'])
+
+@api_bp.route("/admin/module-settings", methods=["GET", "PUT"])
 @login_required
 def api_module_settings():
-    if current_user.role != 'admin':
-        return jsonify({'error':'forbidden'}), 403
-    from app.models import ModuleSetting
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     import json
-    if request.method == 'GET':
+
+    from app.models import ModuleSetting
+
+    if request.method == "GET":
         rows = ModuleSetting.query.all()
+
         def to_obj(r):
             try:
                 val = json.loads(r.value) if r.value else None
             except Exception:
                 val = None
-            return {'key': r.key, 'value': val}
-        return jsonify({'items': [to_obj(r) for r in rows]})
+            return {"key": r.key, "value": val}
+
+        return jsonify({"items": [to_obj(r) for r in rows]})
     data = request.get_json(force=True)
-    items = data.get('items') or []
+    items = data.get("items") or []
     for it in items:
-        key = (it.get('key') or '').strip()
-        val = it.get('value')
-        if not key: continue
+        key = (it.get("key") or "").strip()
+        val = it.get("value")
+        if not key:
+            continue
         row = ModuleSetting.query.filter_by(key=key).first()
         if not row:
             row = ModuleSetting(key=key)
         row.value = json.dumps(val, ensure_ascii=False)
         db.session.add(row)
-    db.session.commit(); return jsonify({'message':'updated'})
+    db.session.commit()
+    return jsonify({"message": "updated"})
 
-    return render_template('admin_branding.html')
+    return render_template("admin_branding.html")
 
     import time
+
     now = time.time()
     if _last_cleanup and now - _last_cleanup < 3600:
         return
     _last_cleanup = now
     try:
-        export_dir = current_app.config.get('EXPORT_DIR', 'exports')
-        days = current_app.config.get('EXPORT_RETENTION_DAYS', 7)
-        cutoff = now - days*86400
+        export_dir = current_app.config.get("EXPORT_DIR", "exports")
+        days = current_app.config.get("EXPORT_RETENTION_DAYS", 7)
+        cutoff = now - days * 86400
         if os.path.isdir(export_dir):
             for name in os.listdir(export_dir):
                 path = os.path.join(export_dir, name)
@@ -3589,48 +4731,53 @@ def api_module_settings():
     except Exception:
         pass
 
+
 # 删除任务与文件
-@api_bp.route('/export/my-tasks/<task_id>', methods=['DELETE'])
+@api_bp.route("/export/my-tasks/<task_id>", methods=["DELETE"])
 @login_required
 def api_export_task_delete(task_id):
-    job = ExportJob.query.get(task_id)
+    job = db.session.get(ExportJob, task_id)
     if not job:
-        return jsonify({'error': 'not found'}), 404
-    if current_user.role != 'admin' and job.user_id != current_user.id:
-        return jsonify({'error': 'forbidden'}), 403
+        return jsonify({"error": "not found"}), 404
+    if current_user.role != "admin" and job.user_id != current_user.id:
+        return jsonify({"error": "forbidden"}), 403
     try:
         if job.file_path and os.path.isfile(job.file_path):
             os.remove(job.file_path)
     except Exception:
         pass
-    db.session.delete(job); db.session.commit()
+    db.session.delete(job)
+    db.session.commit()
     # 同时清理内存缓存
     if task_id in _export_tasks:
         _export_tasks.pop(task_id, None)
-    return jsonify({'message': 'deleted'})
+    return jsonify({"message": "deleted"})
+
 
 # 在任务创建时尝试触发一次清理
 
 
 def _build_export_file(params: dict, export_dir: str) -> str:
     """按 /api/summary/export 的逻辑生成文件并返回路径"""
+
     # 复用参数解析
     def _multi_param(val):
         out = []
         if isinstance(val, list):
             for v in val:
-                out.extend([s.strip() for s in str(v).split(',') if s.strip()])
+                out.extend([s.strip() for s in str(v).split(",") if s.strip()])
         elif isinstance(val, str):
-            out.extend([s.strip() for s in val.split(',') if s.strip()])
+            out.extend([s.strip() for s in val.split(",") if s.strip()])
         return out
 
-    exam_names = _multi_param(params.get('exam_name') or params.get('exam_names') or [])
-    grade_levels = _multi_param(params.get('grade_level') or params.get('grade_levels') or [])
-    class_names = _multi_param(params.get('class_name') or params.get('class_names') or [])
-    subject_code = params.get('subject_code') or 'TOTAL'
-    fmt = params.get('format') or 'csv'
-    scope = params.get('scope') or 'all'
-    order_by = params.get('order_by') or 'score_desc'
+    exam_names = _multi_param(params.get("exam_name") or params.get("exam_names") or [])
+    grade_levels = _multi_param(params.get("grade_level") or params.get("grade_levels") or [])
+    class_names = _multi_param(params.get("class_name") or params.get("class_names") or [])
+    subject_code = params.get("subject_code") or "TOTAL"
+    fmt = params.get("format") or "csv"
+    scope = params.get("scope") or "all"
+    order_by = params.get("order_by") or "score_desc"
+    student_id = (params.get("student_id") or "").strip()
 
     # 组装查询（与 api_summary_export 一致的过滤）
     q = Grade.query.join(Student).join(Course)
@@ -3642,68 +4789,81 @@ def _build_export_file(params: dict, export_dir: str) -> str:
         q = q.filter(Student.class_name.in_(class_names))
     if subject_code:
         q = q.filter(Course.code == subject_code)
+    if student_id:
+        q = q.filter(Student.student_id == student_id)
     # 非管理员可见范围：后台任务默认使用当前用户上下文，这里省略，生产可改为传入用户ID按其限制
 
     # 排序
-    if order_by == 'score_desc':
+    if order_by == "score_desc":
         q = q.order_by(Grade.score.desc())
-    elif order_by == 'score_asc':
+    elif order_by == "score_asc":
         q = q.order_by(Grade.score.asc())
 
     # 范围
-    if scope == 'current_page':
-        page = int(params.get('page') or 1)
-        page_size = int(params.get('page_size') or 50)
-        q = q.offset((page-1)*page_size).limit(page_size)
+    if scope == "current_page":
+        page = int(params.get("page") or 1)
+        page_size = int(params.get("page_size") or 50)
+        q = q.offset((page - 1) * page_size).limit(page_size)
 
     # scope=current_page 时尝试复用 summary_list 缓存
     rows = None
-    if scope == 'current_page':
+    if scope == "current_page":
         try:
+            import hashlib as _hashlib
+            import json as _json
+
             from flask import current_app
-            import json as _json, hashlib as _hashlib
-            rurl = current_app.config.get('REDIS_URL')
+
+            rurl = current_app.config.get("REDIS_URL")
             if rurl:
                 import redis as _redis
-                rc = getattr(current_app, '_redis_cli', None)
+
+                rc = getattr(current_app, "_redis_cli", None)
                 if rc is None:
                     rc = _redis.from_url(rurl, decode_responses=True)
                     current_app._redis_cli = rc
-                page = int(params.get('page') or 1)
-                page_size = int(params.get('page_size') or 50)
+                page = int(params.get("page") or 1)
+                page_size = int(params.get("page_size") or 50)
                 key_payload = {
-                    'ns': 'summary_list:' + (_cache_nsver(current_app,'summary') or ''),
-                    'exam_names': sorted(exam_names),
-                    'grade_levels': sorted(grade_levels),
-                    'class_names': sorted(class_names),
-                    'subject_code': subject_code,
-                    'user': int(params.get('user_id') or 0),
-                    'page': page,
-                    'page_size': page_size,
+                    "ns": "summary_list:" + (_cache_nsver(current_app, "summary") or ""),
+                    "exam_names": sorted(exam_names),
+                    "grade_levels": sorted(grade_levels),
+                    "class_names": sorted(class_names),
+                    "subject_code": subject_code,
+                    "user": int(params.get("user_id") or 0),
+                    "page": page,
+                    "page_size": page_size,
                 }
-                key = 'gas:sumlist:' + _hashlib.md5(_json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                key = (
+                    "gas:sumlist:"
+                    + _hashlib.md5(
+                        _json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+                    ).hexdigest()
+                )
                 cached = rc.get(key)
                 if cached:
                     try:
                         payload = _json.loads(cached)
-                        items = payload.get('items') or []
+                        items = payload.get("items") or []
                         data_rows = []
                         for it in items:
-                            data_rows.append({
-                                'student_id': it.get('student_id'),
-                                'name': it.get('student_name') or it.get('name'),
-                                'class_name': it.get('class_name'),
-                                'grade_level': it.get('grade_level'),
-                                'score': it.get('score'),
-                                'percentage': it.get('percentage'),
-                                'letter': it.get('letter'),
-                                'class_rank': it.get('class_rank'),
-                                'grade_rank': it.get('grade_rank'),
-                                'rule_version': it.get('rule_version'),
-                            })
+                            data_rows.append(
+                                {
+                                    "student_id": it.get("student_id"),
+                                    "name": it.get("student_name") or it.get("name"),
+                                    "class_name": it.get("class_name"),
+                                    "grade_level": it.get("grade_level"),
+                                    "score": it.get("score"),
+                                    "percentage": it.get("percentage"),
+                                    "letter": it.get("letter"),
+                                    "class_rank": it.get("class_rank"),
+                                    "grade_rank": it.get("grade_rank"),
+                                    "rule_version": it.get("rule_version"),
+                                }
+                            )
                             # 命中缓存
                             try:
-                                _CACHE_HITS.labels('export_list').inc()
+                                _CACHE_HITS.labels("export_list").inc()
                             except Exception:
                                 pass
                             rows = []  # 清空 rows，避免下方逻辑重复计算
@@ -3717,44 +4877,48 @@ def _build_export_file(params: dict, export_dir: str) -> str:
         rows = q.all()
 
     # 列控制
-    columns_param = params.get('columns')
-    selected_cols = [c.strip() for c in columns_param.split(',')] if columns_param else None
+    columns_param = params.get("columns")
+    selected_cols = [c.strip() for c in columns_param.split(",")] if columns_param else None
     header_map = {
-        'student_id': '学号',
-        'name': '姓名',
-        'class_name': '班级',
-        'grade_level': '年级',
-        'score': '分数',
-        'percentage': '百分比',
-        'letter': '等第',
-        'class_rank': '班级排名',
-        'grade_rank': '年级排名',
-        'rule_version': '规则版本',
+        "student_id": "学号",
+        "name": "姓名",
+        "class_name": "班级",
+        "grade_level": "年级",
+        "score": "分数",
+        "percentage": "百分比",
+        "letter": "等第",
+        "class_rank": "班级排名",
+        "grade_rank": "年级排名",
+        "rule_version": "规则版本",
     }
-    default_cols = ['student_id','name','class_name','grade_level','score','letter']
+    default_cols = ["student_id", "name", "class_name", "grade_level", "score", "letter"]
     use_cols = [c for c in (selected_cols or default_cols) if c in header_map]
 
     # 计算辅助
     from app.utils import grade_letter_for
+
     max_cache = {}
     from collections import defaultdict
+
     by_class = defaultdict(list)
     by_grade = defaultdict(list)
     for g in rows:
         by_class[g.student.class_name].append((g.student_id, g.score))
         by_grade[g.student.grade_level].append((g.student_id, g.score))
+
     def rank_map(pairs):
         pairs_sorted = sorted(pairs, key=lambda x: x[1], reverse=True)
-        return { sid: i for i, (sid, _) in enumerate(pairs_sorted, 1) }
+        return {sid: i for i, (sid, _) in enumerate(pairs_sorted, 1)}
+
     class_rank_map = {k: rank_map(v) for k, v in by_class.items()}
     grade_rank_map = {k: rank_map(v) for k, v in by_grade.items()}
 
     data_rows = []
     for g in rows:
-        key = (g.exam_type or 'regular', g.course.code)
+        key = (g.exam_type or "regular", g.course.code)
         if key in max_cache:
             try:
-                _CACHE_MISSES.labels('export_list').inc()
+                _CACHE_MISSES.labels("export_list").inc()
             except Exception:
                 pass
 
@@ -3763,99 +4927,130 @@ def _build_export_file(params: dict, export_dir: str) -> str:
             s = ExamScheme.query.filter_by(exam_type=key[0], subject_code=key[1]).first()
             max_score = s.max_score if s else None
             max_cache[key] = max_score
-        perc = round(float(g.score)/float(max_score)*100.0,2) if (max_score and max_score>0) else None
-        data_rows.append({
-            'student_id': g.student.student_id,
-            'name': g.student.name,
-            'class_name': g.student.class_name,
-            'grade_level': g.student.grade_level,
-            'score': g.score,
-            'percentage': perc,
-            'letter': grade_letter_for(g.exam_name or 'default', g.course.code, g.score),
-            'class_rank': class_rank_map.get(g.student.class_name, {}).get(g.student_id),
-            'grade_rank': grade_rank_map.get(g.student.grade_level, {}).get(g.student_id),
-            'rule_version': None,
-        })
+        perc = (
+            round(float(g.score) / float(max_score) * 100.0, 2)
+            if (max_score and max_score > 0)
+            else None
+        )
+        data_rows.append(
+            {
+                "student_id": g.student.student_id,
+                "name": g.student.name,
+                "class_name": g.student.class_name,
+                "grade_level": g.student.grade_level,
+                "score": g.score,
+                "percentage": perc,
+                "letter": grade_letter_for(g.exam_name or "default", g.course.code, g.score),
+                "class_rank": class_rank_map.get(g.student.class_name, {}).get(g.student_id),
+                "grade_rank": grade_rank_map.get(g.student.grade_level, {}).get(g.student_id),
+                "rule_version": None,
+            }
+        )
 
     # 文件名
     def _safe_name(s: str) -> str:
         import re
-        return re.sub(r'[^\w\-\u4e00-\u9fa5]+', '_', s)[:40]
+
+        return re.sub(r"[^\w\-\u4e00-\u9fa5]+", "_", s)[:40]
+
     import datetime as _dt
-    ts = _dt.datetime.now().strftime('%Y%m%d_%H%M%S')
-    name_exam = '-'.join(exam_names) if exam_names else '全部考试'
-    name_subject = subject_code or '全部学科'
-    name_gl = '-'.join(grade_levels) if grade_levels else '全部年级'
-    name_cl = '-'.join(class_names) if class_names else '全部班级'
-    base_name = f"{_safe_name(name_exam)}_{_safe_name(name_subject)}_{_safe_name(name_gl)}_{_safe_name(name_cl)}_{_safe_name(scope)}_{_safe_name(order_by)}_{ts}"
+
+    ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    name_exam = "-".join(exam_names) if exam_names else "全部考试"
+    name_subject = subject_code or "全部学科"
+    name_gl = "-".join(grade_levels) if grade_levels else "全部年级"
+    name_cl = "-".join(class_names) if class_names else "全部班级"
+    sid = (params.get("student_id") or "").strip()
+    sid_part = f"_SID-{_safe_name(sid)}" if sid else ""
+    base_name = f"{_safe_name(name_exam)}_{_safe_name(name_subject)}_{_safe_name(name_gl)}_{_safe_name(name_cl)}{sid_part}_{_safe_name(scope)}_{_safe_name(order_by)}_{ts}"
 
     # 写文件
-    if fmt == 'xlsx':
+    if fmt == "xlsx":
         try:
             from openpyxl import Workbook
+
             wb = Workbook(write_only=True)
             ws = wb.create_sheet()
             # 品牌说明工作表（封面）
             try:
-                cover = wb.create_sheet(title='说明')
-                cover.append(['学校', current_app.config.get('BRAND_SCHOOL_NAME_FULL') or current_app.config.get('BRAND_SCHOOL_NAME') or '某某学校'])
-                cover.append(['副标题', current_app.config.get('BRAND_REPORT_SUBTITLE') or '学业质量监测报告'])
-                cover.append(['导出时间', _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
-                cover.append(['科目', name_subject])
-                cover.append(['年级', name_gl])
-                cover.append(['班级', name_cl])
-                cover.append(['考试', name_exam])
-                cover.append(['范围/排序', f'{scope}/{order_by}'])
+                cover = wb.create_sheet(title="说明")
+                cover.append(
+                    [
+                        "学校",
+                        current_app.config.get("BRAND_SCHOOL_NAME_FULL")
+                        or current_app.config.get("BRAND_SCHOOL_NAME")
+                        or "某某学校",
+                    ]
+                )
+                cover.append(
+                    [
+                        "副标题",
+                        current_app.config.get("BRAND_REPORT_SUBTITLE") or "学业质量监测报告",
+                    ]
+                )
+                cover.append(["导出时间", _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+                cover.append(["科目", name_subject])
+                cover.append(["年级", name_gl])
+                cover.append(["班级", name_cl])
+                cover.append(["考试", name_exam])
+                cover.append(["范围/排序", f"{scope}/{order_by}"])
             except Exception:
                 pass
 
             ws.append([header_map[c] for c in use_cols])
             for rec in data_rows:
-                ws.append([rec.get(c, '') for c in use_cols])
+                ws.append([rec.get(c, "") for c in use_cols])
             filepath = os.path.join(export_dir, f"{base_name}.xlsx")
             wb.save(filepath)
             return filepath
         except Exception:
             import pandas as pd
+
             filepath = os.path.join(export_dir, f"{base_name}.xlsx")
-            import pandas as pd
-            import numpy as np
             import io as _io
             import json as _json
+
+            import numpy as np
+            import pandas as pd
+
             # 防御性：如环境没有 pandas，则回退 csv
             try:
-                pd.DataFrame([{header_map[c]: r.get(c, '') for c in use_cols} for r in data_rows]).to_excel(filepath, index=False)
+                pd.DataFrame(
+                    [{header_map[c]: r.get(c, "") for c in use_cols} for r in data_rows]
+                ).to_excel(filepath, index=False)
                 return filepath
             except Exception:
-                fmt = 'csv'
+                fmt = "csv"
     # csv
     import csv
+
     filepath = os.path.join(export_dir, f"{base_name}.csv")
-    with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
+    with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([header_map[c] for c in use_cols])
         for rec in data_rows:
-            writer.writerow([rec.get(c, '') for c in use_cols])
+            writer.writerow([rec.get(c, "") for c in use_cols])
     return filepath
 
 
-
 # 诊断 API（管理员）：构造典型查询，返回 EXPLAIN 计划与耗时
-@api_bp.route('/diagnostics/run', methods=['POST'])
+@api_bp.route("/diagnostics/run", methods=["POST"])
 @login_required
 def api_diagnostics_run():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     import time
+
     from sqlalchemy import text
+
     payload = request.get_json(force=True) or {}
-    exam_names = payload.get('exam_names') or []
-    grade_levels = payload.get('grade_levels') or []
-    class_names = payload.get('class_names') or []
-    subject_code = payload.get('subject_code') or 'TOTAL'
-    order_by = payload.get('order_by') or 'score_desc'
-    page = int(payload.get('page') or 1)
-    page_size = int(payload.get('page_size') or 50)
+    exam_names = payload.get("exam_names") or []
+    grade_levels = payload.get("grade_levels") or []
+    class_names = payload.get("class_names") or []
+    subject_code = payload.get("subject_code") or "TOTAL"
+    order_by = payload.get("order_by") or "score_desc"
+    page = int(payload.get("page") or 1)
+    page_size = int(payload.get("page_size") or 50)
 
     def build_q(base_q):
         q = base_q
@@ -3867,9 +5062,9 @@ def api_diagnostics_run():
             q = q.filter(Student.class_name.in_(class_names))
         if subject_code:
             q = q.filter(Course.code == subject_code)
-        if order_by == 'score_desc':
+        if order_by == "score_desc":
             q = q.order_by(Grade.score.desc())
-        elif order_by == 'score_asc':
+        elif order_by == "score_asc":
             q = q.order_by(Grade.score.asc())
         return q
 
@@ -3882,97 +5077,129 @@ def api_diagnostics_run():
     t_count = (time.time() - t0) * 1000
 
     t1 = time.time()
-    page_rows = list_q.offset((page-1)*page_size).limit(page_size).all()
+    page_rows = list_q.offset((page - 1) * page_size).limit(page_size).all()
     t_page = (time.time() - t1) * 1000
 
     # EXPLAIN
     engine = db.engine
     dialect = engine.name  # 'sqlite', 'postgresql', 'mysql', ...
-    compiled = list_q.statement.compile(dialect=engine.dialect, compile_kwargs={"literal_binds": True})
+    compiled = list_q.statement.compile(
+        dialect=engine.dialect, compile_kwargs={"literal_binds": True}
+    )
     sql = str(compiled)
-    if dialect == 'sqlite':
+    if dialect == "sqlite":
         explain_sql = f"EXPLAIN QUERY PLAN {sql}"
-    elif dialect == 'postgresql':
+    elif dialect == "postgresql":
         explain_sql = f"EXPLAIN (FORMAT TEXT) {sql}"
     else:
         explain_sql = f"EXPLAIN {sql}"
-    rows = engine.execute(text(explain_sql)).fetchall()
+    with engine.connect() as conn:
+        rows = conn.execute(text(explain_sql)).fetchall()
     plan = [" ".join([str(x) for x in r]) for r in rows]
 
     # 慢阈值日志（含 SQL 摘要）
     try:
         import logging
-        threshold = current_app.config.get('SLOW_QUERY_MS', 500)
+
+        threshold = current_app.config.get("SLOW_QUERY_MS", 500)
         if t_count > threshold or t_page > threshold:
-            snippet = (sql or '')
+            snippet = sql or ""
             if len(snippet) > 300:
-                snippet = snippet[:300] + '...'
-            logging.getLogger('slow').warning(f"DIAG slow: count={t_count:.1f}ms page={t_page:.1f}ms SQL={snippet}")
+                snippet = snippet[:300] + "..."
+            logging.getLogger("slow").warning(
+                f"DIAG slow: count={t_count:.1f}ms page={t_page:.1f}ms SQL={snippet}"
+            )
     except Exception:
         pass
 
-    return jsonify({
-        'filters': {
-            'exam_names': exam_names,
-            'grade_levels': grade_levels,
-            'class_names': class_names,
-            'subject_code': subject_code,
-            'order_by': order_by,
-            'page': page,
-            'page_size': page_size,
-        },
-        'count_ms': round(t_count, 2),
-        'page_ms': round(t_page, 2),
-        'plan': plan,
-        'total': total,
-        'page_rows': len(page_rows),
-        'dialect': dialect,
-        'sql': sql,
-    })
+    return jsonify(
+        {
+            "filters": {
+                "exam_names": exam_names,
+                "grade_levels": grade_levels,
+                "class_names": class_names,
+                "subject_code": subject_code,
+                "order_by": order_by,
+                "page": page,
+                "page_size": page_size,
+            },
+            "count_ms": round(t_count, 2),
+            "page_ms": round(t_page, 2),
+            "plan": plan,
+            "total": total,
+            "page_rows": len(page_rows),
+            "dialect": dialect,
+            "sql": sql,
+        }
+    )
 
 
 # 诊断预设 CRUD（管理员）
-@api_bp.route('/diagnostics/presets', methods=['GET'])
+@api_bp.route("/diagnostics/presets", methods=["GET"])
 @login_required
 def api_diag_presets_list():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
-    mine = DiagnosticPreset.query.filter_by(user_id=current_user.id).order_by(DiagnosticPreset.id.desc()).all()
-    shared = DiagnosticPreset.query.filter_by(is_shared=True).order_by(DiagnosticPreset.id.desc()).all()
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    mine = (
+        DiagnosticPreset.query.filter_by(user_id=current_user.id)
+        .order_by(DiagnosticPreset.id.desc())
+        .all()
+    )
+    shared = (
+        DiagnosticPreset.query.filter_by(is_shared=True).order_by(DiagnosticPreset.id.desc()).all()
+    )
     import json
+
     def to_obj(p):
-        return { 'id': p.id, 'name': p.name, 'group_name': p.group_name, 'is_shared': p.is_shared, 'payload': json.loads(p.payload) }
-    return jsonify({ 'mine': [to_obj(p) for p in mine], 'shared': [to_obj(p) for p in shared] })
+        return {
+            "id": p.id,
+            "name": p.name,
+            "group_name": p.group_name,
+            "is_shared": p.is_shared,
+            "payload": json.loads(p.payload),
+        }
+
+    return jsonify({"mine": [to_obj(p) for p in mine], "shared": [to_obj(p) for p in shared]})
 
 
-@api_bp.route('/diagnostics/presets', methods=['POST'])
+@api_bp.route("/diagnostics/presets", methods=["POST"])
 @login_required
 def api_diag_preset_create():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(force=True)
-    name = (data.get('name') or '').strip()
-    group_name = (data.get('group_name') or '').strip() or None
-    is_shared = bool(data.get('is_shared') or False)
-    payload = data.get('payload') or {}
+    name = (data.get("name") or "").strip()
+    group_name = (data.get("group_name") or "").strip() or None
+    is_shared = bool(data.get("is_shared") or False)
+    payload = data.get("payload") or {}
     if not name:
-        return jsonify({'error': 'name required'}), 400
+        return jsonify({"error": "name required"}), 400
     import json
-    p = DiagnosticPreset(user_id=current_user.id, name=name, group_name=group_name, is_shared=is_shared, payload=json.dumps(payload, ensure_ascii=False))
-    db.session.add(p); db.session.commit()
-    return jsonify({'id': p.id, 'name': p.name})
+
+    p = DiagnosticPreset(
+        user_id=current_user.id,
+        name=name,
+        group_name=group_name,
+        is_shared=is_shared,
+        payload=json.dumps(payload, ensure_ascii=False),
+    )
+    db.session.add(p)
+    db.session.commit()
+    return jsonify({"id": p.id, "name": p.name})
 
 
-@api_bp.route('/diagnostics/presets/<int:preset_id>', methods=['PUT'])
+@api_bp.route("/diagnostics/presets/<int:preset_id>", methods=["PUT"])
 @login_required
 def api_diag_preset_rename(preset_id):
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(force=True)
-    name = (data.get('name') or '').strip()
-    group_name = (data.get('group_name') or '').strip() or None
-    is_shared = data.get('is_shared')
-    p = DiagnosticPreset.query.filter_by(id=preset_id, user_id=current_user.id).first_or_404()
+    name = (data.get("name") or "").strip()
+    group_name = (data.get("group_name") or "").strip() or None
+    is_shared = data.get("is_shared")
+    p = DiagnosticPreset.query.filter_by(id=preset_id, user_id=current_user.id).first()
+    if not p:
+        abort(404)
     if name:
         p.name = name
     if group_name is not None:
@@ -3980,392 +5207,561 @@ def api_diag_preset_rename(preset_id):
     if is_shared is not None:
         p.is_shared = bool(is_shared)
     db.session.commit()
-    return jsonify({'message':'renamed'})
+    return jsonify({"message": "renamed"})
 
 
-@api_bp.route('/diagnostics/presets/<int:preset_id>', methods=['DELETE'])
+@api_bp.route("/diagnostics/presets/<int:preset_id>", methods=["DELETE"])
 @login_required
 def api_diag_preset_delete(preset_id):
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
-    p = DiagnosticPreset.query.filter_by(id=preset_id, user_id=current_user.id).first_or_404()
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    p = DiagnosticPreset.query.filter_by(id=preset_id, user_id=current_user.id).first()
+    if not p:
+        abort(404)
     db.session.delete(p)
     db.session.commit()
-    return jsonify({'message':'deleted'})
+    return jsonify({"message": "deleted"})
 
 
 # 用户管理 API（管理员）
-@api_bp.route('/users', methods=['GET'])
+@api_bp.route("/users", methods=["GET"])
 @login_required
 def api_users_list():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
-    qstr = request.args.get('q', '').strip()
-    page = request.args.get('page', type=int) or 1
-    page_size = min(max(request.args.get('page_size', type=int) or 20, 1), 200)
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    qstr = request.args.get("q", "").strip()
+    page = request.args.get("page", type=int) or 1
+    page_size = min(max(request.args.get("page_size", type=int) or 20, 1), 200)
     q = User.query
     if qstr:
         like = f"%{qstr}%"
         q = q.filter((User.username.ilike(like)) | (User.email.ilike(like)))
     # COUNT 微缓存：按筛选组合缓存短时间的 total
     try:
+        import json
+        import time
         from hashlib import md5
-        import json, time
-        ttl = current_app.config.get('SUMMARY_COUNT_TTL_SECONDS', 60)
-        cache = getattr(current_app, '_summary_count_cache', None)
+
+        ttl = current_app.config.get("SUMMARY_COUNT_TTL_SECONDS", 60)
+        cache = getattr(current_app, "_summary_count_cache", None)
         if cache is None:
-            cache = {}; current_app._summary_count_cache = cache
+            cache = {}
+            current_app._summary_count_cache = cache
         key_payload = {
-            'exam_names': sorted(exam_names),
-            'grade_levels': sorted(grade_levels),
-            'class_names': sorted(class_names),
-            'subject_code': subject_code,
-            'user_gl': sorted([s.strip() for s in (current_user.allowed_grade_levels or '').split(',') if s.strip()]) if (not current_user.is_anonymous and current_user.role!='admin') else [],
-            'user_cl': sorted([s.strip() for s in (current_user.allowed_class_names or '').split(',') if s.strip()]) if (not current_user.is_anonymous and current_user.role!='admin') else [],
+            "exam_names": sorted(exam_names),
+            "grade_levels": sorted(grade_levels),
+            "class_names": sorted(class_names),
+            "subject_code": subject_code,
+            "user_gl": (
+                sorted(
+                    [
+                        s.strip()
+                        for s in (current_user.allowed_grade_levels or "").split(",")
+                        if s.strip()
+                    ]
+                )
+                if (not current_user.is_anonymous and current_user.role != "admin")
+                else []
+            ),
+            "user_cl": (
+                sorted(
+                    [
+                        s.strip()
+                        for s in (current_user.allowed_class_names or "").split(",")
+                        if s.strip()
+                    ]
+                )
+                if (not current_user.is_anonymous and current_user.role != "admin")
+                else []
+            ),
         }
-        key = md5(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        key = md5(
+            json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
         now = time.time()
         entry = cache.get(key)
-        if entry and now - entry['ts'] < ttl:
-            total = entry['total']
+        if entry and now - entry["ts"] < ttl:
+            total = entry["total"]
         else:
             total = q.with_entities(db.func.count()).scalar()
-            cache[key] = {'total': total, 'ts': now}
+            cache[key] = {"total": total, "ts": now}
     except Exception:
         total = q.with_entities(db.func.count()).scalar()
-    users = q.order_by(User.id.asc()).offset((page-1)*page_size).limit(page_size).all()
-    return jsonify({
-        'items': [
-            {
-                'id': u.id,
-                'username': u.username,
-                'email': u.email,
-                'role': u.role,
-                'allowed_grade_levels': u.allowed_grade_levels or '',
-                'allowed_class_names': u.allowed_class_names or '',
-            } for u in users
-        ],
-        'total': total,
-        'page': page,
-        'page_size': page_size,
-    })
+    users = q.order_by(User.id.asc()).offset((page - 1) * page_size).limit(page_size).all()
+    return jsonify(
+        {
+            "items": [
+                {
+                    "id": u.id,
+                    "username": u.username,
+                    "email": u.email,
+                    "role": u.role,
+                    "allowed_grade_levels": u.allowed_grade_levels or "",
+                    "allowed_class_names": u.allowed_class_names or "",
+                }
+                for u in users
+            ],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+    )
+
 
 # 导出用户列表（按当前搜索过滤，不分页）
-@api_bp.route('/users/export', methods=['GET'])
+@api_bp.route("/users/export", methods=["GET"])
 @login_required
 def api_users_export():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
-    qstr = request.args.get('q', '').strip()
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    qstr = request.args.get("q", "").strip()
     q = User.query
     if qstr:
         like = f"%{qstr}%"
         q = q.filter((User.username.ilike(like)) | (User.email.ilike(like)))
     rows = q.order_by(User.id.asc()).all()
-    import io, csv
+    import csv
+    import io
+
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(['id','username','email','role','allowed_grade_levels','allowed_class_names'])
+    writer.writerow(
+        ["id", "username", "email", "role", "allowed_grade_levels", "allowed_class_names"]
+    )
     for u in rows:
-        writer.writerow([u.id, u.username or '', u.email or '', u.role or '', u.allowed_grade_levels or '', u.allowed_class_names or ''])
+        writer.writerow(
+            [
+                u.id,
+                u.username or "",
+                u.email or "",
+                u.role or "",
+                u.allowed_grade_levels or "",
+                u.allowed_class_names or "",
+            ]
+        )
     from flask import Response
-    data = '\ufeff' + buf.getvalue()
-    return Response(data, mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename=users.csv'})
+
+    data = "\ufeff" + buf.getvalue()
+    return Response(
+        data,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=users.csv"},
+    )
 
 
-@api_bp.route('/users', methods=['POST'])
+@api_bp.route("/users", methods=["POST"])
 @login_required
 def api_user_create():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(force=True)
-    items = data.get('items')
+    items = data.get("items")
     if items and isinstance(items, list):
         # 批量创建
-        created = 0; existed = 0
+        created = 0
+        existed = 0
         for it in items:
-            username = (it.get('username') or '').strip()
-            email = (it.get('email') or '').strip()
-            role = it.get('role') or 'teacher'
-            pwd = it.get('password') or '123456'
+            username = (it.get("username") or "").strip()
+            email = (it.get("email") or "").strip()
+            role = it.get("role") or "teacher"
+            pwd = it.get("password") or "123456"
             if not username or not email:
                 continue
-            if User.query.filter((User.username==username)|(User.email==email)).first():
-                existed += 1; continue
+            if User.query.filter((User.username == username) | (User.email == email)).first():
+                existed += 1
+                continue
             u = User(username=username, email=email, role=role)
             u.set_password(pwd)
             db.session.add(u)
             created += 1
         db.session.commit()
-        return jsonify({'message': 'batch created', 'created': created, 'existed': existed})
+        return jsonify({"message": "batch created", "created": created, "existed": existed})
     # 单个创建
-    username = (data.get('username') or '').strip()
-    email = (data.get('email') or '').strip()
-    role = data.get('role') or 'teacher'
-    pwd = data.get('password') or '123456'
+    username = (data.get("username") or "").strip()
+    email = (data.get("email") or "").strip()
+    role = data.get("role") or "teacher"
+    pwd = data.get("password") or "123456"
     if not username or not email:
-        return jsonify({'error':'username and email required'}), 400
-    if User.query.filter((User.username==username)|(User.email==email)).first():
-        return jsonify({'error':'user exists'}), 400
+        return jsonify({"error": "username and email required"}), 400
+    if User.query.filter((User.username == username) | (User.email == email)).first():
+        return jsonify({"error": "user exists"}), 400
     u = User(username=username, email=email, role=role)
     u.set_password(pwd)
-    db.session.add(u); db.session.commit()
-    return jsonify({'id': u.id, 'message':'created'})
+    db.session.add(u)
+    db.session.commit()
+    return jsonify({"id": u.id, "message": "created"})
 
-@api_bp.route('/users/<int:user_id>', methods=['DELETE'])
+
+@api_bp.route("/users/<int:user_id>", methods=["DELETE"])
 @login_required
 def api_user_delete(user_id):
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
-    u = User.query.get_or_404(user_id)
-    db.session.delete(u); db.session.commit()
-    return jsonify({'message': 'deleted'})
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    u = db.session.get(User, user_id)
+    if not u:
+        abort(404)
+    db.session.delete(u)
+    db.session.commit()
+    return jsonify({"message": "deleted"})
 
-@api_bp.route('/users/batch', methods=['DELETE'])
+
+@api_bp.route("/users/batch", methods=["DELETE"])
 @login_required
 def api_users_batch_delete():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(force=True)
-    ids = data.get('ids') or []
+    ids = data.get("ids") or []
     if not isinstance(ids, list):
-        return jsonify({'error':'ids must be list'}), 400
+        return jsonify({"error": "ids must be list"}), 400
     deleted = 0
     for uid in ids:
-        u = User.query.get(uid)
+        u = db.session.get(User, uid)
         if u:
-            db.session.delete(u); deleted += 1
+            db.session.delete(u)
+            deleted += 1
     db.session.commit()
-    return jsonify({'message':'batch deleted', 'deleted': deleted})
+    return jsonify({"message": "batch deleted", "deleted": deleted})
 
 
 # 年级/班级主数据管理（管理员）
-@api_bp.route('/master/grades', methods=['GET','POST'])
+@api_bp.route("/master/grades", methods=["GET", "POST"])
 @login_required
 def api_master_grades():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     from app.models import GradeMaster
-    if request.method == 'GET':
+
+    if request.method == "GET":
         rows = GradeMaster.query.order_by(GradeMaster.order_no.asc(), GradeMaster.name.asc()).all()
-        return jsonify({'items': [{'id': r.id, 'name': r.name, 'order_no': r.order_no, 'is_active': r.is_active} for r in rows]})
+        return jsonify(
+            {
+                "items": [
+                    {"id": r.id, "name": r.name, "order_no": r.order_no, "is_active": r.is_active}
+                    for r in rows
+                ]
+            }
+        )
     data = request.get_json(force=True)
-    items = data.get('items')
+    items = data.get("items")
     if items and isinstance(items, list):
         created = 0
         for it in items:
-            name = (it.get('name') or '').strip()
+            name = (it.get("name") or "").strip()
             if not name:
                 continue
             if GradeMaster.query.filter_by(name=name).first():
                 continue
-            db.session.add(GradeMaster(name=name, order_no=int(it.get('order_no') or 0), is_active=bool(it.get('is_active', True))))
+            db.session.add(
+                GradeMaster(
+                    name=name,
+                    order_no=int(it.get("order_no") or 0),
+                    is_active=bool(it.get("is_active", True)),
+                )
+            )
             created += 1
         db.session.commit()
-        return jsonify({'message': 'batch created', 'created': created})
+        return jsonify({"message": "batch created", "created": created})
     # 单个创建
-    name = (data.get('name') or '').strip()
+    name = (data.get("name") or "").strip()
     if not name:
-        return jsonify({'error': 'name required'}), 400
+        return jsonify({"error": "name required"}), 400
     if GradeMaster.query.filter_by(name=name).first():
-        return jsonify({'error': 'exists'}), 400
-    r = GradeMaster(name=name, order_no=int(data.get('order_no') or 0), is_active=bool(data.get('is_active', True)))
-    db.session.add(r); db.session.commit()
-    return jsonify({'id': r.id, 'message': 'created'})
+        return jsonify({"error": "exists"}), 400
+    r = GradeMaster(
+        name=name,
+        order_no=int(data.get("order_no") or 0),
+        is_active=bool(data.get("is_active", True)),
+    )
+    db.session.add(r)
+    db.session.commit()
+    return jsonify({"id": r.id, "message": "created"})
+
 
 # 下载导入模板
-@api_bp.route('/import/template/<string:kind>', methods=['GET'])
+@api_bp.route("/import/template/<string:kind>", methods=["GET"])
 @login_required
 def api_download_import_template(kind):
-    if current_user.role != 'admin':
+    if current_user.role != "admin":
         abort(403)
     import io
-    from openpyxl import Workbook
-    wb = Workbook(); ws = wb.active; ws.title = 'Sheet1'
-    if kind == 'grades':
-        # 新模板：一行一个学生，姓名/班级/至少一门学科成绩必填；学号可选（同名时建议填写）
-        ws.append(['学号','姓名','班级','语文','数学','英语','科学','社会','道法'])
-        ws.append(['','张三','高一(1)班','95','88','92','85','90','80'])
-        ws.append(['20240002','李四','高一(1)班','88','82','76','91','85',''])
-        ws2 = wb.create_sheet('说明')
-        ws2.append(['填写说明'])
-        ws2.append(['1）姓名、班级、至少一门学科成绩必填；学号可选（存在同名学生时需填写唯一学号）。'])
-        ws2.append(['2）考试名称/考试类型在导入页面填写或选择；无需在模板中提供对应列。'])
-        ws2.append(['3）学号建议为8位数字；若提供将优先用学号匹配学生。'])
-        ws2.append(['4）留空的学科成绩视为本次不录入，不会覆盖已有成绩。'])
-    elif kind == 'students':
-        ws.append(['学号','姓名','班级','年级','邮箱'])
-        ws.append(['20240001','张三','高一(1)班','高一','20240001@example.com'])
-        ws.append(['20240002','李四','高一(1)班','高一','20240002@example.com'])
-    else:
-        return jsonify({'error':'unknown template kind'}), 400
-    buf = io.BytesIO()
-    wb.save(buf); buf.seek(0)
-    from flask import send_file
-    return send_file(buf, as_attachment=True, download_name=f'{kind}_template.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-@api_bp.route('/master/grades/<int:gid>', methods=['PUT'])
+    from openpyxl import Workbook
+
+    version = (request.args.get("v") or "2").strip()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    if kind == "grades":
+        # 新模板：一行一个学生，姓名/班级/至少一门学科成绩必填；学号可选（同名时建议填写）
+        ws.append(["学号", "姓名", "班级", "语文", "数学", "英语", "科学", "社会", "道法"])
+        ws.append(["", "张三", "高一(1)班", "95", "88", "92", "85", "90", "80"])
+        ws.append(["20240002", "李四", "高一(1)班", "88", "82", "76", "91", "85", ""])
+        ws2 = wb.create_sheet("说明")
+        ws2.append(["填写说明"])
+        ws2.append(["模板版本：v" + version])
+        ws2.append(
+            ["1）姓名、班级、至少一门学科成绩必填；学号可选（存在同名学生时需填写唯一学号）。"]
+        )
+        ws2.append(["2）考试名称/考试类型在导入页面填写或选择；无需在模板中提供对应列。"])
+        ws2.append(["3）学号建议为8位数字；若提供将优先用学号匹配学生。"])
+        ws2.append(["4）留空的学科成绩视为本次不录入，不会覆盖已有成绩。"])
+    elif kind == "students":
+        ws.append(["学号", "姓名", "班级", "年级", "邮箱"])
+        ws.append(["20240001", "张三", "高一(1)班", "高一", "20240001@example.com"])
+        ws.append(["20240002", "李四", "高一(1)班", "高一", "20240002@example.com"])
+    else:
+        return jsonify({"error": "unknown template kind"}), 400
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    from flask import send_file
+
+    resp = send_file(
+        buf,
+        as_attachment=True,
+        download_name=f"{kind}_template_v{version}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    try:
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+    except Exception:
+        pass
+    return resp
+
+
+@api_bp.route("/master/grades/<int:gid>", methods=["PUT"])
 @login_required
 def api_master_grade_update(gid):
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     from app.models import GradeMaster
-    r = GradeMaster.query.get_or_404(gid)
-    data = request.get_json(force=True)
-    if 'name' in data and data.get('name'): r.name = data.get('name').strip()
-    if 'order_no' in data: r.order_no = int(data.get('order_no') or 0)
-    if 'is_active' in data: r.is_active = bool(data.get('is_active'))
-    db.session.commit(); return jsonify({'message':'updated'})
 
-@api_bp.route('/master/classes', methods=['GET','POST'])
+    r = db.session.get(GradeMaster, gid)
+    if not r:
+        abort(404)
+    data = request.get_json(force=True)
+    if "name" in data and data.get("name"):
+        r.name = data.get("name").strip()
+    if "order_no" in data:
+        r.order_no = int(data.get("order_no") or 0)
+    if "is_active" in data:
+        r.is_active = bool(data.get("is_active"))
+    db.session.commit()
+    return jsonify({"message": "updated"})
+
+
+@api_bp.route("/master/classes", methods=["GET", "POST"])
 @login_required
 def api_master_classes():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     from app.models import ClassMaster
-    if request.method == 'GET':
-        rows = ClassMaster.query.order_by(ClassMaster.grade_level.asc(), ClassMaster.order_no.asc(), ClassMaster.name.asc()).all()
-        return jsonify({'items': [{'id': r.id, 'name': r.name, 'grade_level': r.grade_level, 'order_no': r.order_no, 'is_active': r.is_active} for r in rows]})
-    data = request.get_json(force=True)
-    items = data.get('items')
-    if items and isinstance(items, list):
-        created=0
-        for it in items:
-            name = (it.get('name') or '').strip(); gl = (it.get('grade_level') or '').strip() or None
-            if not name: continue
-            from app.models import ClassMaster as CM
-            if CM.query.filter_by(grade_level=gl, name=name).first(): continue
-            db.session.add(ClassMaster(name=name, grade_level=gl, order_no=int(it.get('order_no') or 0), is_active=bool(it.get('is_active', True))))
-            created+=1
-        db.session.commit(); return jsonify({'message':'batch created','created':created})
-    name = (data.get('name') or '').strip(); gl = (data.get('grade_level') or '').strip() or None
-    if not name: return jsonify({'error':'name required'}), 400
-    from app.models import ClassMaster as CM
-    if CM.query.filter_by(grade_level=gl, name=name).first(): return jsonify({'error':'exists'}), 400
-    r = ClassMaster(name=name, grade_level=gl, order_no=int(data.get('order_no') or 0), is_active=bool(data.get('is_active', True)))
-    db.session.add(r); db.session.commit(); return jsonify({'id': r.id, 'message':'created'})
 
-@api_bp.route('/master/classes/<int:cid>', methods=['PUT'])
+    if request.method == "GET":
+        rows = ClassMaster.query.order_by(
+            ClassMaster.grade_level.asc(), ClassMaster.order_no.asc(), ClassMaster.name.asc()
+        ).all()
+        return jsonify(
+            {
+                "items": [
+                    {
+                        "id": r.id,
+                        "name": r.name,
+                        "grade_level": r.grade_level,
+                        "order_no": r.order_no,
+                        "is_active": r.is_active,
+                    }
+                    for r in rows
+                ]
+            }
+        )
+    data = request.get_json(force=True)
+    items = data.get("items")
+    if items and isinstance(items, list):
+        created = 0
+        for it in items:
+            name = (it.get("name") or "").strip()
+            gl = (it.get("grade_level") or "").strip() or None
+            if not name:
+                continue
+            from app.models import ClassMaster as CM
+
+            if CM.query.filter_by(grade_level=gl, name=name).first():
+                continue
+            db.session.add(
+                ClassMaster(
+                    name=name,
+                    grade_level=gl,
+                    order_no=int(it.get("order_no") or 0),
+                    is_active=bool(it.get("is_active", True)),
+                )
+            )
+            created += 1
+        db.session.commit()
+        return jsonify({"message": "batch created", "created": created})
+    name = (data.get("name") or "").strip()
+    gl = (data.get("grade_level") or "").strip() or None
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    from app.models import ClassMaster as CM
+
+    if CM.query.filter_by(grade_level=gl, name=name).first():
+        return jsonify({"error": "exists"}), 400
+    r = ClassMaster(
+        name=name,
+        grade_level=gl,
+        order_no=int(data.get("order_no") or 0),
+        is_active=bool(data.get("is_active", True)),
+    )
+    db.session.add(r)
+    db.session.commit()
+    return jsonify({"id": r.id, "message": "created"})
+
+
+@api_bp.route("/master/classes/<int:cid>", methods=["PUT"])
 @login_required
 def api_master_class_update(cid):
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     from app.models import ClassMaster
-    r = ClassMaster.query.get_or_404(cid)
-    data = request.get_json(force=True)
-    if 'name' in data and data.get('name'): r.name = data.get('name').strip()
-    if 'grade_level' in data: r.grade_level = (data.get('grade_level') or '').strip() or None
-    if 'order_no' in data: r.order_no = int(data.get('order_no') or 0)
-    if 'is_active' in data: r.is_active = bool(data.get('is_active'))
-    db.session.commit(); return jsonify({'message':'updated'})
 
-@api_bp.route('/users/<int:user_id>', methods=['PUT'])
+    r = db.session.get(ClassMaster, cid)
+    if not r:
+        abort(404)
+    data = request.get_json(force=True)
+    if "name" in data and data.get("name"):
+        r.name = data.get("name").strip()
+    if "grade_level" in data:
+        r.grade_level = (data.get("grade_level") or "").strip() or None
+    if "order_no" in data:
+        r.order_no = int(data.get("order_no") or 0)
+    if "is_active" in data:
+        r.is_active = bool(data.get("is_active"))
+    db.session.commit()
+    return jsonify({"message": "updated"})
+
+
+@api_bp.route("/users/<int:user_id>", methods=["PUT"])
 @login_required
 def api_user_update(user_id):
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
-    u = User.query.get_or_404(user_id)
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    u = db.session.get(User, user_id)
+    if not u:
+        abort(404)
     data = request.get_json(force=True)
     # 仅允许更新可见范围与角色（可选）
-    if 'allowed_grade_levels' in data:
-        u.allowed_grade_levels = data.get('allowed_grade_levels')
-    if 'allowed_class_names' in data:
-        u.allowed_class_names = data.get('allowed_class_names')
-    if 'role' in data:
-        u.role = data.get('role')
+    if "allowed_grade_levels" in data:
+        u.allowed_grade_levels = data.get("allowed_grade_levels")
+    if "allowed_class_names" in data:
+        u.allowed_class_names = data.get("allowed_class_names")
+    if "role" in data:
+        u.role = data.get("role")
     db.session.commit()
-    return jsonify({'message': 'updated'})
+    return jsonify({"message": "updated"})
 
-@api_bp.route('/auth/password', methods=['PUT'])
+
+@api_bp.route("/auth/password", methods=["PUT"])
 @login_required
 def api_change_my_password():
     data = request.get_json(force=True)
-    old_pwd = data.get('old_password')
-    new_pwd = data.get('new_password')
+    old_pwd = data.get("old_password")
+    new_pwd = data.get("new_password")
     if not new_pwd:
-        return jsonify({'error':'new_password required'}), 400
+        return jsonify({"error": "new_password required"}), 400
     # 学生/教师需校验旧密码；管理员可直接改自己的
-    if current_user.role != 'admin':
+    if current_user.role != "admin":
         if not old_pwd or not current_user.check_password(old_pwd):
-            return jsonify({'error':'invalid old password'}), 400
-    u = User.query.get(current_user.id)
+            return jsonify({"error": "invalid old password"}), 400
+    u = db.session.get(User, current_user.id)
     u.set_password(new_pwd)
     db.session.commit()
-    return jsonify({'message':'password updated'})
+    return jsonify({"message": "password updated"})
 
-@api_bp.route('/admin/users/passwords', methods=['PUT'])
+
+@api_bp.route("/admin/users/passwords", methods=["PUT"])
 @login_required
 def api_admin_batch_update_passwords():
-    if current_user.role != 'admin':
-        return jsonify({'error':'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(force=True)
-    items = data.get('items') or []  # [{id|username, new_password}]
+    items = data.get("items") or []  # [{id|username, new_password}]
     updated = 0
     for it in items:
-        new_pwd = it.get('new_password')
+        new_pwd = it.get("new_password")
         if not new_pwd:
             continue
         u = None
-        if it.get('id'):
-            u = User.query.get(it['id'])
-        elif it.get('username'):
-            u = User.query.filter_by(username=it['username']).first()
+        if it.get("id"):
+            u = db.session.get(User, it["id"])
+        elif it.get("username"):
+            u = User.query.filter_by(username=it["username"]).first()
         if u:
-            u.set_password(new_pwd); updated += 1
+            u.set_password(new_pwd)
+            updated += 1
     db.session.commit()
-    return jsonify({'message':'batch updated', 'updated': updated})
+    return jsonify({"message": "batch updated", "updated": updated})
 
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
-    u = User.query.get_or_404(user_id)
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    u = db.session.get(User, user_id)
+    if not u:
+        abort(404)
     data = request.get_json(force=True)
     # 仅允许更新可见范围与角色（可选）
-    if 'allowed_grade_levels' in data:
-        u.allowed_grade_levels = data.get('allowed_grade_levels')
-    if 'allowed_class_names' in data:
-        u.allowed_class_names = data.get('allowed_class_names')
-    if 'role' in data:
-        u.role = data.get('role')
+    if "allowed_grade_levels" in data:
+        u.allowed_grade_levels = data.get("allowed_grade_levels")
+    if "allowed_class_names" in data:
+        u.allowed_class_names = data.get("allowed_class_names")
+    if "role" in data:
+        u.role = data.get("role")
     db.session.commit()
-    return jsonify({'message': 'updated'})
+    return jsonify({"message": "updated"})
 
 
-@api_bp.route('/users/batch', methods=['PUT'])
+@api_bp.route("/users/batch", methods=["PUT"])
 @login_required
 def api_users_batch_update():
-    if current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(force=True)
-    items = data.get('items') or []
+    items = data.get("items") or []
     for it in items:
-        u = User.query.get(it.get('id'))
+        u = db.session.get(User, it.get("id"))
         if not u:
             continue
         # 批量更新用户属性
-        if 'role' in it and it.get('role'):
-            u.role = it.get('role')
-        if 'allowed_grade_levels' in it:
-            u.allowed_grade_levels = it.get('allowed_grade_levels')
-        if 'allowed_class_names' in it:
-            u.allowed_class_names = it.get('allowed_class_names')
+        if "role" in it and it.get("role"):
+            u.role = it.get("role")
+        if "allowed_grade_levels" in it:
+            u.allowed_grade_levels = it.get("allowed_grade_levels")
+        if "allowed_class_names" in it:
+            u.allowed_class_names = it.get("allowed_class_names")
     db.session.commit()
-    return jsonify({'message': 'batch updated', 'count': len(items)})
-    return jsonify({'message': 'batch updated', 'count': len(items)})
+    return jsonify({"message": "batch updated", "count": len(items)})
+    return jsonify({"message": "batch updated", "count": len(items)})
+
 
 # 批量创建学生账号（管理员，直接粘贴学号列表）
-@api_bp.route('/admin/users/students/batch-create', methods=['POST'])
+@api_bp.route("/admin/users/students/batch-create", methods=["POST"])
 @login_required
 def api_admin_batch_create_student_users():
-    if current_user.role != 'admin':
-        return jsonify({'error':'forbidden'}), 403
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(force=True)
-    ids_text = (data.get('student_ids') or '').strip()
-    default_password = (data.get('default_password') or '123456').strip() or '123456'
+    ids_text = (data.get("student_ids") or "").strip()
+    default_password = (data.get("default_password") or "123456").strip() or "123456"
     import re
-    sids = [s.strip() for s in re.split(r'[\s,;\n\r]+', ids_text) if s.strip()]
-    created = 0; skipped = 0; no_student = 0
+
+    sids = [s.strip() for s in re.split(r"[\s,;\n\r]+", ids_text) if s.strip()]
+    created = 0
+    skipped = 0
+    no_student = 0
     for sid in sids:
-        if not re.fullmatch(r'\d{8}', sid):
+        if not re.fullmatch(r"\d{8}", sid):
             skipped += 1
             continue
         stu = Student.query.filter_by(student_id=sid).first()
@@ -4376,179 +5772,270 @@ def api_admin_batch_create_student_users():
         if u:
             skipped += 1
             continue
-        u = User(username=sid, email=(stu.email or f'{sid}@example.com'), role='student')
+        u = User(username=sid, email=(stu.email or f"{sid}@example.com"), role="student")
         u.set_password(default_password)
-        db.session.add(u); created += 1
+        db.session.add(u)
+        created += 1
+
 
 # 导出学生用户初始化清单（用户名=学号，含初始密码可选）
-@api_bp.route('/admin/users/students/export-init', methods=['GET'])
+@api_bp.route("/admin/users/students/export-init", methods=["GET"])
 @login_required
 def api_admin_export_student_init():
-    if current_user.role != 'admin':
-        return jsonify({'error':'forbidden'}), 403
-    fmt = (request.args.get('format') or 'csv').lower()
-    initial_password = (request.args.get('default_password') or '').strip()
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    fmt = (request.args.get("format") or "csv").lower()
+    initial_password = (request.args.get("default_password") or "").strip()
     # 仅导出已创建的学生用户
-    q = db.session.query(User.username, Student.name, Student.class_name, Student.email) \
-        .join(Student, Student.student_id == User.username) \
-        .filter(User.role == 'student') \
+    q = (
+        db.session.query(User.username, Student.name, Student.class_name, Student.email)
+        .join(Student, Student.student_id == User.username)
+        .filter(User.role == "student")
         .order_by(Student.class_name.asc(), Student.student_id.asc())
+    )
     rows = q.all()
-    if fmt == 'xlsx':
+    if fmt == "xlsx":
         import io
+
         from openpyxl import Workbook
-        wb = Workbook(); ws = wb.active; ws.title = '学生用户'
-        headers = ['用户名(学号)','姓名','班级','邮箱']
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "学生用户"
+        headers = ["用户名(学号)", "姓名", "班级", "邮箱"]
         if initial_password:
-            headers.append('初始密码')
+            headers.append("初始密码")
         else:
-            headers.append('说明')
+            headers.append("说明")
         ws.append(headers)
         for u, name, cls, email in rows:
-            rec = [u, name or '', cls or '', email or '']
+            rec = [u, name or "", cls or "", email or ""]
             if initial_password:
                 rec.append(initial_password)
             else:
-                rec.append('初始密码为管理员设置或123456；请首次登录后修改密码')
+                rec.append("初始密码为管理员设置或123456；请首次登录后修改密码")
             ws.append(rec)
-        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
         from flask import send_file
-        return send_file(buf, as_attachment=True, download_name='student_users_init.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name="student_users_init.xlsx",
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
     # 默认 CSV
-    import io, csv
+    import csv
+    import io
+
     buf = io.StringIO()
     writer = csv.writer(buf)
-    headers = ['用户名(学号)','姓名','班级','邮箱']
+    headers = ["用户名(学号)", "姓名", "班级", "邮箱"]
     if initial_password:
-        headers.append('初始密码')
+        headers.append("初始密码")
     else:
-        headers.append('说明')
+        headers.append("说明")
     writer.writerow(headers)
     for u, name, cls, email in rows:
-        rec = [u, name or '', cls or '', email or '']
+        rec = [u, name or "", cls or "", email or ""]
         if initial_password:
             rec.append(initial_password)
         else:
-            rec.append('初始密码为管理员设置或123456；请首次登录后修改密码')
+            rec.append("初始密码为管理员设置或123456；请首次登录后修改密码")
         writer.writerow(rec)
     from flask import Response
-    data = '\ufeff' + buf.getvalue()
+
+    data = "\ufeff" + buf.getvalue()
     return Response(
         data,
-        mimetype='text/csv; charset=utf-8',
-        headers={'Content-Disposition': 'attachment; filename=student_users_init.csv'}
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=student_users_init.csv"},
     )
     db.session.commit()
-    return jsonify({'message':'batch created', 'created': created, 'skipped': skipped, 'no_student': no_student})
+    return jsonify(
+        {
+            "message": "batch created",
+            "created": created,
+            "skipped": skipped,
+            "no_student": no_student,
+        }
+    )
 
-    return jsonify({'message': 'batch updated', 'count': len(items)})
+    return jsonify({"message": "batch updated", "count": len(items)})
 
 
 # 版本管理：列出/新建草稿/发布/回滚
-@api_bp.route('/grade-bands/sets', methods=['GET', 'POST'])
+@api_bp.route("/grade-bands/sets", methods=["GET", "POST"])
 @login_required
 def api_band_sets():
-    if request.method == 'POST':
-        if not current_user.is_authenticated or current_user.role != 'admin':
-            return jsonify({'error': 'forbidden'}), 403
+    if request.method == "POST":
+        if not current_user.is_authenticated or current_user.role != "admin":
+            return jsonify({"error": "forbidden"}), 403
         data = request.get_json(force=True)
-        exam_name = data.get('exam_name') or 'default'
-        note = data.get('note')
+        exam_name = data.get("exam_name") or "default"
+        note = data.get("note")
         import json
+
         # version = 当前该考试的最大版本+1（草稿态）
-        max_ver = db.session.query(db.func.max(GradeBandSet.version)).filter_by(exam_name=exam_name).scalar() or 0
-        s = GradeBandSet(exam_name=exam_name, version=max_ver+1, status='draft', note=note, rules_json=json.dumps([], ensure_ascii=False))
+        max_ver = (
+            db.session.query(db.func.max(GradeBandSet.version))
+            .filter_by(exam_name=exam_name)
+            .scalar()
+            or 0
+        )
+        s = GradeBandSet(
+            exam_name=exam_name,
+            version=max_ver + 1,
+            status="draft",
+            note=note,
+            rules_json=json.dumps([], ensure_ascii=False),
+        )
         db.session.add(s)
         db.session.commit()
-        return jsonify({'id': s.id, 'version': s.version, 'status': s.status}), 201
+        return jsonify({"id": s.id, "version": s.version, "status": s.status}), 201
     # GET
-    exam_name = request.args.get('exam_name') or 'default'
-    sets = GradeBandSet.query.filter_by(exam_name=exam_name).order_by(GradeBandSet.version.desc()).all()
+    exam_name = request.args.get("exam_name") or "default"
+    sets = (
+        GradeBandSet.query.filter_by(exam_name=exam_name)
+        .order_by(GradeBandSet.version.desc())
+        .all()
+    )
     # 缓存命名空间：等级规则变更影响分析与汇总
     try:
         from flask import current_app
-        _cache_bump(current_app, 'analysis')
-        _cache_bump(current_app, 'summary')
+
+        _cache_bump(current_app, "analysis")
+        _cache_bump(current_app, "summary")
     except Exception:
         pass
 
-    return jsonify([
-        { 'id': s.id, 'exam_name': s.exam_name, 'version': s.version, 'status': s.status, 'note': s.note, 'created_at': s.created_at.isoformat(), 'published_at': (s.published_at.isoformat() if s.published_at else None) }
-        for s in sets
-    ])
+    return jsonify(
+        [
+            {
+                "id": s.id,
+                "exam_name": s.exam_name,
+                "version": s.version,
+                "status": s.status,
+                "note": s.note,
+                "created_at": s.created_at.isoformat(),
+                "published_at": (s.published_at.isoformat() if s.published_at else None),
+            }
+            for s in sets
+        ]
+    )
 
 
-@api_bp.route('/grade-bands/sets/<int:set_id>/publish', methods=['PUT'])
+@api_bp.route("/grade-bands/sets/<int:set_id>/publish", methods=["PUT"])
 @login_required
 def api_band_set_publish(set_id):
-    if not current_user.is_authenticated or current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
-    s = GradeBandSet.query.get_or_404(set_id)
-    import json, datetime as dt
+    if not current_user.is_authenticated or current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    s = db.session.get(GradeBandSet, set_id)
+    if not s:
+        abort(404)
+    import datetime as dt
+    import json
+
     # 将快照覆盖到活跃规则
     items = json.loads(s.rules_json)
     GradeBandRule.query.filter_by(exam_name=s.exam_name).delete()
     for it in items:
-        db.session.add(GradeBandRule(
-            exam_name=s.exam_name,
-            subject_code=it.get('subject_code'),
-            method=it.get('method'),
-            a_min=it.get('a_min'), b_min=it.get('b_min'), c_min=it.get('c_min'), d_min=it.get('d_min'),
-            a_pct=it.get('a_pct'), b_pct=it.get('b_pct'), c_pct=it.get('c_pct'), d_pct=it.get('d_pct'), e_pct=it.get('e_pct'),
-        ))
-    s.status = 'published'
-    s.published_at = dt.datetime.utcnow()
+        db.session.add(
+            GradeBandRule(
+                exam_name=s.exam_name,
+                subject_code=it.get("subject_code"),
+                method=it.get("method"),
+                a_min=it.get("a_min"),
+                b_min=it.get("b_min"),
+                c_min=it.get("c_min"),
+                d_min=it.get("d_min"),
+                a_pct=it.get("a_pct"),
+                b_pct=it.get("b_pct"),
+                c_pct=it.get("c_pct"),
+                d_pct=it.get("d_pct"),
+                e_pct=it.get("e_pct"),
+            )
+        )
+    s.status = "published"
+    s.published_at = dt.datetime.now(dt.timezone.utc)
     db.session.commit()
     # 审计
     from app.models import AuditLog
-    db.session.add(AuditLog(user_id=current_user.id, username=current_user.username, action='publish', resource=f'GradeBandSet:{s.id}', details=f'{s.exam_name} v{s.version}'))
+
+    db.session.add(
+        AuditLog(
+            user_id=current_user.id,
+            username=current_user.username,
+            action="publish",
+            resource=f"GradeBandSet:{s.id}",
+            details=f"{s.exam_name} v{s.version}",
+        )
+    )
     db.session.commit()
-    return jsonify({'message': 'published'})
+    return jsonify({"message": "published"})
 
 
-@api_bp.route('/grade-bands/sets/<int:set_id>/rollback', methods=['PUT'])
+@api_bp.route("/grade-bands/sets/<int:set_id>/rollback", methods=["PUT"])
 @login_required
 def api_band_set_rollback(set_id):
-    if not current_user.is_authenticated or current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
+    if not current_user.is_authenticated or current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
     # 将历史版本复制为新的草稿
-    src = GradeBandSet.query.get_or_404(set_id)
+    src = db.session.get(GradeBandSet, set_id)
+    if not src:
+        abort(404)
     import json
-    max_ver = db.session.query(db.func.max(GradeBandSet.version)).filter_by(exam_name=src.exam_name).scalar() or 0
+
+    max_ver = (
+        db.session.query(db.func.max(GradeBandSet.version))
+        .filter_by(exam_name=src.exam_name)
+        .scalar()
+        or 0
+    )
     s = GradeBandSet(
         exam_name=src.exam_name,
-        version=max_ver+1,
-        status='draft',
-        note=f'Rollback from v{src.version}',
+        version=max_ver + 1,
+        status="draft",
+        note=f"Rollback from v{src.version}",
         rules_json=src.rules_json,
     )
     db.session.add(s)
     db.session.commit()
-    return jsonify({'id': s.id, 'version': s.version, 'status': s.status})
+    return jsonify({"id": s.id, "version": s.version, "status": s.status})
 
 
-@api_bp.route('/grade-bands/sets/<int:set_id>/export-json', methods=['GET'])
+@api_bp.route("/grade-bands/sets/<int:set_id>/export-json", methods=["GET"])
 @login_required
 def api_band_set_export_json(set_id):
-    if not current_user.is_authenticated or current_user.role not in ['admin','teacher']:
-        return jsonify({'error': 'forbidden'}), 403
-    s = GradeBandSet.query.get_or_404(set_id)
+    if not current_user.is_authenticated or current_user.role not in ["admin", "teacher"]:
+        return jsonify({"error": "forbidden"}), 403
+    s = db.session.get(GradeBandSet, set_id)
+    if not s:
+        abort(404)
     import json
-    return jsonify({ 'exam_name': s.exam_name, 'version': s.version, 'items': json.loads(s.rules_json) })
+
+    return jsonify(
+        {"exam_name": s.exam_name, "version": s.version, "items": json.loads(s.rules_json)}
+    )
 
 
-@api_bp.route('/grade-bands/sets/<int:set_id>/import-json', methods=['POST'])
+@api_bp.route("/grade-bands/sets/<int:set_id>/import-json", methods=["POST"])
 @login_required
 def api_band_set_import_json(set_id):
-    if not current_user.is_authenticated or current_user.role != 'admin':
-        return jsonify({'error': 'forbidden'}), 403
-    s = GradeBandSet.query.get_or_404(set_id)
+    if not current_user.is_authenticated or current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    s = db.session.get(GradeBandSet, set_id)
+    if not s:
+        abort(404)
     data = request.get_json(force=True)
-    items = data.get('items') or []
+    items = data.get("items") or []
     import json
+
     s.rules_json = json.dumps(items, ensure_ascii=False)
     db.session.commit()
-    return jsonify({'message': 'imported', 'count': len(items)})
+    return jsonify({"message": "imported", "count": len(items)})
 
 
 # ExamScheme CRUD
@@ -4562,7 +6049,10 @@ def api_exam_schemes():
         subject_name = data.get("subject_name")
         max_score = float(data.get("max_score", 100))
         item = ExamScheme(
-            exam_type=exam_type, subject_code=subject_code, subject_name=subject_name, max_score=max_score
+            exam_type=exam_type,
+            subject_code=subject_code,
+            subject_name=subject_name,
+            max_score=max_score,
         )
         db.session.add(item)
         db.session.commit()
@@ -4587,7 +6077,9 @@ def api_exam_schemes():
 @api_bp.route("/exam-schemes/<int:item_id>", methods=["PUT", "DELETE"])
 @login_required
 def api_exam_scheme_detail(item_id):
-    item = ExamScheme.query.get_or_404(item_id)
+    item = db.session.get(ExamScheme, item_id)
+    if not item:
+        abort(404)
     if request.method == "PUT":
         data = request.get_json() or request.form
         if "max_score" in data:

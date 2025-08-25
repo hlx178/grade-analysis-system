@@ -101,7 +101,7 @@ def migrate():
                     # check by PK or unique keys
                     exists = None
                     if key in r and r[key] is not None:
-                        exists = model.query.get(r[key])
+                        exists = s.get(model, r[key])
                     if not exists:
                         for uk in unique_keys:
                             val = r.get(uk)

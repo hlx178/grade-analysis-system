@@ -1,33 +1,50 @@
 {% extends 'base.html' %}
 {% block title %}仪表盘 - 成绩分析系统{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h3>课程统计</h3>
-  <div class="d-flex gap-2">
+<div class="filter-section">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">📊 成绩分析仪表盘</h3>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
     <select id="courseSelect" class="form-select">
-      <option value="">全部课程</option>
+      <option value="">📚 全部课程</option>
       {% for c in courses %}
-      <option value="{{ c.id }}">{{ c.code }} - {{ c.name }}</option>
+      <option value="{{ c.id }}" data-code="{{ c.code }}">{{ c.code }} - {{ c.name }}</option>
       {% endfor %}
     </select>
     <select id="classSelect" class="form-select">
-      <option value="">全部班级</option>
+      <option value="">🏫 全部班级</option>
       {% for cls in classes %}
       <option value="{{ cls }}">{{ cls }}</option>
       {% endfor %}
     </select>
+    <select id="subjectSelect" class="form-select">
+      <option value="TOTAL">📘 总分</option>
+      {% for _, code, name in SUBJECTS %}
+      <option value="{{ code }}">{{ name }}</option>
+      {% endfor %}
+    </select>
     <select id="examNameSelect" class="form-select">
-      <option value="">全部考试</option>
+      <option value="">📝 全部考试</option>
       {% for en in exam_names %}
       <option value="{{ en }}" {% if cur_exam_name==en %}selected{% endif %}>{{ en }}</option>
       {% endfor %}
     </select>
-    <button class="btn btn-primary" onclick="applyExamFilter()">分析</button>
+    <button class="btn btn-primary btn-analyze" onclick="applyExamFilter()">
+      <i class="fas fa-chart-line me-1"></i>分析
+    </button>
+  </div>
+  <div class="mt-2">
+    <button class="btn btn-sm btn-outline-secondary" onclick="saveDashboardPrefs()">保存筛选</button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="restoreDashboardPrefs()">恢复筛选</button>
   </div>
 </div>
 
 <div class="row">
-  <div class="col-md-6 mb-4">
+  <div class="col-md-4 mb-4">
     <div class="card">
       <small class="text-muted">若未选择具体课程，则统计“总分”或“全部学科汇总”</small>
 
@@ -45,11 +62,101 @@
       </div>
     </div>
   </div>
-  <div class="col-md-6 mb-4">
+  <div class="col-md-4 mb-4">
     <div class="card">
       <div class="card-header">成绩分布</div>
       <div class="card-body">
         <canvas id="distChart" height="160"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4 mb-4">
+    <div class="card">
+      <div class="card-header">分数段分布</div>
+      <div class="card-body">
+        <canvas id="scoreRangeChart" height="160"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新增图表行 -->
+<div class="row">
+  <div class="col-md-6 mb-4">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>班级对比</span>
+        <div>
+          <a id="classCompareExportCsv" class="btn btn-sm btn-outline-light me-2" href="#">导出CSV</a>
+          <button class="btn btn-sm btn-light" onclick="downloadChartPng('classCompareChart','class-compare.png')">导出PNG</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <input id="ccTopN" type="number" class="form-control form-control-sm" placeholder="Top N" min="1" style="max-width: 100px;" />
+          <input id="ccMinCount" type="number" class="form-control form-control-sm" placeholder="最小样本数" min="0" style="max-width: 130px;" />
+          <select id="ccSortBy" class="form-select form-select-sm" style="max-width: 120px;">
+            <option value="avg" selected>按均分</option>
+            <option value="count">按人数</option>
+        <button class="btn btn-sm btn-outline-info ms-2" onclick="showExcludedClasses()">查看剔除班级</button>
+        <div class="modal fade" id="excludedModal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">未达最小样本数的班级</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                <div id="excludedList" class="small"></div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+              </div>
+            </div>
+          </div>
+        </div>
+          </select>
+          <div id="ccMeta" class="text-muted small"></div>
+          <button class="btn btn-sm btn-outline-secondary" onclick="reloadClassCompare()">应用</button>
+        </div>
+          <div class="form-check form-check-inline ms-2">
+            <input class="form-check-input" type="checkbox" id="ccOnlyMeets">
+            <label class="form-check-label" for="ccOnlyMeets">导出仅达标</label>
+          </div>
+        <canvas id="classCompareChart" height="200"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 mb-4">
+    <div class="card">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <label class="form-check-label me-2">显示序列：</label>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="tsAvg" checked>
+            <label class="form-check-label" for="tsAvg">平均</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="tsMax" checked>
+            <label class="form-check-label" for="tsMax">最高</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="tsMin" checked>
+            <label class="form-check-label" for="tsMin">最低</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="tsStd" checked>
+            <label class="form-check-label" for="tsStd">标准差</label>
+          </div>
+        </div>
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>成绩趋势</span>
+        <div>
+          <a id="trendExportCsv" class="btn btn-sm btn-outline-light me-2" href="#">导出CSV</a>
+          <button class="btn btn-sm btn-light" onclick="downloadChartPng('trendChart','trends.png')">导出PNG</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <canvas id="trendChart" height="200"></canvas>
       </div>
     </div>
   </div>
@@ -82,6 +189,7 @@
 </table>
 {% endblock %}
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
 function applyExamFilter(){
   const en = document.getElementById('examNameSelect').value;
@@ -92,39 +200,319 @@ function applyExamFilter(){
 </script>
 
 <script>
-let chart;
+let charts = {};
+
 async function loadAnalysis(){
   const courseId = document.getElementById('courseSelect').value;
   const className = document.getElementById('classSelect').value;
+  const examName = document.getElementById('examNameSelect').value;
+
   const p = new URLSearchParams();
   if (courseId) p.append('course_id', courseId);
   if (className) p.append('class_name', className);
-  const examName = document.getElementById('examNameSelect').value;
   if (examName) p.append('exam_name', examName);
+
+  // 用学科选择器影响后续两个分析接口
+  const subjectCode = document.getElementById('subjectSelect').value;
+
   const res = await fetch('/api/analysis/statistics?' + p.toString());
   const data = await res.json();
   const s = data.stats || {};
   const d = data.distribution || {};
   const subject = document.getElementById('courseSelect').value ? '学科' : '总分/全部学科';
+
+  // 更新统计摘要
   document.getElementById('statsList').innerHTML = `
-    <li><strong>对象：</strong>${subject}</li>
-    <li>样本数: ${s.count ?? '-'}</li>
-    <li>平均分: ${s.average ?? '-'}</li>
-    <li>中位数: ${s.median ?? '-'}</li>
-    <li>最高分: ${s.max ?? '-'}</li>
-    <li>最低分: ${s.min ?? '-'}</li>
-    <li>标准差: ${s.std ?? '-'}</li>
-    <li>及格率: ${s.pass_rate ?? '-'}%</li>`;
+    <li><strong>对象：</strong><span class="stats-value">${subject}</span></li>
+    <li>样本数: <span class="stats-value">${s.count ?? '-'}</span></li>
+    <li>平均分: <span class="stats-value">${s.average ?? '-'}</span></li>
+    <li>中位数: <span class="stats-value">${s.median ?? '-'}</span></li>
+    <li>最高分: <span class="stats-value">${s.max ?? '-'}</span></li>
+    <li>最低分: <span class="stats-value">${s.min ?? '-'}</span></li>
+    <li>标准差: <span class="stats-value">${s.std ?? '-'}</span></li>
+    <li>及格率: <span class="stats-value">${s.pass_rate ?? '-'}%</span></li>`;
+
+  // 等级分布图
+  updateDistributionChart(d);
+
+  // 分数段分布图
+  await updateScoreRangeChart();
+
+  // 加载班级对比数据
+  await loadClassComparison(examName, subjectCode);
+
+  // 加载趋势数据
+  await loadTrendData(subjectCode, className);
+}
+
+function updateDistributionChart(distribution) {
   const labels = ['A','B','C','D','E'];
-  const values = labels.map(k => d[k] || 0);
+  const values = labels.map(k => distribution[k] || 0);
   const ctx = document.getElementById('distChart').getContext('2d');
-  if (chart) chart.destroy();
-  chart = new Chart(ctx, {
-    type: 'bar',
-    data: { labels, datasets: [{ label: '人数', data: values, backgroundColor: '#0d6efd' }] },
-    options: { scales: { y: { beginAtZero: true, precision: 0 } } }
+
+  if (charts.dist) charts.dist.destroy();
+  charts.dist = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        label: '人数',
+        data: values,
+        backgroundColor: ['#28a745', '#17a2b8', '#ffc107', '#fd7e14', '#dc3545']
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom' }
+      }
+    }
   });
 }
-window.addEventListener('DOMContentLoaded', loadAnalysis);
+
+async function updateScoreRangeChart() {
+  const courseId = document.getElementById('courseSelect').value;
+  const className = document.getElementById('classSelect').value;
+  const examName = document.getElementById('examNameSelect').value;
+
+  const p = new URLSearchParams();
+  if (courseId) p.append('course_id', courseId);
+  if (className) p.append('class_name', className);
+  if (examName) p.append('exam_name', examName);
+
+  try {
+    const res = await fetch('/api/analysis/score-ranges?' + p.toString());
+    const data = await res.json();
+
+    const ctx = document.getElementById('scoreRangeChart').getContext('2d');
+
+    if (charts.scoreRange) charts.scoreRange.destroy();
+    charts.scoreRange = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: (data.ranges || []).map(r => r.label),
+        datasets: [{
+          label: '人数',
+          data: (data.ranges || []).map(r => r.count),
+          backgroundColor: '#6f42c1'
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true, precision: 0 }
+        },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              afterLabel: function(context) {
+                const range = data.ranges[context.dataIndex];
+                return `占比: ${range.percentage}%`;
+              }
+            }
+          }
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Failed to load score range data:', error);
+  }
+}
+
+async function loadClassComparison(examName, subjectCode) {
+  try {
+    const p = new URLSearchParams();
+    if (examName) p.append('exam_name', examName);
+    const courseSel = document.getElementById('courseSelect');
+    const selectedOption = courseSel.options[courseSel.selectedIndex];
+    const subjectCode = selectedOption && selectedOption.dataset.code ? selectedOption.dataset.code : 'TOTAL';
+    p.append('subject_code', subjectCode);
+
+    const res = await fetch('/api/analysis/class-compare?' + p.toString());
+    const data = await res.json();
+
+    // 更新导出 CSV 链接（包含参数）
+    const onlyMeets = document.getElementById('ccOnlyMeets')?.checked ? '&export_only_meets=1' : '';
+    document.getElementById('classCompareExportCsv').href = '/api/analysis/class-compare/export?' + p.toString() + onlyMeets;
+
+    // 显示统计提示
+    if (data.meta) {
+      const m = data.meta;
+      document.getElementById('ccMeta').textContent = `共 ${m.total} 个班级，剔除 ${m.below_threshold || 0} 个（样本数 < 最小样本数），已返回 ${m.returned} 个`;
+    } else {
+      document.getElementById('ccMeta').textContent = '';
+    }
+
+    // 缓存剔除班级列表（供弹窗展示）
+    window.__excluded_classes = Array.isArray(data.excluded) ? data.excluded : [];
+
+    const ctx = document.getElementById('classCompareChart').getContext('2d');
+
+    if (charts.classCompare) charts.classCompare.destroy();
+    charts.classCompare = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: (data.compare || []).map(item => item.class_name),
+        datasets: [{
+          label: '平均分',
+          data: (data.compare || []).map(item => item.avg),
+          backgroundColor: '#20c997'
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true }
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Failed to load class comparison:', error);
+  }
+}
+
+function reloadClassCompare(){
+  const en = document.getElementById('examNameSelect').value;
+  const code = document.getElementById('subjectSelect').value;
+  loadClassComparison(en, code);
+}
+}
+
+async function loadTrendData(subjectCode, className) {
+  try {
+    const p = new URLSearchParams();
+    const courseSel = document.getElementById('courseSelect');
+    const selectedOption = courseSel.options[courseSel.selectedIndex];
+    const subjectCode = selectedOption && selectedOption.dataset.code ? selectedOption.dataset.code : 'TOTAL';
+    p.append('subject_code', subjectCode);
+    if (className) p.append('class_name', className);
+
+    const res = await fetch('/api/analysis/trends?' + p.toString());
+    const data = await res.json();
+
+    // 更新导出 CSV 链接
+    document.getElementById('trendExportCsv').href = '/api/analysis/trends/export?' + p.toString();
+
+    const ctx = document.getElementById('trendChart').getContext('2d');
+
+    if (charts.trend) charts.trend.destroy();
+    const labels = (data.trends || []).map(item => item.exam_name);
+    const series = data.trends || [];
+    const ds = [];
+    if (document.getElementById('tsAvg')?.checked) ds.push({ label:'平均分', data: series.map(i=>i.avg), borderColor:'#e83e8c', backgroundColor:'rgba(232, 62, 140, 0.08)', tension:0.35 });
+    if (document.getElementById('tsMax')?.checked) ds.push({ label:'最高分', data: series.map(i=>i.max), borderColor:'#28a745', backgroundColor:'rgba(40, 167, 69, 0.06)', tension:0.35 });
+    if (document.getElementById('tsMin')?.checked) ds.push({ label:'最低分', data: series.map(i=>i.min), borderColor:'#dc3545', backgroundColor:'rgba(220, 53, 69, 0.06)', tension:0.35 });
+    if (document.getElementById('tsStd')?.checked) ds.push({ label:'标准差', data: series.map(i=>i.std), borderColor:'#6f42c1', backgroundColor:'rgba(111, 66, 193, 0.06)', borderDash:[4,3], tension:0.35, yAxisID:'y1' });
+    charts.trend = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: ds
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          y: { beginAtZero: true, title: { display: true, text: '分数' } },
+          y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '标准差' } }
+        },
+        plugins: { legend: { position: 'bottom' } }
+      }
+    });
+
+    // 记忆趋势序列开关
+    const prefs = {
+      tsAvg: !!document.getElementById('tsAvg')?.checked,
+      tsMax: !!document.getElementById('tsMax')?.checked,
+      tsMin: !!document.getElementById('tsMin')?.checked,
+      tsStd: !!document.getElementById('tsStd')?.checked,
+    };
+    try { localStorage.setItem('trendSeriesPrefs', JSON.stringify(prefs)); } catch(e) {}
+
+    });
+  } catch (error) {
+    console.error('Failed to load trend data:', error);
+  }
+}
+
+function downloadChartPng(canvasId, filename) {
+  const link = document.createElement('a');
+  link.href = document.getElementById(canvasId).toDataURL('image/png');
+  link.download = filename || 'chart.png';
+  link.click();
+}
+
+function updateExportLinks() {
+  const examName = document.getElementById('examNameSelect').value;
+  const subjectCode = document.getElementById('subjectSelect').value;
+  const search = new URLSearchParams();
+  if (examName) search.append('exam_name', examName);
+  if (subjectCode) search.append('subject_code', subjectCode);
+  document.getElementById('classCompareExportCsv').href = '/api/analysis/class-compare/export?' + search.toString();
+  document.getElementById('trendExportCsv').href = '/api/analysis/trends/export?' + search.toString();
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  ['courseSelect','classSelect','examNameSelect','subjectSelect','tsAvg','tsMax','tsMin','tsStd','ccTopN','ccMinCount','ccSortBy','ccOnlyMeets'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => { loadAnalysis(); updateExportLinks(); });
+  });
+  // 恢复趋势序列偏好
+  try {
+    const saved = JSON.parse(localStorage.getItem('trendSeriesPrefs')||'{}');
+    if (typeof saved.tsAvg === 'boolean') document.getElementById('tsAvg').checked = saved.tsAvg;
+    if (typeof saved.tsMax === 'boolean') document.getElementById('tsMax').checked = saved.tsMax;
+    if (typeof saved.tsMin === 'boolean') document.getElementById('tsMin').checked = saved.tsMin;
+    if (typeof saved.tsStd === 'boolean') document.getElementById('tsStd').checked = saved.tsStd;
+function saveDashboardPrefs(){
+  const prefs = {
+    subject: document.getElementById('subjectSelect')?.value || 'TOTAL',
+    exam: document.getElementById('examNameSelect')?.value || '',
+    cls: document.getElementById('classSelect')?.value || '',
+function showExcludedClasses(){
+  const list = Array.isArray(window.__excluded_classes) ? window.__excluded_classes : [];
+  const box = document.getElementById('excludedList');
+  if (!box) return;
+  if (!list.length) { box.textContent = '无剔除班级或未设置最小样本数。'; }
+  else {
+    box.innerHTML = '<ul class="list-unstyled mb-0">' + list.map(o => `<li>${o.class_name}（人数 ${o.count}）</li>`).join('') + '</ul>';
+  }
+  const modal = new bootstrap.Modal(document.getElementById('excludedModal'));
+  modal.show();
+}
+
+    course: document.getElementById('courseSelect')?.value || ''
+  };
+  try { localStorage.setItem('dashboardFilters', JSON.stringify(prefs)); } catch(e) {}
+  // 同步到服务端偏好
+  try { fetch('/dashboard/prefs', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ dashboard_filters: prefs }) }); } catch(e) {}
+}
+function restoreDashboardPrefs(){
+  try {
+    const prefs = JSON.parse(localStorage.getItem('dashboardFilters')||'{}');
+    if (prefs.subject) document.getElementById('subjectSelect').value = prefs.subject;
+    if (typeof prefs.exam === 'string') document.getElementById('examNameSelect').value = prefs.exam;
+    if (typeof prefs.cls === 'string') document.getElementById('classSelect').value = prefs.cls;
+    if (typeof prefs.course === 'string') document.getElementById('courseSelect').value = prefs.course;
+  } catch(e) {}
+  // 从服务端偏好回填（若存在）
+  try {
+    fetch('/dashboard/prefs').then(r=>r.json()).then(p=>{
+      const f = p && p.dashboard_filters ? p.dashboard_filters : null;
+      if (f) {
+        if (f.subject) document.getElementById('subjectSelect').value = f.subject;
+        if (typeof f.exam === 'string') document.getElementById('examNameSelect').value = f.exam;
+        if (typeof f.cls === 'string') document.getElementById('classSelect').value = f.cls;
+        if (typeof f.course === 'string') document.getElementById('courseSelect').value = f.course;
+      }
+      loadAnalysis(); updateExportLinks();
+    });
+  } catch(e) { loadAnalysis(); updateExportLinks(); }
+}
+
+  } catch(e) {}
+  loadAnalysis();
+  updateExportLinks();
+});
 </script>
 {% endblock %}

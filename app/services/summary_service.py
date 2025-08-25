@@ -66,133 +66,146 @@ def get_summary_data(
             rule_version = published_set.version
 
     # TOTAL: 若无总分科目，按各科汇总生成“虚拟总分行”
-    if (subject_code or '').upper() == 'TOTAL':
+    if (subject_code or "").upper() == "TOTAL":
         rows = base_q.all()
         # 按 (exam_name, student.id) 聚合
         from collections import defaultdict
+
         agg = {}
         exam_type_by_exam = {}
         for g in rows:
-            key = (g.exam_name or 'default', g.student_id)
+            key = (g.exam_name or "default", g.student_id)
             rec = agg.get(key)
             if not rec:
                 rec = agg[key] = {
-                    'total': 0.0,
-                    'student': g.student,
-                    'exam_name': g.exam_name or 'default',
+                    "total": 0.0,
+                    "student": g.student,
+                    "exam_name": g.exam_name or "default",
                 }
-                if (g.exam_name or 'default') not in exam_type_by_exam:
-                    exam_type_by_exam[g.exam_name or 'default'] = g.exam_type or 'regular'
-            rec['total'] = float(rec['total']) + float(g.score or 0)
+                if (g.exam_name or "default") not in exam_type_by_exam:
+                    exam_type_by_exam[g.exam_name or "default"] = g.exam_type or "regular"
+            rec["total"] = float(rec["total"]) + float(g.score or 0)
         # 计算班/年排名（按 exam_name 维度分别计算）
         by_class = defaultdict(list)
         by_grade = defaultdict(list)
         for (ex, sid), rec in agg.items():
-            s = rec['student']
-            by_class[(ex, s.class_name)].append((sid, rec['total']))
-            by_grade[(ex, s.grade_level)].append((sid, rec['total']))
+            s = rec["student"]
+            by_class[(ex, s.class_name)].append((sid, rec["total"]))
+            by_grade[(ex, s.grade_level)].append((sid, rec["total"]))
+
         def rank_map(pairs):
             ps = sorted(pairs, key=lambda x: x[1], reverse=True)
             return {sid: i for i, (sid, _v) in enumerate(ps, 1)}
+
         class_rank_map = {k: rank_map(v) for k, v in by_class.items()}
         grade_rank_map = {k: rank_map(v) for k, v in by_grade.items()}
-        # 获取 TOTAL 的满分（按 exam_type 推断，默认 regular）
-        max_cache = {}
+        # 批量获取 TOTAL 的满分配置避免N+1查询
+        exam_types = list(set(exam_type_by_exam.values()))
+        schemes = ExamScheme.query.filter(
+            ExamScheme.exam_type.in_(exam_types),
+            ExamScheme.subject_code == "TOTAL"
+        ).all()
+        max_cache = {(s.exam_type, "TOTAL"): s.max_score for s in schemes}
+
         for (ex, sid), rec in agg.items():
-            s = rec['student']
-            total = rec['total']
-            et = exam_type_by_exam.get(ex, 'regular') or 'regular'
-            key = (et, 'TOTAL')
-            if key in max_cache:
-                max_score = max_cache[key]
-            else:
-                scheme = ExamScheme.query.filter_by(exam_type=et, subject_code='TOTAL').first()
-                max_score = scheme.max_score if scheme else None
-                max_cache[key] = max_score
-            perc = round(float(total)/float(max_score)*100.0, 2) if max_score else None
-            items.append({
-                'student_id': s.student_id,
-                'name': s.name,
-                'class_name': s.class_name,
-                'grade_level': s.grade_level,
-                'exam_name': ex,
-                'subject_code': 'TOTAL',
-                'score': total,
-                'percentage': perc,
-                'letter': grade_letter_for(ex, 'TOTAL', total),
-                'class_rank': class_rank_map.get((ex, s.class_name), {}).get(s.id),
-                'grade_rank': grade_rank_map.get((ex, s.grade_level), {}).get(s.id),
-                'rule_version': rule_version,
-            })
+            s = rec["student"]
+            total = rec["total"]
+            et = exam_type_by_exam.get(ex, "regular") or "regular"
+            key = (et, "TOTAL")
+            max_score = max_cache.get(key)
+            perc = round(float(total) / float(max_score) * 100.0, 2) if max_score else None
+            items.append(
+                {
+                    "student_id": s.student_id,
+                    "name": s.name,
+                    "class_name": s.class_name,
+                    "grade_level": s.grade_level,
+                    "exam_name": ex,
+                    "subject_code": "TOTAL",
+                    "score": total,
+                    "percentage": perc,
+                    "letter": grade_letter_for(ex, "TOTAL", total),
+                    "class_rank": class_rank_map.get((ex, s.class_name), {}).get(s.id),
+                    "grade_rank": grade_rank_map.get((ex, s.grade_level), {}).get(s.id),
+                    "rule_version": rule_version,
+                }
+            )
         total_count = len(items)
         # 分页与排序
-        if order_by == 'score_desc':
-            items.sort(key=lambda x: x['score'], reverse=True)
-        elif order_by == 'score_asc':
-            items.sort(key=lambda x: x['score'])
-        elif order_by == 'class_rank':
-            items.sort(key=lambda x: (x['class_name'] or '', x['class_rank'] or 1e9))
-        elif order_by == 'grade_rank':
-            items.sort(key=lambda x: (x['grade_level'] or '', x['grade_rank'] or 1e9))
-        start = max(0, (page-1)*page_size)
+        if order_by == "score_desc":
+            items.sort(key=lambda x: x["score"], reverse=True)
+        elif order_by == "score_asc":
+            items.sort(key=lambda x: x["score"])
+        elif order_by == "class_rank":
+            items.sort(key=lambda x: (x["class_name"] or "", x["class_rank"] or 1e9))
+        elif order_by == "grade_rank":
+            items.sort(key=lambda x: (x["grade_level"] or "", x["grade_rank"] or 1e9))
+        start = max(0, (page - 1) * page_size)
         end = start + page_size
         items = items[start:end]
         return {
-            'items': items,
-            'total': total_count,
-            'page': page,
-            'page_size': page_size,
-            'rule_version': rule_version,
+            "items": items,
+            "total": total_count,
+            "page": page,
+            "page_size": page_size,
+            "rule_version": rule_version,
         }
 
     # 非 TOTAL：按指定学科直接取行
     q = base_q.filter(Course.code == subject_code) if subject_code else base_q
     # 统计总数
     total = db.session.query(db.func.count()).select_from(q.subquery()).scalar()
-    rows = q.offset((page - 1) * page_size).limit(page_size).all()
+    # 使用eager loading避免N+1查询
+    rows = q.options(db.joinedload(Grade.student), db.joinedload(Grade.course)).offset((page - 1) * page_size).limit(page_size).all()
 
     # 计算排名（同学科内、按班/年）
     from collections import defaultdict
+
     by_class = defaultdict(list)
     by_grade = defaultdict(list)
     for g in rows:
         by_class[g.student.class_name].append((g.student_id, g.score))
         by_grade[g.student.grade_level].append((g.student_id, g.score))
+
     def rank_map(pairs):
         pairs_sorted = sorted(pairs, key=lambda x: x[1], reverse=True)
         return {sid: i for i, (sid, _) in enumerate(pairs_sorted, 1)}
+
     class_rank_map = {k: rank_map(v) for k, v in by_class.items()}
     grade_rank_map = {k: rank_map(v) for k, v in by_grade.items()}
 
-    # 规则版本与满分缓存
-    max_cache = {}
+    # 批量获取满分配置避免N+1查询
+    exam_types = list(set(g.exam_type or "regular" for g in rows))
+    subject_codes = list(set(g.course.code for g in rows))
+    schemes = ExamScheme.query.filter(
+        ExamScheme.exam_type.in_(exam_types),
+        ExamScheme.subject_code.in_(subject_codes)
+    ).all()
+    max_cache = {(s.exam_type, s.subject_code): s.max_score for s in schemes}
 
     for g in rows:
         letter = grade_letter_for(g.exam_name or "default", g.course.code, g.score)
         perc = None
         key = (g.exam_type or "regular", g.course.code)
-        if key in max_cache:
-            max_score = max_cache[key]
-        else:
-            s = ExamScheme.query.filter_by(exam_type=key[0], subject_code=key[1]).first()
-            max_score = s.max_score if s else None
-            max_cache[key] = max_score
+        max_score = max_cache.get(key)
         if max_score and max_score > 0:
             perc = round(float(g.score) / float(max_score) * 100.0, 2)
-        items.append({
-            "student_id": g.student.student_id,
-            "name": g.student.name,
-            "class_name": g.student.class_name,
-            "grade_level": g.student.grade_level,
-            "exam_name": g.exam_name,
-            "subject_code": g.course.code,
-            "score": g.score,
-            "percentage": perc,
-            "letter": letter,
-            "class_rank": class_rank_map.get(g.student.class_name, {}).get(g.student_id),
-            "grade_rank": grade_rank_map.get(g.student.grade_level, {}).get(g.student_id),
-            "rule_version": rule_version,
-        })
+        items.append(
+            {
+                "student_id": g.student.student_id,
+                "name": g.student.name,
+                "class_name": g.student.class_name,
+                "grade_level": g.student.grade_level,
+                "exam_name": g.exam_name,
+                "subject_code": g.course.code,
+                "score": g.score,
+                "percentage": perc,
+                "letter": letter,
+                "class_rank": class_rank_map.get(g.student.class_name, {}).get(g.student_id),
+                "grade_rank": grade_rank_map.get(g.student.grade_level, {}).get(g.student_id),
+                "rule_version": rule_version,
+            }
+        )
 
     if order_by == "score_desc":
         items.sort(key=lambda x: x["score"], reverse=True)

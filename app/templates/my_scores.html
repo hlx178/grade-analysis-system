@@ -20,13 +20,14 @@
       <option value="MOR">道法</option>
     </select>
   </div>
+  {% if current_user.role in ['admin','teacher'] %}
+  <div class="col-auto">
+    <label class="form-label">学号(管理员/教师)</label>
+    <input id="studentId" class="form-control" placeholder="输入学号以查看指定学生">
+  </div>
+  {% endif %}
   <div class="col-auto">
     <label class="form-label">排序</label>
-  <div class="col-auto">
-    <label class="form-label">趋势</label>
-    <button class="btn btn-outline-secondary" onclick="loadTrend()">学科 vs 总分</button>
-  </div>
-
     <select id="orderBy" class="form-select">
       <option value="score_desc">分数(高->低)</option>
       <option value="score_asc">分数(低->高)</option>
@@ -35,7 +36,14 @@
     </select>
   </div>
   <div class="col-auto">
+    <label class="form-label">趋势</label>
+    <button class="btn btn-outline-secondary" onclick="loadTrend()">学科 vs 总分</button>
+  </div>
+  <div class="col-auto">
     <button class="btn btn-primary" onclick="loadMySummary()">查询</button>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-success" onclick="exportMySummary()">导出 CSV</button>
   </div>
 </div>
 
@@ -53,18 +61,18 @@
   </thead>
   <tbody></tbody>
 </table>
-{% endblock %}
-{% block scripts %}
-<script>
-async function loadSummaryOptions(){
-  const res = await fetch('/api/summary/options');
+
 <div class="card mt-3">
   <div class="card-header">学科 vs 总分 趋势</div>
   <div class="card-body">
     <canvas id="trendChart" height="140"></canvas>
   </div>
 </div>
-
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadSummaryOptions(){
+  const res = await fetch('/api/summary/options');
   const data = await res.json();
   const sel = document.getElementById('examName');
   sel.innerHTML = '';
@@ -79,7 +87,10 @@ async function loadMySummary(){
   const subject_code = document.getElementById('subjectCode').value;
   const order_by = document.getElementById('orderBy').value;
   const exam_name = selectedExams();
-  const res = await fetch('/api/summary?' + new URLSearchParams({ subject_code, order_by, exam_name }));
+  const student_id = document.getElementById('studentId') ? document.getElementById('studentId').value.trim() : '';
+  const params = { subject_code, order_by, exam_name };
+  if (student_id) params.student_id = student_id;
+  const res = await fetch('/api/my/summary?' + new URLSearchParams(params));
   const data = await res.json();
   const tb = document.querySelector('#mySummaryTable tbody'); tb.innerHTML='';
   const subjName = (code)=>({TOTAL:'总分',CN:'语文',MA:'数学',EN:'英语',SC:'科学',SOC:'社会',MOR:'道法'})[code]||code;
@@ -88,6 +99,7 @@ async function loadMySummary(){
     tr.innerHTML = `<td>${it.exam_name||''}</td><td>${subjName(it.subject_code||subject_code)}</td><td>${it.score}</td><td>${it.percentage??''}</td><td>${it.letter??''}</td><td>${it.class_rank??''}</td><td>${it.grade_rank??''}</td>`;
     tb.appendChild(tr);
   });
+}
 
 async function loadTrend(){
   const exams = selectedExams();
@@ -95,10 +107,15 @@ async function loadTrend(){
   // 拉取学科与总分两组数据
   const subj = document.getElementById('subjectCode').value;
   if (subj==='TOTAL'){ alert('请选择一个具体学科'); return; }
-  const params = (code)=> new URLSearchParams({ subject_code: code, order_by: 'score_desc', exam_name: exams });
+  const student_id = document.getElementById('studentId') ? document.getElementById('studentId').value.trim() : '';
+  const params = (code)=> {
+    const p = { subject_code: code, order_by: 'score_desc', exam_name: exams };
+    if (student_id) p.student_id = student_id;
+    return new URLSearchParams(p);
+  };
   const [subjRes, totalRes] = await Promise.all([
-    fetch('/api/summary?'+params(subj)),
-    fetch('/api/summary?'+params('TOTAL'))
+    fetch('/api/my/summary?'+params(subj)),
+    fetch('/api/my/summary?'+params('TOTAL'))
   ]);
   const subjData = await subjRes.json();
   const totalData = await totalRes.json();
@@ -127,9 +144,17 @@ async function loadTrend(){
   });
 }
 
+async function exportMySummary(){
+  const subject_code = document.getElementById('subjectCode').value;
+  const order_by = document.getElementById('orderBy').value;
+  const exam_name = selectedExams();
+  const student_id = document.getElementById('studentId') ? document.getElementById('studentId').value.trim() : '';
+  const params = new URLSearchParams({ scope: 'all', format: 'csv', subject_code, order_by, exam_name });
+  if (student_id) params.set('student_id', student_id);
+  // 复用通用导出接口：下载后用户可在表格软件筛选
+  window.open('/api/summary/export?' + params.toString(), '_blank');
 }
 
 window.addEventListener('DOMContentLoaded', async ()=>{ await loadSummaryOptions(); await loadMySummary(); });
 </script>
 {% endblock %}
-
