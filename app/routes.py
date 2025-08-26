@@ -1434,17 +1434,30 @@ def api_import_files_batch_delete():
         else:
             not_found.append(fid)
         # 级联删除关联成绩（按考试名称匹配）
-        # 以原始文件名（去扩展名）作为考试名称
-        orig_name = (meta.get("original_filename") or f"{fid}.xlsx")
-        exam_name = os.path.splitext(orig_name)[0]
+        # 优先使用导入时记录在元数据中的 exam_name；同时兼容以原始文件名（去扩展名）作为考试名称
+        exam_names = set()
         try:
-            cnt = Grade.query.filter(Grade.exam_name == exam_name).delete(
-                synchronize_session=False
-            )
-            if cnt:
-                grades_deleted_total += cnt
+            meta_exam = (meta.get("exam_name") or "").strip()
+            if meta_exam:
+                exam_names.add(meta_exam)
         except Exception:
-            current_app.logger.exception("batch delete grades failed for %s", exam_name)
+            pass
+        try:
+            orig_name = (meta.get("original_filename") or f"{fid}.xlsx")
+            exam_from_filename = os.path.splitext(orig_name)[0]
+            if exam_from_filename:
+                exam_names.add(exam_from_filename)
+        except Exception:
+            pass
+        if exam_names:
+            try:
+                cnt = Grade.query.filter(Grade.exam_name.in_(list(exam_names))).delete(
+                    synchronize_session=False
+                )
+                if cnt:
+                    grades_deleted_total += cnt
+            except Exception:
+                current_app.logger.exception("batch delete grades failed for %s", ",".join(exam_names))
     if grades_deleted_total:
         db.session.commit()
         try:
@@ -1480,14 +1493,28 @@ def api_import_file_delete(file_id):
                     os.remove(p + ".json")
             except Exception:
                 pass
-            # 始终级联删除关联成绩（按考试名称，规则：以原始文件名去扩展名）
+            # 始终级联删除关联成绩（按考试名称）
+            # 优先使用导入时记录在元数据中的 exam_name；同时兼容以原始文件名（去扩展名）作为考试名称
             grades_deleted = 0
-            orig_name = (meta.get("original_filename") or f"{file_id}.xlsx")
-            exam_name = os.path.splitext(orig_name)[0] or "default"
+            exam_names = set()
             try:
-                grades_deleted = Grade.query.filter(Grade.exam_name == exam_name).delete(
-                    synchronize_session=False
-                )
+                meta_exam = (meta.get("exam_name") or "").strip()
+                if meta_exam:
+                    exam_names.add(meta_exam)
+            except Exception:
+                pass
+            try:
+                orig_name = (meta.get("original_filename") or f"{file_id}.xlsx")
+                exam_from_filename = os.path.splitext(orig_name)[0]
+                if exam_from_filename:
+                    exam_names.add(exam_from_filename)
+            except Exception:
+                pass
+            try:
+                if exam_names:
+                    grades_deleted = Grade.query.filter(Grade.exam_name.in_(list(exam_names))).delete(
+                        synchronize_session=False
+                    )
                 db.session.commit()
                 try:
                     _cache_bump(current_app, "summary")
@@ -1495,7 +1522,7 @@ def api_import_file_delete(file_id):
                 except Exception:
                     pass
             except Exception as e:
-                current_app.logger.exception("delete grades failed for %s", exam_name)
+                current_app.logger.exception("delete grades failed for %s", ",".join(exam_names) or "<empty>")
                 return jsonify({"deleted": True, "grades_deleted": 0, "warning": str(e)})
             return jsonify({"deleted": True, "grades_deleted": grades_deleted})
         except Exception as e:
