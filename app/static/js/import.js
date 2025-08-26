@@ -117,10 +117,15 @@
         const tr = document.createElement('tr');
         const dt = new Date(it.mtime*1000);
         tr.innerHTML = `<td><input type="checkbox" class="upload-cb" value="${it.file_id}"></td><td>${it.filename||it.file_id+'.xlsx'}</td><td>${it.file_id}</td><td>${it.exam_name||''}</td><td>${(it.size/1024).toFixed(1)} KB</td><td>${dt.toLocaleString()}</td>`;
+        // 填充便于批量操作的元数据
+        const ckb = tr.querySelector('input.upload-cb');
+        if (ckb){ ckb.dataset.exam = it.exam_name||''; ckb.dataset.filename = it.filename||''; }
         const tdOp = document.createElement('td');
         const delBtn = document.createElement('button'); delBtn.className='btn btn-sm btn-outline-danger'; delBtn.textContent='删除';
         delBtn.onclick = async ()=>{
-          if (!confirm('确认删除该文件及其关联考试的所有数据？此操作不可恢复！')) return;
+          const exam = (it.exam_name||'') || ((it.filename||'').replace(/\.[^.]+$/, ''));
+          const msg = exam ? `确认删除该文件，并删除“${exam}”考试的所有成绩数据？此操作不可恢复！` : '确认删除该文件及其关联考试的所有数据？此操作不可恢复！';
+          if (!confirm(msg)) return;
           const url = '/api/import/files/'+it.file_id + '?delete_grades=1';
           const r = await fetch(url, { method: 'DELETE' });
           const d = await r.json();
@@ -139,9 +144,13 @@
   }
 
   async function batchDeleteSelected(){
-    const ids = Array.from(document.querySelectorAll('#uploadTable .upload-cb:checked')).map(x=>x.value);
+    const cbs = Array.from(document.querySelectorAll('#uploadTable .upload-cb:checked'));
+    const ids = cbs.map(x=>x.value);
     if (!ids.length){ alert('请选择文件'); return; }
-    if (!confirm('确认删除选中的 ' + ids.length + ' 个文件及其关联考试的所有数据？此操作不可恢复！')) return;
+    const exams = cbs.map(x=> x.dataset.exam || (x.dataset.filename||'').replace(/\.[^.]+$/, '')).filter(Boolean);
+    const uniqExams = Array.from(new Set(exams));
+    const extra = uniqExams.length ? `\n将删除以下考试：\n- ${uniqExams.join('\n- ')}` : '';
+    if (!confirm(`确认删除选中的 ${ids.length} 个文件及其关联考试的所有数据？此操作不可恢复！${extra}`)) return;
     const r = await fetch('/api/import/files/batch-delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ file_ids: ids, delete_grades: true }) });
     const d = await r.json();
     if (r.ok){ if (d.grades_deleted) alert('已删除关联成绩 '+ d.grades_deleted +' 条'); loadUploadList(); }
