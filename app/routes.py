@@ -1430,18 +1430,17 @@ def api_import_files_batch_delete():
                 pass
         else:
             not_found.append(fid)
-        # 可选删除关联成绩（按考试名称匹配）
-        if delete_grades:
-            exam_name = (meta.get("exam_name") or "").strip()
-            if exam_name:
-                try:
-                    cnt = Grade.query.filter(Grade.exam_name == exam_name).delete(
-                        synchronize_session=False
-                    )
-                    if cnt:
-                        grades_deleted_total += cnt
-                except Exception:
-                    current_app.logger.exception("batch delete grades failed for %s", exam_name)
+        # 级联删除关联成绩（按考试名称匹配）
+        exam_name = (meta.get("exam_name") or "").strip()
+        if exam_name:
+            try:
+                cnt = Grade.query.filter(Grade.exam_name == exam_name).delete(
+                    synchronize_session=False
+                )
+                if cnt:
+                    grades_deleted_total += cnt
+            except Exception:
+                current_app.logger.exception("batch delete grades failed for %s", exam_name)
     if grades_deleted_total:
         db.session.commit()
         try:
@@ -1459,13 +1458,11 @@ def api_import_files_batch_delete():
 def api_import_file_delete(file_id):
     if current_user.role != "admin":
         return jsonify({"error": "forbidden"}), 403
-    delete_grades = request.args.get("delete_grades", "").lower() in ("1", "true", "yes")
     upload_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
     p = os.path.join(upload_dir, f"{file_id}.xlsx")
     meta = {}
     try:
         import json
-
         if os.path.exists(p + ".json"):
             with open(p + ".json", "r", encoding="utf-8") as mf:
                 meta = json.load(mf) or {}
@@ -1479,62 +1476,29 @@ def api_import_file_delete(file_id):
                     os.remove(p + ".json")
             except Exception:
                 pass
+            # 始终级联删除关联成绩（按考试名称）
             grades_deleted = 0
-            if delete_grades:
-                exam_name = (meta.get("exam_name") or "").strip()
-                # 回退策略：若元数据缺少 exam_name 且请求显式开启 fallback_by='default'，使用 'default' 清理
-                fallback_by = request.args.get("fallback_by")
-                if not exam_name and fallback_by == "default":
-                    exam_name = "default"
-                if exam_name:
-                    try:
-                        grades_deleted = Grade.query.filter(Grade.exam_name == exam_name).delete(
-                            synchronize_session=False
-                        )
-                        db.session.commit()
-                        try:
-                            _cache_bump(current_app, "summary")
-                            _cache_bump(current_app, "analysis")
-                        except Exception:
-                            pass
-                    except Exception as e:
-                        current_app.logger.exception("delete grades failed for %s", exam_name)
-                        return jsonify({"deleted": True, "grades_deleted": 0, "warning": str(e)})
+            exam_name = (meta.get("exam_name") or "").strip() or "default"
+            try:
+                grades_deleted = Grade.query.filter(Grade.exam_name == exam_name).delete(
+                    synchronize_session=False
+                )
+                db.session.commit()
+                try:
+                    _cache_bump(current_app, "summary")
+                    _cache_bump(current_app, "analysis")
+                except Exception:
+                    pass
+            except Exception as e:
+                current_app.logger.exception("delete grades failed for %s", exam_name)
+                return jsonify({"deleted": True, "grades_deleted": 0, "warning": str(e)})
             return jsonify({"deleted": True, "grades_deleted": grades_deleted})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     return jsonify({"deleted": False, "error": "not found"}), 404
 
 
-# 管理员清理：按考试名称（可选按学科）删除成绩
-@api_bp.route("/grades/cleanup-by-exam", methods=["POST"])
-@login_required
-def api_grades_cleanup_by_exam():
-    if current_user.role != "admin":
-        return jsonify({"error": "forbidden"}), 403
-    data = request.get_json(force=True) or {}
-    exam_name = (data.get("exam_name") or "").strip()
-    subject_code = (data.get("subject_code") or "").strip()
-    if not exam_name:
-        return jsonify({"error": "exam_name is required"}), 400
-    q = Grade.query.filter(Grade.exam_name == exam_name)
-    if subject_code:
-        from sqlalchemy import select
 
-        course_ids = db.session.query(Course.id).filter(Course.code == subject_code)
-        q = q.filter(Grade.course_id.in_(course_ids))
-    try:
-        deleted = q.delete(synchronize_session=False)
-        db.session.commit()
-        try:
-            _cache_bump(current_app, "summary")
-            _cache_bump(current_app, "analysis")
-        except Exception:
-            pass
-        return jsonify({"deleted": deleted or 0})
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
 
 
 # 管理员清理：清空所有成绩（可选按学科过滤）
@@ -1568,36 +1532,7 @@ def api_cleanup_nameless_students():
         return jsonify({"error": str(e)}), 500
 
 
-@api_bp.route("/grades/cleanup-all", methods=["POST"])
-@login_required
-def api_grades_cleanup_all():
-    if current_user.role != "admin":
-        return jsonify({"error": "forbidden"}), 403
-    data = request.get_json(silent=True) or {}
-    confirm = data.get("confirm") in (True, "true", "1", 1)
-    subject_code = (data.get("subject_code") or "").strip()
-    if not confirm:
-        return jsonify({"error": "confirmation required"}), 400
-    try:
-        if subject_code:
-            # 仅清理某一学科
-            course_ids = db.session.query(Course.id).filter(Course.code == subject_code)
-            deleted = Grade.query.filter(Grade.course_id.in_(course_ids)).delete(
-                synchronize_session=False
-            )
-        else:
-            # 清空所有成绩
-            deleted = Grade.query.delete(synchronize_session=False)
-        db.session.commit()
-        try:
-            _cache_bump(current_app, "summary")
-            _cache_bump(current_app, "analysis")
-        except Exception:
-            pass
-        return jsonify({"deleted": deleted or 0})
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
+
 
 
 # 导入: 根据选择的工作表执行导入

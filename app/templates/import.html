@@ -79,7 +79,7 @@
     </div>
     <div class="d-flex justify-content-between align-items-center mb-2">
       <div>
-        <button class="btn btn-outline-danger btn-sm" onclick="batchDeleteSelected()">批量删除所选</button>
+        <button class="btn btn-outline-danger btn-sm" id="batchDeleteBtn">批量删除所选</button>
       </div>
     </div>
     <div class="table-responsive">
@@ -90,43 +90,6 @@
     </div>
   </div>
 </div>
-  <div class="card mt-3">
-    <div class="card-body">
-      <div class="row g-2 align-items-end">
-        <div class="col-auto"><label class="form-label mb-0">按考试名称清理成绩</label></div>
-        <div class="col-auto"><input id="cleanupExam" class="form-control form-control-sm" placeholder="考试名称"></div>
-        <div class="col-auto"><input id="cleanupSubject" class="form-control form-control-sm" placeholder="学科代码(可选，如 CN/TOTAL)"></div>
-        <div class="col-auto"><button class="btn btn-outline-danger btn-sm" id="cleanupByExamBtn">清理</button></div>
-        <div class="col"><small class="text-muted">仅管理员可见；清理后汇总/分析将自动刷新。</small></div>
-      </div>
-      <div id="cleanupResult" class="small mt-2 text-muted"></div>
-    </div>
-  </div>
-  <div class="card mt-3">
-    <div class="card-body">
-      <div class="d-flex align-items-center gap-2">
-        <span class="text-danger">危险操作：</span>
-        <button class="btn btn-outline-danger btn-sm" id="cleanupAllBtn">清空所有成绩</button>
-        <input id="cleanupAllSubject" class="form-control form-control-sm" placeholder="学科代码(可选，如 TOTAL/CN)">
-      </div>
-      <div class="small text-muted mt-2">仅管理员可见。将删除所有成绩记录（或指定学科的所有成绩），不可恢复，请谨慎操作。</div>
-      <div id="cleanupAllResult" class="small mt-2 text-muted"></div>
-    </div>
-  </div>
-
-  <div class="card mt-3">
-    <div class="card-body">
-      <div class="d-flex align-items-center gap-2">
-        <span>清理“姓名为空”的学生</span>
-        <button class="btn btn-outline-secondary btn-sm" id="cleanupNamelessBtn">仅删除无成绩的无名学生</button>
-        <button class="btn btn-outline-danger btn-sm" id="cleanupNamelessCascadeBtn">级联删除无名学生及其成绩</button>
-      </div>
-      <div id="cleanupNamelessResult" class="small text-muted mt-2"></div>
-    </div>
-  </div>
-
-
-
   <p>学生导入模板：学号（8位：入学年份4位+流水号4位）、姓名、班级必填；可选：年级、邮箱。</p>
 </div>
 {% endblock %}

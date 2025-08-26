@@ -120,21 +120,14 @@
         const tdOp = document.createElement('td');
         const delBtn = document.createElement('button'); delBtn.className='btn btn-sm btn-outline-danger'; delBtn.textContent='删除';
         delBtn.onclick = async ()=>{
-          if (!confirm('确认删除该文件？')) return;
-          const withGrades = confirm('是否同时删除该文件对应考试名称下的所有成绩记录？[确定=是/取消=否]');
-          let url = '/api/import/files/'+it.file_id + (withGrades? '?delete_grades=1' : '');
-          if (withGrades && !it.exam_name){
-            const useDefault = confirm('元数据缺少考试名称，是否使用 "default" 作为回退进行清理？');
-            if (useDefault) url += '&fallback_by=default';
-          }
+          if (!confirm('确认删除该文件及其关联考试的所有数据？此操作不可恢复！')) return;
+          const url = '/api/import/files/'+it.file_id + '?delete_grades=1';
           const r = await fetch(url, { method: 'DELETE' });
           const d = await r.json();
           if (r.ok) {
             if (d.grades_deleted) { alert('已删除关联成绩 '+ d.grades_deleted +' 条'); }
-            else if (withGrades) { alert('未发现可删除的关联成绩，请尝试使用“按考试名称清理成绩”工具'); }
             loadUploadList();
-          }
-          else { alert(d.error||'删除失败'); }
+          } else { alert(d.error||'删除失败'); }
         };
         tdOp.appendChild(delBtn); tr.appendChild(tdOp); tb.appendChild(tr);
       });
@@ -148,42 +141,11 @@
   async function batchDeleteSelected(){
     const ids = Array.from(document.querySelectorAll('#uploadTable .upload-cb:checked')).map(x=>x.value);
     if (!ids.length){ alert('请选择文件'); return; }
-    if (!confirm('确认删除选中的 ' + ids.length + ' 个文件？')) return;
-    const withGrades = confirm('是否同时删除这些文件对应考试名称下的成绩记录？[确定=是/取消=否]');
-    const r = await fetch('/api/import/files/batch-delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ file_ids: ids, delete_grades: withGrades }) });
+    if (!confirm('确认删除选中的 ' + ids.length + ' 个文件及其关联考试的所有数据？此操作不可恢复！')) return;
+    const r = await fetch('/api/import/files/batch-delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ file_ids: ids, delete_grades: true }) });
     const d = await r.json();
     if (r.ok){ if (d.grades_deleted) alert('已删除关联成绩 '+ d.grades_deleted +' 条'); loadUploadList(); }
     else { alert(d.error||'批量删除失败'); }
-  }
-
-  async function cleanupByExam(){
-    const exam = (document.getElementById('cleanupExam')||{}).value?.trim();
-    const subj = (document.getElementById('cleanupSubject')||{}).value?.trim();
-    if (!exam){ alert('请输入考试名称'); return; }
-    const res = await fetch('/api/grades/cleanup-by-exam', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ exam_name: exam, subject_code: subj||undefined }) });
-    const data = await res.json();
-    const box = document.getElementById('cleanupResult');
-    if (res.ok){ box.textContent = `已删除 ${data.deleted||0} 条成绩`; }
-    else { box.textContent = `清理失败：${data.error||res.status}`; }
-  }
-
-  async function cleanupAllGrades(){
-    if (!confirm('将要删除所有成绩（或指定学科的所有成绩），不可恢复。确认继续？')) return;
-    const subj = (document.getElementById('cleanupAllSubject')||{}).value?.trim();
-    const res = await fetch('/api/grades/cleanup-all', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ confirm: true, subject_code: subj||undefined }) });
-    const data = await res.json();
-    const box = document.getElementById('cleanupAllResult');
-    if (res.ok){ box.textContent = `已删除 ${data.deleted||0} 条成绩`; }
-    else { box.textContent = `清理失败：${data.error||res.status}`; }
-  }
-
-  async function cleanupNameless(cascade){
-    if (cascade && !confirm('将删除“姓名为空”的学生及其所有成绩，确认继续？')) return;
-    const res = await fetch('/api/admin/cleanup/nameless-students', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ cascade }) });
-    const data = await res.json();
-    const box = document.getElementById('cleanupNamelessResult');
-    if (res.ok){ box.textContent = `已删除学生 ${data.deleted_students||0} 个`; }
-    else { box.textContent = `清理失败：${data.error||res.status}`; }
   }
 
   function bindEvents(){
@@ -195,10 +157,6 @@
     const ref = document.getElementById('uploadRefreshBtn'); if (ref) ref.addEventListener('click', loadUploadList);
     const delBatch = document.getElementById('batchDeleteBtn'); if (delBatch) delBatch.addEventListener('click', batchDeleteSelected);
     const tog = document.getElementById('toggleAllUploads'); if (tog) tog.addEventListener('change', (e)=> toggleAllUploads(e.target.checked));
-    const cbExam = document.getElementById('cleanupByExamBtn'); if (cbExam) cbExam.addEventListener('click', cleanupByExam);
-    const cbAll = document.getElementById('cleanupAllBtn'); if (cbAll) cbAll.addEventListener('click', cleanupAllGrades);
-    const nameless = document.getElementById('cleanupNamelessBtn'); if (nameless) nameless.addEventListener('click', ()=> cleanupNameless(false));
-    const nameless2 = document.getElementById('cleanupNamelessCascadeBtn'); if (nameless2) nameless2.addEventListener('click', ()=> cleanupNameless(true));
   }
 
   document.addEventListener('DOMContentLoaded', () => {
