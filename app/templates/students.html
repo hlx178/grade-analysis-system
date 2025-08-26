@@ -3,7 +3,10 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3>学生列表</h3>
-  <a href="#" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStudentModal">新增学生</a>
+  <div class="btn-group">
+    <a href="#" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addStudentModal">新增学生</a>
+    <button class="btn btn-outline-danger" onclick="openDupDiag()">重名诊断</button>
+  </div>
 </div>
 <div class="row g-2 align-items-end mb-2">
   <div class="col-auto">
@@ -30,6 +33,73 @@
   </thead>
   <tbody></tbody>
 </table>
+
+<!-- 重名诊断模态框 -->
+<div class="modal fade" id="dupDiagModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">重名学生诊断</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2 mb-2">
+          <div class="col-auto">
+            <input id="dupGrade" class="form-control form-control-sm" placeholder="年级(可选)">
+          </div>
+          <div class="col-auto">
+            <input id="dupClass" class="form-control form-control-sm" placeholder="班级(可选)">
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-sm btn-outline-secondary" onclick="loadDupDiag()">刷新</button>
+          </div>
+        </div>
+        <div class="small text-muted" id="dupSummary"></div>
+        <div class="d-flex justify-content-between align-items-center">
+          <ul class="nav nav-tabs" id="dupTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabByName" type="button" role="tab">按姓名</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabByNameGrade" type="button" role="tab">按姓名+年级</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabByNameClass" type="button" role="tab">按姓名+班级</button>
+            </li>
+          </ul>
+          <div class="btn-group ms-2">
+            <button class="btn btn-sm btn-outline-primary" onclick="exportDupCSV('by_name')">导出(按姓名)</button>
+            <button class="btn btn-sm btn-outline-primary" onclick="exportDupCSV('by_name_grade')">导出(按姓名+年级)</button>
+            <button class="btn btn-sm btn-outline-primary" onclick="exportDupCSV('by_name_class')">导出(按姓名+班级)</button>
+          </div>
+        </div>
+        <div class="tab-content mt-2">
+          <div class="tab-pane fade show active" id="tabByName" role="tabpanel">
+            <table class="table table-sm"><thead><tr><th>姓名</th><th>数量</th><th>学生</th></tr></thead><tbody id="dupByName"></tbody></table>
+          </div>
+          <div class="tab-pane fade" id="tabByNameGrade" role="tabpanel">
+            <table class="table table-sm"><thead><tr><th>姓名</th><th>年级</th><th>数量</th><th>学生</th></tr></thead><tbody id="dupByNameGrade"></tbody></table>
+          </div>
+          <div class="tab-pane fade" id="tabByNameClass" role="tabpanel">
+            <table class="table table-sm"><thead><tr><th>姓名</th><th>班级</th><th>数量</th><th>学生</th></tr></thead><tbody id="dupByNameClass"></tbody></table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function exportDupCSV(group){
+  const gl = document.getElementById('dupGrade').value.trim();
+  const cl = document.getElementById('dupClass').value.trim();
+  const qs = new URLSearchParams(); if (gl) qs.set('grade_level', gl); if (cl) qs.set('class_name', cl); qs.set('format','csv'); qs.set('group', group);
+  window.open('/api/admin/diagnose/duplicate-students?' + qs.toString(), '_blank');
+}
+</script>
 
 <!-- 新增学生模态框 -->
 <div class="modal fade" id="addStudentModal" tabindex="-1">
@@ -108,6 +178,32 @@ async function submitStudent() {
     alert('保存失败');
   }
 }
+async function openDupDiag(){ try{ bootstrap.Modal.getOrCreateInstance(document.getElementById('dupDiagModal')).show(); }catch(e){} await loadDupDiag(); }
+async function loadDupDiag(){
+  const gl = document.getElementById('dupGrade').value.trim();
+  const cl = document.getElementById('dupClass').value.trim();
+  const qs = new URLSearchParams(); if (gl) qs.set('grade_level', gl); if (cl) qs.set('class_name', cl);
+  const r = await fetch('/api/admin/diagnose/duplicate-students' + (qs.toString()?('?'+qs.toString()):''));
+  if (!r.ok){ alert('诊断失败'); return; }
+  const d = await r.json();
+  const sum = document.getElementById('dupSummary');
+  sum.textContent = `学生总数：${d.total_students||0}；姓名重名组：${(d.duplicates_by_name||[]).length}；姓名+年级重名组：${(d.duplicates_by_name_grade||[]).length}；姓名+班级重名组：${(d.duplicates_by_name_class||[]).length}`;
+  const render = (arr, tbodyId, cols)=>{
+    const tb = document.getElementById(tbodyId); tb.innerHTML='';
+    (arr||[]).forEach(it=>{
+      const tr = document.createElement('tr');
+      const students = (it.students||[]).map(s=>`${s.student_id||'(无学号)'} ${s.name||''} ${s.grade_level||''} ${s.class_name||''}`).join('<br/>');
+      if (cols===2) tr.innerHTML = `<td>${it.name||''}</td><td>${it.count||0}</td><td>${students}</td>`;
+      else if (cols===3) tr.innerHTML = `<td>${it.name||''}</td><td>${it.grade_level||''}</td><td>${it.count||0}</td><td>${students}</td>`;
+      else tr.innerHTML = `<td>${it.name||''}</td><td>${it.class_name||''}</td><td>${it.count||0}</td><td>${students}</td>`;
+      tb.appendChild(tr);
+    });
+  };
+  render(d.duplicates_by_name, 'dupByName', 2);
+  render(d.duplicates_by_name_grade, 'dupByNameGrade', 3);
+  render(d.duplicates_by_name_class, 'dupByNameClass', 4);
+}
+
 window.addEventListener('DOMContentLoaded', async ()=>{ await loadOptions(); await loadStudents(); });
 </script>
 {% endblock %}

@@ -86,6 +86,8 @@
       if (result) result.innerHTML = `<div class="alert alert-danger">导入失败：${(e && e.message) ? e.message : '异常'}</div>`;
     } finally {
       if (btn){ btn.disabled = false; btn.textContent = '开始导入'; }
+      // 导入失败时，后端已删除上传文件，这里刷新一下列表，避免看到失败条目
+      try{ loadUploadList(); }catch(e){}
     }
   }
 

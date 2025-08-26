@@ -1633,7 +1633,7 @@ def api_diagnose_duplicate_students():
             "class_name": item.class_name,
         }
 
-    return jsonify({
+    data = {
         "filters": {"grade_level": gl, "class_name": cl},
         "duplicates_by_name": [
             {"name": k, "count": len(v), "students": [to_obj(x) for x in v]}
@@ -1648,7 +1648,37 @@ def api_diagnose_duplicate_students():
             for k, v in sorted(dup_name_class.items(), key=lambda kv: (-len(kv[1]), kv[0][0], kv[0][1]))
         ],
         "total_students": len(rows)
-    })
+    }
+    # 可选 CSV 导出
+    if (request.args.get("format") or "").lower() == "csv":
+        group = (request.args.get("group") or "by_name").lower()
+        import csv, io
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        if group == "by_name_grade":
+            w.writerow(["name", "grade_level", "count", "student_id", "student_name", "class_name"])
+            for it in data["duplicates_by_name_grade"]:
+                for s in it["students"]:
+                    w.writerow([it["name"], it["grade_level"], it["count"], s["student_id"], s["name"], s["class_name"]])
+        elif group == "by_name_class":
+            w.writerow(["name", "class_name", "count", "student_id", "student_name", "grade_level"])
+            for it in data["duplicates_by_name_class"]:
+                for s in it["students"]:
+                    w.writerow([it["name"], it["class_name"], it["count"], s["student_id"], s["name"], s["grade_level"]])
+        else:
+            w.writerow(["name", "count", "student_id", "student_name", "grade_level", "class_name"])
+            for it in data["duplicates_by_name"]:
+                for s in it["students"]:
+                    w.writerow([it["name"], it["count"], s["student_id"], s["name"], s["grade_level"], s["class_name"]])
+        csv_text = buf.getvalue()
+        return Response(
+            csv_text,
+            mimetype="text/csv",
+            headers={
+                "Content-Disposition": "attachment; filename=duplicate_students_" + group + ".csv"
+            },
+        )
+    return jsonify(data)
 
 # 管理员清理：清除“无对应上传文件”的孤立考试成绩（支持试运行）
 @api_bp.route("/admin/cleanup/orphan-grades", methods=["POST"])
@@ -1763,6 +1793,15 @@ def api_import_grades():
     try:
         df = pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl")
     except Exception as e:
+        # 读取失败：清理本次上传文件，避免占用上传列表
+        try:
+            os.remove(file_path)
+            try:
+                os.remove(file_path + ".json")
+            except Exception:
+                pass
+        except Exception:
+            pass
         return jsonify({"error": f"Failed to read sheet: {e}"}), 400
 
     # 标准化与自动识别表头/别名
@@ -2035,8 +2074,13 @@ def api_import_grades():
             else:
                 same_name = Student.query.filter_by(name=name).all()
                 if len(same_name) > 1:
-                    errors.append(f"第{idx}行：存在同名学生，请填写唯一学号")
-                    continue
+                    # 尝试按 姓名+班级 唯一匹配（更便捷的策略）
+                    same_name_class = [s for s in same_name if (s.class_name or "").strip() == cls]
+                    if len(same_name_class) == 1:
+                        student = same_name_class[0]
+                    else:
+                        errors.append(f"第{idx}行：存在同名学生，请填写唯一学号")
+                        continue
                 elif len(same_name) == 1:
                     student = same_name[0]
                 else:
@@ -2140,6 +2184,15 @@ def api_import_grades():
             # 记录详细校验失败原因，便于定位
             try:
                 current_app.logger.warning("import validation errors: %s", errors)
+            except Exception:
+                pass
+            # 失败时删除上传文件，避免列表出现失败条目导致的重复考试名
+            try:
+                os.remove(file_path)
+                try:
+                    os.remove(file_path + ".json")
+                except Exception:
+                    pass
             except Exception:
                 pass
             # 返回前端更友好的第一条错误，同时提供详情
