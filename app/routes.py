@@ -1593,6 +1593,63 @@ def api_cleanup_all_grades():
         return jsonify({"error": str(e)}), 500
 
 
+# 管理员诊断：重名学生列表（只读，便于导入前排查）
+@api_bp.route("/admin/diagnose/duplicate-students", methods=["GET"])
+@login_required
+def api_diagnose_duplicate_students():
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    gl = (request.args.get("grade_level") or "").strip()
+    cl = (request.args.get("class_name") or "").strip()
+    q = Student.query
+    if gl:
+        q = q.filter(Student.grade_level == gl)
+    if cl:
+        q = q.filter(Student.class_name == cl)
+    rows = q.with_entities(Student.id, Student.student_id, Student.name, Student.grade_level, Student.class_name).all()
+    from collections import defaultdict
+    # 1) 按姓名的全局重名
+    by_name = defaultdict(list)
+    for r in rows:
+        by_name[(r.name or "").strip()].append(r)
+    dup_name = {k: v for k, v in by_name.items() if k and len(v) > 1}
+    # 2) 按(姓名,年级)的重名
+    by_name_grade = defaultdict(list)
+    for r in rows:
+        by_name_grade[((r.name or "").strip(), (r.grade_level or "").strip())].append(r)
+    dup_name_grade = {k: v for k, v in by_name_grade.items() if k[0] and len(v) > 1}
+    # 3) 按(姓名,班级)的重名
+    by_name_class = defaultdict(list)
+    for r in rows:
+        by_name_class[((r.name or "").strip(), (r.class_name or "").strip())].append(r)
+    dup_name_class = {k: v for k, v in by_name_class.items() if k[0] and len(v) > 1}
+
+    def to_obj(item):
+        return {
+            "id": item.id,
+            "student_id": item.student_id,
+            "name": item.name,
+            "grade_level": item.grade_level,
+            "class_name": item.class_name,
+        }
+
+    return jsonify({
+        "filters": {"grade_level": gl, "class_name": cl},
+        "duplicates_by_name": [
+            {"name": k, "count": len(v), "students": [to_obj(x) for x in v]}
+            for k, v in sorted(dup_name.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        ],
+        "duplicates_by_name_grade": [
+            {"name": k[0], "grade_level": k[1], "count": len(v), "students": [to_obj(x) for x in v]}
+            for k, v in sorted(dup_name_grade.items(), key=lambda kv: (-len(kv[1]), kv[0][0], kv[0][1]))
+        ],
+        "duplicates_by_name_class": [
+            {"name": k[0], "class_name": k[1], "count": len(v), "students": [to_obj(x) for x in v]}
+            for k, v in sorted(dup_name_class.items(), key=lambda kv: (-len(kv[1]), kv[0][0], kv[0][1]))
+        ],
+        "total_students": len(rows)
+    })
+
 # 管理员清理：清除“无对应上传文件”的孤立考试成绩（支持试运行）
 @api_bp.route("/admin/cleanup/orphan-grades", methods=["POST"])
 @login_required
