@@ -1377,11 +1377,14 @@ def api_import_files():
                         meta = json.load(mf) or {}
                 except Exception:
                     meta = {}
+                # 考试名称以原始文件名为准（去掉扩展名）
+                orig_name = meta.get("original_filename") or fn
+                exam_from_filename = os.path.splitext(orig_name)[0] or None
                 items.append(
                     {
                         "file_id": fn.replace(".xlsx", ""),
-                        "filename": meta.get("original_filename") or fn,
-                        "exam_name": meta.get("exam_name") or None,
+                        "filename": orig_name,
+                        "exam_name": exam_from_filename,
                         "size": st.st_size,
                         "mtime": int(st.st_mtime),
                     }
@@ -1431,14 +1434,15 @@ def api_import_files_batch_delete():
         else:
             not_found.append(fid)
         # 级联删除关联成绩（按考试名称匹配）
-        exam_name = (meta.get("exam_name") or "").strip()
-        if exam_name:
-            try:
-                cnt = Grade.query.filter(Grade.exam_name == exam_name).delete(
-                    synchronize_session=False
-                )
-                if cnt:
-                    grades_deleted_total += cnt
+        # 以原始文件名（去扩展名）作为考试名称
+        orig_name = (meta.get("original_filename") or f"{fid}.xlsx")
+        exam_name = os.path.splitext(orig_name)[0]
+        try:
+            cnt = Grade.query.filter(Grade.exam_name == exam_name).delete(
+                synchronize_session=False
+            )
+            if cnt:
+                grades_deleted_total += cnt
             except Exception:
                 current_app.logger.exception("batch delete grades failed for %s", exam_name)
     if grades_deleted_total:
@@ -1476,9 +1480,10 @@ def api_import_file_delete(file_id):
                     os.remove(p + ".json")
             except Exception:
                 pass
-            # 始终级联删除关联成绩（按考试名称）
+            # 始终级联删除关联成绩（按考试名称，规则：以原始文件名去扩展名）
             grades_deleted = 0
-            exam_name = (meta.get("exam_name") or "").strip() or "default"
+            orig_name = (meta.get("original_filename") or f"{file_id}.xlsx")
+            exam_name = os.path.splitext(orig_name)[0] or "default"
             try:
                 grades_deleted = Grade.query.filter(Grade.exam_name == exam_name).delete(
                     synchronize_session=False
