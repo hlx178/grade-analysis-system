@@ -116,14 +116,20 @@
       (data.items||[]).forEach(it => {
         const tr = document.createElement('tr');
         const dt = new Date(it.mtime*1000);
-        tr.innerHTML = `<td><input type="checkbox" class="upload-cb" value="${it.file_id}"></td><td>${it.filename||it.file_id+'.xlsx'}</td><td>${it.file_id}</td><td>${it.exam_name||''}</td><td>${(it.size/1024).toFixed(1)} KB</td><td>${dt.toLocaleString()}</td>`;
+        const examByFilename = (it.filename||'').replace(/\.[^.]+$/, '');
+        tr.innerHTML = `<td><input type="checkbox" class="upload-cb" value="${it.file_id}"></td><td>${it.filename||it.file_id+'.xlsx'}</td><td>${it.file_id}</td><td>${it.exam_name||''}</td><td>${examByFilename||''}</td><td>${(it.size/1024).toFixed(1)} KB</td><td>${dt.toLocaleString()}</td>`;
         // 填充便于批量操作的元数据
         const ckb = tr.querySelector('input.upload-cb');
         if (ckb){ ckb.dataset.exam = it.exam_name||''; ckb.dataset.filename = it.filename||''; }
         const tdOp = document.createElement('td');
+        const badge = document.createElement('span');
+        const badgeExam = (it.exam_name||'') || ((it.filename||'').replace(/\.[^.]+$/, ''));
+        badge.className = 'badge text-bg-warning me-2';
+        badge.textContent = badgeExam ? `将删除：${badgeExam}` : '将删除：<未知>';
+        tdOp.appendChild(badge);
         const delBtn = document.createElement('button'); delBtn.className='btn btn-sm btn-outline-danger'; delBtn.textContent='删除';
         delBtn.onclick = async ()=>{
-          const exam = (it.exam_name||'') || ((it.filename||'').replace(/\.[^.]+$/, ''));
+          const exam = badgeExam;
           const msg = exam ? `确认删除该文件，并删除“${exam}”考试的所有成绩数据？此操作不可恢复！` : '确认删除该文件及其关联考试的所有数据？此操作不可恢复！';
           if (!confirm(msg)) return;
           const url = '/api/import/files/'+it.file_id + '?delete_grades=1';
@@ -141,6 +147,18 @@
 
   function toggleAllUploads(checked){
     document.querySelectorAll('#uploadTable .upload-cb').forEach(x=> x.checked = checked);
+    updateSelectionSummary();
+  }
+
+  function updateSelectionSummary(){
+    const cbs = Array.from(document.querySelectorAll('#uploadTable .upload-cb:checked'));
+    const ids = cbs.map(x=>x.value);
+    const exams = cbs.map(x=> x.dataset.exam || (x.dataset.filename||'').replace(/\.[^.]+$/, '')).filter(Boolean);
+    const uniqExams = Array.from(new Set(exams));
+    const el = document.getElementById('selectionSummary');
+    if (!el) return;
+    if (!ids.length){ el.textContent = ''; return; }
+    el.innerHTML = `已选 ${ids.length} 个文件；将删除考试：` + (uniqExams.length? uniqExams.map(e=>`<span class="badge text-bg-secondary me-1">${e}</span>`).join('') : '<span class="text-muted">(未知)</span>');
   }
 
   async function batchDeleteSelected(){
@@ -163,9 +181,10 @@
     const imp = document.getElementById('importBtn'); if (imp) imp.addEventListener('click', importGrades);
     const impStu = document.getElementById('importStudentsBtn'); if (impStu) impStu.addEventListener('click', importStudents);
     const sel = document.getElementById('sheetSelect'); if (sel) sel.addEventListener('change', inspectSelectedSheet);
-    const ref = document.getElementById('uploadRefreshBtn'); if (ref) ref.addEventListener('click', loadUploadList);
+    const ref = document.getElementById('uploadRefreshBtn'); if (ref) ref.addEventListener('click', ()=>{ loadUploadList(); updateSelectionSummary(); });
     const delBatch = document.getElementById('batchDeleteBtn'); if (delBatch) delBatch.addEventListener('click', batchDeleteSelected);
     const tog = document.getElementById('toggleAllUploads'); if (tog) tog.addEventListener('change', (e)=> toggleAllUploads(e.target.checked));
+    document.addEventListener('change', (e)=>{ if (e.target && e.target.classList.contains('upload-cb')) updateSelectionSummary(); });
   }
 
   document.addEventListener('DOMContentLoaded', () => {
