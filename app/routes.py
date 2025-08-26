@@ -1329,6 +1329,27 @@ def api_import_preview_inspect():
     is_legacy = len(legacy_missing) == 0
     mode = "template" if is_template else ("legacy" if is_legacy else "unknown")
     can_import = is_template or is_legacy
+    # 前置校验：缺少学号且数据库存在重名姓名，则禁止导入并提示必须提供学号
+    precheck_warnings = []
+    if is_template and "学号" not in df.columns:
+        try:
+            # 统计当前模板中涉及到的姓名集合
+            names_in_sheet = set(str(x).strip() for x in df.get("姓名", []).tolist() if str(x).strip())
+            if names_in_sheet:
+                from collections import Counter
+                # 数据库中这些姓名的计数
+                dup_names = []
+                for nm in names_in_sheet:
+                    cnt = Student.query.filter_by(name=nm).count()
+                    if cnt > 1:
+                        dup_names.append(nm)
+                if dup_names:
+                    can_import = False
+                    precheck_warnings.append(
+                        "检测到数据库存在重名学生且本次导入缺少学号列，请为以下姓名提供学号后再导入：" + ", ".join(sorted(dup_names)[:10]) + (" 等" if len(dup_names)>10 else "")
+                    )
+        except Exception:
+            pass
 
     # 样例行
     sample = []
@@ -1351,6 +1372,7 @@ def api_import_preview_inspect():
             "新模板：姓名+班级+至少一门学科列；学号可缺省，将自动生成",
             "旧模式：学号/姓名/班级/课程代码/课程名称/成绩 必须齐全",
         ],
+        "precheck_warnings": precheck_warnings,
     }
     return jsonify(report)
 
@@ -2074,13 +2096,8 @@ def api_import_grades():
             else:
                 same_name = Student.query.filter_by(name=name).all()
                 if len(same_name) > 1:
-                    # 尝试按 姓名+班级 唯一匹配（更便捷的策略）
-                    same_name_class = [s for s in same_name if (s.class_name or "").strip() == cls]
-                    if len(same_name_class) == 1:
-                        student = same_name_class[0]
-                    else:
-                        errors.append(f"第{idx}行：存在同名学生，请填写唯一学号")
-                        continue
+                    errors.append(f"第{idx}行：存在同名学生，请填写唯一学号")
+                    continue
                 elif len(same_name) == 1:
                     student = same_name[0]
                 else:

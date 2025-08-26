@@ -43,9 +43,11 @@
     const subjects = (data.subjects_present||[]).join('、') || '(无)';
     const mode = data.mode;
     const sample = (data.sample_rows||[]).map((r,i)=> `${i+1}) ` + JSON.stringify(r)).join('<br/>');
+    const warns = (data.precheck_warnings||[]);
     let html = `<div><strong>识别列：</strong>${cols}</div>` +
                `<div><strong>识别模式：</strong>${mode==='template'?'新模板':(mode==='legacy'?'旧模式':'未知')}</div>` +
                `<div><strong>检测到的学科列：</strong>${subjects}</div>` +
+               (warns.length?`<div class="alert alert-warning mt-2">${warns.map(w=>`<div>${w}</div>`).join('')}</div>`:'') +
                (sample?`<div class="mt-2"><strong>样例(最多3行)：</strong><br/>${sample}</div>`:'');
     box.innerHTML = html; box.style.display='block';
     const ok = !!data.can_import;
