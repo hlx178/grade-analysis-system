@@ -1593,6 +1593,68 @@ def api_cleanup_all_grades():
         return jsonify({"error": str(e)}), 500
 
 
+# 管理员清理：清除“无对应上传文件”的孤立考试成绩（支持试运行）
+@api_bp.route("/admin/cleanup/orphan-grades", methods=["POST"])
+@login_required
+def api_cleanup_orphan_grades():
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    payload = request.get_json(silent=True) or {}
+    dry_run = bool(payload.get("dry_run", True))
+    exclude_defaults = bool(payload.get("exclude_defaults", True))
+    try:
+        upload_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        existing = set()
+        for fn in os.listdir(upload_dir):
+            if not fn.lower().endswith(".xlsx"):
+                continue
+            base, _ext = os.path.splitext(fn)
+            # 从元数据 exam_name 与 文件名 stem 双渠道采集
+            meta_exam = None
+            try:
+                with open(os.path.join(upload_dir, fn + ".json"), "r", encoding="utf-8") as mf:
+                    import json as _json
+                    meta = _json.load(mf) or {}
+                    meta_exam = (meta.get("exam_name") or "").strip() or None
+            except Exception:
+                meta_exam = None
+            if meta_exam:
+                existing.add(meta_exam)
+            if base:
+                existing.add(base)
+        # 所有成绩中的考试名集合
+        all_exam_names = [r[0] for r in db.session.query(Grade.exam_name).distinct().all()]
+        # 识别孤立（不在 existing 中）的考试名
+        orphans = set((n or "").strip() or "default" for n in all_exam_names) - existing
+        if exclude_defaults:
+            orphans.discard("default")
+        deleted = 0
+        if not dry_run and orphans:
+            try:
+                deleted = (
+                    Grade.query.filter(Grade.exam_name.in_(list(orphans))).delete(synchronize_session=False)
+                )
+                db.session.commit()
+                try:
+                    _cache_bump(current_app, "summary")
+                    _cache_bump(current_app, "analysis")
+                except Exception:
+                    pass
+            except Exception as e:
+                db.session.rollback()
+                return jsonify({"error": str(e)}), 500
+        return jsonify(
+            {
+                "dry_run": dry_run,
+                "existing_exams": sorted(existing),
+                "orphan_exams": sorted(orphans),
+                "deleted": int(deleted or 0),
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # 管理员清理：姓名为空的学生（可选级联删除成绩）
 @api_bp.route("/admin/cleanup/nameless-students", methods=["POST"])
 @login_required
