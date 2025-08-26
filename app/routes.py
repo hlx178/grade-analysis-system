@@ -1335,18 +1335,20 @@ def api_import_preview_inspect():
         try:
             # 统计当前模板中涉及到的姓名集合
             names_in_sheet = set(str(x).strip() for x in df.get("姓名", []).tolist() if str(x).strip())
+            has_grade_col = "年级" in df.columns
             if names_in_sheet:
-                from collections import Counter
-                # 数据库中这些姓名的计数
                 dup_names = []
                 for nm in names_in_sheet:
                     cnt = Student.query.filter_by(name=nm).count()
                     if cnt > 1:
                         dup_names.append(nm)
                 if dup_names:
-                    can_import = False
+                    # 若没有年级列，无法消歧，阻止导入；有年级列则仅提示预警，后端会尝试按姓名+年级消歧
+                    if not has_grade_col:
+                        can_import = False
                     precheck_warnings.append(
-                        "检测到数据库存在重名学生且本次导入缺少学号列，请为以下姓名提供学号后再导入：" + ", ".join(sorted(dup_names)[:10]) + (" 等" if len(dup_names)>10 else "")
+                        ("检测到数据库存在重名学生且本次导入缺少学号列。" + ("缺少年级列，无法消歧，请为以下姓名提供学号后再导入：" if not has_grade_col else "将尝试按姓名+年级消歧；如仍冲突需提供学号。 ")
+                        + ", ".join(sorted(dup_names)[:10]) + (" 等" if len(dup_names)>10 else ""))
                     )
         except Exception:
             pass
@@ -2096,8 +2098,18 @@ def api_import_grades():
             else:
                 same_name = Student.query.filter_by(name=name).all()
                 if len(same_name) > 1:
-                    errors.append(f"第{idx}行：存在同名学生，请填写唯一学号")
-                    continue
+                    # 若提供年级列，尝试按 姓名+年级 唯一匹配；否则要求学号
+                    gl = str(row.get("年级") or "").strip()
+                    if gl:
+                        same_name_grade = [s for s in same_name if (s.grade_level or "").strip() == gl]
+                        if len(same_name_grade) == 1:
+                            student = same_name_grade[0]
+                        else:
+                            errors.append(f"第{idx}行：存在同名学生，请填写唯一学号")
+                            continue
+                    else:
+                        errors.append(f"第{idx}行：存在同名学生，请填写唯一学号")
+                        continue
                 elif len(same_name) == 1:
                     student = same_name[0]
                 else:
