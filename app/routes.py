@@ -1532,8 +1532,65 @@ def api_import_file_delete(file_id):
 
 
 
+# 管理员清理：按考试名称清理成绩（可选按学科过滤）
+@api_bp.route("/grades/cleanup-by-exam", methods=["POST"])
+@login_required
+def api_cleanup_by_exam():
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(force=True) or {}
+    exam_name = (data.get("exam_name") or "").strip()
+    subject_code = (data.get("subject_code") or "").strip()
+    if not exam_name:
+        return jsonify({"error": "exam_name required"}), 400
+    try:
+        q = Grade.query.filter(Grade.exam_name == exam_name)
+        if subject_code:
+            code = subject_code
+            if code == "TOTAL":
+                code = TOTAL_SUBJECT[1]
+            q = q.join(Course).filter(Course.code == code)
+        deleted = q.delete(synchronize_session=False)
+        db.session.commit()
+        try:
+            _cache_bump(current_app, "summary")
+            _cache_bump(current_app, "analysis")
+        except Exception:
+            pass
+        return jsonify({"deleted": int(deleted or 0)})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
 
 # 管理员清理：清空所有成绩（可选按学科过滤）
+@api_bp.route("/grades/cleanup-all", methods=["POST"])
+@login_required
+def api_cleanup_all_grades():
+    if current_user.role != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(force=True) or {}
+    if not data.get("confirm"):
+        return jsonify({"error": "confirm required"}), 400
+    subject_code = (data.get("subject_code") or "").strip()
+    try:
+        q = Grade.query
+        if subject_code:
+            code = subject_code
+            if code == "TOTAL":
+                code = TOTAL_SUBJECT[1]
+            q = q.join(Course).filter(Course.code == code)
+        deleted = q.delete(synchronize_session=False)
+        db.session.commit()
+        try:
+            _cache_bump(current_app, "summary")
+            _cache_bump(current_app, "analysis")
+        except Exception:
+            pass
+        return jsonify({"deleted": int(deleted or 0)})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 
 # 管理员清理：姓名为空的学生（可选级联删除成绩）
