@@ -1,4 +1,6 @@
 // Import page JS - extracted from template to avoid inline conflicts
+// eslint-disable-next-line
+
 (function(){
   let fileId = null;
 

@@ -1443,8 +1443,8 @@ def api_import_files_batch_delete():
             )
             if cnt:
                 grades_deleted_total += cnt
-            except Exception:
-                current_app.logger.exception("batch delete grades failed for %s", exam_name)
+        except Exception:
+            current_app.logger.exception("batch delete grades failed for %s", exam_name)
     if grades_deleted_total:
         db.session.commit()
         try:
@@ -2802,6 +2802,27 @@ def api_analysis_student_trend():
             abort(404)
     else:
         return jsonify({"error": "missing student id"}), 400
+    # 权限：学生仅能查看本人；教师需在可见范围内；管理员不受限
+    try:
+        if not current_user.is_anonymous:
+            if current_user.role == "student":
+                if student.student_id != current_user.username:
+                    return jsonify({"error": "forbidden"}), 403
+            elif current_user.role != "admin":
+                allowed_ok = True
+                if current_user.allowed_grade_levels:
+                    allowed = [s.strip() for s in (current_user.allowed_grade_levels or "").split(",") if s.strip()]
+                    if allowed and (student.grade_level not in allowed):
+                        allowed_ok = False
+                if current_user.allowed_class_names:
+                    allowed = [s.strip() for s in (current_user.allowed_class_names or "").split(",") if s.strip()]
+                    if allowed and (student.class_name not in allowed):
+                        allowed_ok = False
+                if not allowed_ok:
+                    return jsonify({"error": "forbidden"}), 403
+    except Exception:
+        # 保守处理：出错不放大权限
+        return jsonify({"error": "forbidden"}), 403
     # 查询该生该科多次考试
     q = Grade.query.join(Course).filter(Grade.student_id == student.id)
     if subject_code:
@@ -2957,6 +2978,37 @@ def api_analysis_student_trend():
         if sc is not None:
             seen_by_base[bt] = sc
 
+        # 生成简单报告
+        scores = [s["score"] for s in series_sorted if s["score"] is not None]
+        trend = None
+        if len(scores) >= 2:
+            trend = "up" if scores[-1] > scores[0] else ("down" if scores[-1] < scores[0] else "flat")
+        report = {
+            "summary": {
+                "exams": len(series_sorted),
+                "avg": round(sum(scores) / len(scores), 2) if scores else None,
+                "min": min(scores) if scores else None,
+                "max": max(scores) if scores else None,
+                "latest": scores[-1] if scores else None,
+                "trend": trend,
+            }
+        }
+        return jsonify(
+            {
+                "student": {
+                    "id": student.id,
+                    "student_id": student.student_id,
+                    "name": student.name,
+                    "class_name": student.class_name,
+                    "grade_level": student.grade_level,
+                },
+                "subject_code": subject_code,
+                "series": series_sorted,
+                "ranks": ranks,
+                "report": report,
+            }
+        )
+
 
 @api_bp.route("/analysis/student-trend/export", methods=["GET"])
 @login_required
@@ -2989,36 +3041,6 @@ def api_analysis_student_trend_export():
         },
     )
 
-    # 生成简单报告
-    scores = [s["score"] for s in series_sorted if s["score"] is not None]
-    trend = None
-    if len(scores) >= 2:
-        trend = "up" if scores[-1] > scores[0] else ("down" if scores[-1] < scores[0] else "flat")
-    report = {
-        "summary": {
-            "exams": len(series_sorted),
-            "avg": round(sum(scores) / len(scores), 2) if scores else None,
-            "min": min(scores) if scores else None,
-            "max": max(scores) if scores else None,
-            "latest": scores[-1] if scores else None,
-            "trend": trend,
-        }
-    }
-    return jsonify(
-        {
-            "student": {
-                "id": student.id,
-                "student_id": student.student_id,
-                "name": student.name,
-                "class_name": student.class_name,
-                "grade_level": student.grade_level,
-            },
-            "subject_code": subject_code,
-            "series": series_sorted,
-            "ranks": ranks,
-            "report": report,
-        }
-    )
 
     args = request.args
     trends_qs = urlencode(
