@@ -43,8 +43,15 @@
     </div>
   </div>
   <div class="col-auto">
-    <label class="form-label">学科</label>
-    <select id="subjectCode" class="form-select">
+    <label class="form-label">分析维度</label>
+    <select id="dimension" class="form-select">
+      <option value="TOTAL" selected>总分</option>
+      <option value="SUBJECT">学科</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label">学科<span class="text-muted small">（选择“学科”维度后可编辑）</span></label>
+    <select id="subjectCode" class="form-select" disabled>
       <option value="TOTAL">总分</option>
       <option value="CN">语文</option>
       <option value="MA">数学</option>
@@ -355,11 +362,13 @@ async function loadOptions(){
 }
 async function loadSummary(){
   const page_size = Number(document.getElementById('pageSize')?.value || 50);
+  const dim = document.getElementById('dimension').value;
+  const subject_code = dim==='TOTAL' ? 'TOTAL' : document.getElementById('subjectCode').value;
   const p = new URLSearchParams({
     exam_name: selectedCsv('examName'),
     grade_level: selectedCsv('gradeLevel'),
     class_name: selectedCsv('className'),
-    subject_code: document.getElementById('subjectCode').value,
+    subject_code,
     order_by: document.getElementById('orderBy').value,
     page: 1,
     page_size
@@ -452,7 +461,8 @@ function qs(){
   const exam_name = Array.from(document.getElementById('examName').selectedOptions).map(o=>o.value).join(',');
   const grade_level = Array.from(document.getElementById('gradeLevel').selectedOptions).map(o=>o.value).join(',');
   const class_name = Array.from(document.getElementById('className').selectedOptions).map(o=>o.value).join(',');
-  const subject_code = document.getElementById('subjectCode').value;
+  const dim = document.getElementById('dimension')?.value || 'TOTAL';
+  const subject_code = dim==='TOTAL' ? 'TOTAL' : document.getElementById('subjectCode').value;
   const order_by = document.getElementById('orderBy').value;
   return { exam_name, grade_level, class_name, subject_code, order_by };
 }
@@ -681,7 +691,9 @@ function renderTaskPager(total, page, page_size){
 
 let _trendChart, _classChart;
 async function loadTrendChart(){
-  const { subject_code, grade_level, class_name } = qs();
+  const dim = document.getElementById('dimension')?.value || 'TOTAL';
+  const subject_code = dim==='TOTAL' ? 'TOTAL' : document.getElementById('subjectCode').value;
+  const { grade_level, class_name } = qs();
   const p = new URLSearchParams({ subject_code, grade_level, class_name });
   const r = await fetch('/api/analysis/trends?'+p.toString());
   if (!r.ok) return;
@@ -774,7 +786,8 @@ async function loadTrendChart(){
 }
 async function loadClassCompare(){
   const exam = document.getElementById('compareExam').value.trim() || (Array.from(document.getElementById('examName').selectedOptions)[0]?.value || '');
-  const subject_code = document.getElementById('subjectCode').value;
+  const dim = document.getElementById('dimension')?.value || 'TOTAL';
+  const subject_code = dim==='TOTAL' ? 'TOTAL' : document.getElementById('subjectCode').value;
   if (!exam){ alert('请填写考试名称或在左侧选择一个'); return; }
   const grade_level = (document.getElementById('gradeLevel')?.value || '').trim();
   const top_n = (document.getElementById('compareTopN')?.value || '').trim();
@@ -859,7 +872,8 @@ function buildTrendExportUrl(){
 }
 function buildClassExportUrl(){
   const exam = document.getElementById('compareExam').value.trim() || (Array.from(document.getElementById('examName').selectedOptions)[0]?.value || '');
-  const subject_code = document.getElementById('subjectCode').value;
+  const dim = document.getElementById('dimension')?.value || 'TOTAL';
+  const subject_code = dim==='TOTAL' ? 'TOTAL' : document.getElementById('subjectCode').value;
   const p = new URLSearchParams({ subject_code });
   if (exam) p.set('exam_name', exam);
   const grade_level = (document.getElementById('gradeLevel')?.value || '').trim();
@@ -874,7 +888,8 @@ function buildClassExportUrl(){
 }
 
 function buildDistExportUrl(){
-  const subject_code = document.getElementById('subjectCode').value;
+  const dim = document.getElementById('dimension')?.value || 'TOTAL';
+  const subject_code = dim==='TOTAL' ? 'TOTAL' : document.getElementById('subjectCode').value;
   const bin_width = Number(document.getElementById('distBin').value)||10;
   const exam_name = document.getElementById('distExam').value.trim();
   const p = new URLSearchParams({ subject_code, bin_width });
@@ -930,6 +945,13 @@ async function loadDistribution(){
   const ctx = document.getElementById('distChart').getContext('2d');
   if (_distChart) _distChart.destroy();
   const percentMode = document.getElementById('distPercent')?.checked || false;
+  // 学科/总分维度提示
+  const dim = document.getElementById('dimension')?.value || 'TOTAL';
+  const metaDiv = document.getElementById('distMeta');
+  if (metaDiv){
+    const dimWord = dim==='TOTAL' ? '总分' : '学科';
+    metaDiv.textContent = `维度：${dimWord}；` + (metaDiv.textContent||'');
+  }
   const showCDF = document.getElementById('distCDF')?.checked || false;
   const datasets = [];
   datasets.push({ label: percentMode ? '百分比(%)' : '人数', type: 'bar', data: percentMode? percents : counts, backgroundColor: 'rgba(13,110,253,0.4)', borderColor: '#0d6efd' });
@@ -982,6 +1004,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Initial data load
     await loadOptions();
     await loadPrefs();
+    // 维度切换：总分 vs 学科
+    const dimSel = document.getElementById('dimension');
+    const subjSel = document.getElementById('subjectCode');
+    if (dimSel && subjSel){
+      const syncDisable = ()=>{ const isTotal = dimSel.value==='TOTAL'; subjSel.disabled = isTotal; if (isTotal) subjSel.value='TOTAL'; };
+      dimSel.addEventListener('change', ()=>{ syncDisable(); window.loadSummary(); });
+      syncDisable();
+    }
     wireExportLinks();
     await window.loadSummary(); // Call the decorated function
 
